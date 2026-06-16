@@ -1,5 +1,5 @@
 import { ref, computed, ComputedRef, Ref } from 'vue'
-import { useStore } from '../services/store'
+import { useStore, getCache, setCache } from '../services/store'
 import { orderAction } from '../services/repositories/baseRepository'
 import { CACHE_KEYS } from '../constants/cacheConfig'
 
@@ -45,19 +45,6 @@ interface StatsReturn {
     searchDetail: () => Promise<void>
     loadMoreDetail: () => Promise<void>
     downloadMonthlyData: () => Promise<void>
-}
-
-function getCache(key: string): MonthlyStat[] | null {
-    try {
-        const raw = uni.getStorageSync(key)
-        if (!raw) return null
-        const { data } = JSON.parse(raw)
-        return data
-    } catch { return null }
-}
-
-function setCache(key: string, data: MonthlyStat[]) {
-    uni.setStorageSync(key, JSON.stringify({ data, ts: Date.now() }))
 }
 
 export function useStats(): StatsReturn {

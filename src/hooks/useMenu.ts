@@ -1,8 +1,8 @@
 import { ref, computed, ComputedRef, Ref } from 'vue'
-import { useStore } from '../services/store'
+import { useStore, getCache, setCache } from '../services/store'
 import { menuAction } from '../services/repositories/baseRepository'
 import { waitForInit } from '../services/appInit'
-import { CACHE_KEYS, CACHE_TTL } from '../constants/cacheConfig'
+import { CACHE_KEYS } from '../constants/cacheConfig'
 
 interface MenuItem {
     _id: string
@@ -12,22 +12,6 @@ interface MenuItem {
     visible: boolean
     sortNo: number
     [key: string]: any
-}
-
-function getCache(key: string): MenuItem[] | null {
-    try {
-        const raw = uni.getStorageSync(key)
-        if (!raw) return null
-        const { data, ts } = JSON.parse(raw)
-        if (CACHE_TTL.MENU !== Infinity && Date.now() - ts > CACHE_TTL.MENU) return null
-        return data
-    } catch {
-        return null
-    }
-}
-
-function setCache(key: string, data: MenuItem[]) {
-    uni.setStorageSync(key, JSON.stringify({ data, ts: Date.now() }))
 }
 
 interface MenuReturn {

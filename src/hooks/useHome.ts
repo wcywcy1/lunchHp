@@ -1,22 +1,9 @@
 import { ref, computed } from 'vue'
-import { useStore, setStore } from '../services/store'
+import { useStore, setStore, getCache, setCache, saveSession, getRecentLoadTime, setRecentLoadTime } from '../services/store'
 import { menuAction, orderAction } from '../services/repositories/baseRepository'
 import { waitForInit } from '../services/appInit'
 import { CACHE_KEYS, CACHE_TTL } from '../constants/cacheConfig'
 import { ORDER_STATUS } from '../constants/orderStatus'
-
-function getCache(key: string) {
-    try {
-        const raw = uni.getStorageSync(key)
-        if (!raw) return null
-        const { data } = JSON.parse(raw)
-        return data
-    } catch { return null }
-}
-
-function setCache(key: string, data: any) {
-    uni.setStorageSync(key, JSON.stringify({ data, ts: Date.now() }))
-}
 
 function getToday() {
     const d = new Date()
@@ -32,7 +19,6 @@ export function useHome() {
     const editingName = ref('')
     const showLinkDialog = ref(false)
     const selectedVirtualId = ref('')
-    let lastCheckTime = 0
 
     const displayName = computed(() => {
         const m = store.member
@@ -60,26 +46,7 @@ export function useHome() {
         (store.members || []).filter((m: any) => m.isVirtual === true)
     )
 
-    function restoreFromCache() {
-        const session = getCache(CACHE_KEYS.SESSION)
-        if (!session) return false
-        const recentOrders = getCache(CACHE_KEYS.RECENT_ORDERS)
-        const menu = getCache(CACHE_KEYS.MENU)
-        setStore({
-            member: session.member,
-            role: session.role,
-            groupId: session.groupId,
-            recentOrders: recentOrders || [],
-            menu: menu || [],
-        })
-        return true
-    }
-
     async function initApp() {
-        if (restoreFromCache()) {
-            await loadInitData()
-            return
-        }
         loading.value = true
         try {
             await waitForInit()
@@ -87,7 +54,7 @@ export function useHome() {
             if (joinRes.result.code === 0) {
                 const { member, isNew } = joinRes.result.data
                 setStore({ member, role: member.role, groupId: member.groupId })
-                setCache(CACHE_KEYS.SESSION, { groupId: member.groupId, role: member.role, member })
+                saveSession({ groupId: member.groupId, role: member.role, member })
                 if (!member.privacyAgreed) {
                     showPrivacyDialog.value = true
                 } else if (isNew && !member.name) {
@@ -112,6 +79,9 @@ export function useHome() {
                 setStore({ monthSummary, recentOrders, menu, members, recentTimestamp, initialized: true })
                 setCache(CACHE_KEYS.RECENT_ORDERS, recentOrders)
                 setCache(CACHE_KEYS.MENU, menu)
+                setCache(CACHE_KEYS.MEMBERS, members)
+                setCache(CACHE_KEYS.RECENT_TIMESTAMP, recentTimestamp)
+                setRecentLoadTime(Date.now())
             }
         } catch (e) {
             console.error('loadInitData error:', e)
@@ -124,8 +94,7 @@ export function useHome() {
             return
         }
         const now = Date.now()
-        if (now - lastCheckTime < CACHE_TTL.RECENT_ORDERS) return
-        lastCheckTime = now
+        if (now - getRecentLoadTime() < CACHE_TTL.RECENT_ORDERS) return
         await checkFreshness()
     }
 
@@ -135,7 +104,9 @@ export function useHome() {
             if (res.result.code === 0) {
                 const serverTs = res.result.data.recentTimestamp
                 if (serverTs !== store.recentTimestamp) {
-                    await fetchRecentOrders()
+                    await fetchRecentOrders(serverTs)
+                } else {
+                    setRecentLoadTime(Date.now())
                 }
             }
         } catch (e) {
@@ -143,12 +114,18 @@ export function useHome() {
         }
     }
 
-    async function fetchRecentOrders() {
+    async function fetchRecentOrders(newTimestamp?: any) {
         try {
             const res = await orderAction('getRecentOrders')
             if (res.result.code === 0) {
-                setStore({ recentOrders: res.result.data })
-                setCache(CACHE_KEYS.RECENT_ORDERS, res.result.data)
+                const orders = res.result.data
+                setStore({ recentOrders: orders })
+                setCache(CACHE_KEYS.RECENT_ORDERS, orders)
+                if (newTimestamp !== undefined) {
+                    setStore({ recentTimestamp: newTimestamp })
+                    setCache(CACHE_KEYS.RECENT_TIMESTAMP, newTimestamp)
+                }
+                setRecentLoadTime(Date.now())
             }
         } catch (e) {
             console.error('fetchRecentOrders error:', e)
@@ -158,7 +135,7 @@ export function useHome() {
     async function refreshData() {
         loading.value = true
         try {
-            await loadInitData()
+            await fetchRecentOrders()
         } finally {
             loading.value = false
             uni.stopPullDownRefresh()
@@ -224,7 +201,7 @@ export function useHome() {
             if (res.result.code === 0) {
                 const { member } = res.result.data
                 setStore({ member, role: member.role })
-                setCache(CACHE_KEYS.SESSION, { groupId: member.groupId, role: member.role, member })
+                saveSession({ groupId: member.groupId, role: member.role, member })
                 showLinkDialog.value = false
                 showNameDialog.value = false
                 uni.showToast({ title: '关联成功', icon: 'success' })

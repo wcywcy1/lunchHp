@@ -1,6 +1,7 @@
 import { ref, computed, ComputedRef, Ref } from 'vue'
-import { useStore } from '../services/store'
+import { useStore, setCache } from '../services/store'
 import { menuAction, orderAction } from '../services/repositories/baseRepository'
+import { CACHE_KEYS } from '../constants/cacheConfig'
 
 interface MenuItem {
     _id: string
@@ -145,6 +146,19 @@ export function useOrder(): OrderReturn {
             })
             if (res.result.code === 0) {
                 uni.showToast({ title: '点餐成功', icon: 'success' })
+                const newOrder = res.result.data?.order || {
+                    date,
+                    memberId,
+                    memberName,
+                    menuId: item._id,
+                    menuName: item.name,
+                    supplier: item.supplier,
+                    price: item.price,
+                    note: '',
+                    status: 'pending',
+                }
+                store.recentOrders = [newOrder, ...(store.recentOrders || [])]
+                setCache(CACHE_KEYS.RECENT_ORDERS, store.recentOrders)
                 selectedMenuId.value = ''
                 orderFor.value = 'self'
                 orderForMemberId.value = ''
