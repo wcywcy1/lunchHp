@@ -11,7 +11,8 @@
             "urlCheck" : false
         },
         "usingComponents" : true,
-        "cloud" : true
+        "cloud" : true,
+        "cloudfunctionRoot" : "wxcloud/functions/"
     },
     "uniStatistics" : {
         "enable" : false
