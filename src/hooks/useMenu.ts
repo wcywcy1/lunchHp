@@ -1,6 +1,7 @@
 import { ref, computed, ComputedRef, Ref } from 'vue'
 import { useStore } from '../services/store'
 import { menuAction } from '../services/repositories/baseRepository'
+import { waitForInit } from '../services/appInit'
 import { CACHE_KEYS, CACHE_TTL } from '../constants/cacheConfig'
 
 interface MenuItem {
@@ -59,6 +60,7 @@ export function useMenu(): MenuReturn {
     })
 
     async function loadMenu(forceRefresh = false): Promise<MenuItem[]> {
+        await waitForInit()
         if (!forceRefresh) {
             const cached = getCache(CACHE_KEYS.MENU)
             if (cached) {

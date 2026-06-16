@@ -33,6 +33,8 @@ exports.main = async (event, context) => {
         updateMemberName,
         addVirtualMember,
         setAdmin,
+        agreePrivacy,
+        linkVirtualMember,
         getMenuList,
         addMenuItem,
         updateMenuItem,
@@ -51,7 +53,21 @@ exports.main = async (event, context) => {
     }
 }
 
+async function ensureCollections() {
+    const required = ['lunch_groups', 'lunch_members', 'lunch_menu', 'lunch_orders', 'lunch_monthly_stats', 'lunch_backups']
+    for (const name of required) {
+        try {
+            await db.createCollection(name)
+        } catch (e) {
+            if (!e.message || !e.message.includes('already exists')) {
+                console.warn(`createCollection ${name}:`, e.message)
+            }
+        }
+    }
+}
+
 async function initGroup(event, openid) {
+    await ensureCollections()
     const { data } = await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => ({ data: null }))
     if (data) return { code: 0, data: { exists: true, group: data } }
 
@@ -153,6 +169,37 @@ async function addVirtualMember(event, openid) {
     const { _id } = await db.collection(COL.MEMBERS).add({ data: member })
     member._id = _id
     return { code: 0, data: member }
+}
+
+async function agreePrivacy(event, openid) {
+    const member = await getMemberByOpenid(openid)
+    if (!member) return { code: 403, msg: 'not a member' }
+    await db.collection(COL.MEMBERS).doc(member._id).update({ data: { privacyAgreed: true } })
+    return { code: 0 }
+}
+
+async function linkVirtualMember(event, openid) {
+    const { virtualMemberId } = event
+    if (!virtualMemberId) return { code: 400, msg: 'missing virtualMemberId' }
+
+    const caller = await getMemberByOpenid(openid)
+    if (!caller) return { code: 403, msg: 'not a member' }
+
+    const virtual = (await db.collection(COL.MEMBERS).doc(virtualMemberId).get()).data
+    if (!virtual || !virtual.isVirtual) return { code: 404, msg: 'virtual member not found' }
+
+    await db.collection(COL.MEMBERS).doc(virtualMemberId).update({
+        data: { openid, isVirtual: false, nickName: caller.nickName || '', privacyAgreed: caller.privacyAgreed || false }
+    })
+
+    if (caller.role !== ROLE.MEMBER) {
+        await db.collection(COL.MEMBERS).doc(virtualMemberId).update({ data: { role: caller.role } })
+    }
+
+    await db.collection(COL.MEMBERS).doc(caller._id).remove()
+
+    const updated = (await db.collection(COL.MEMBERS).doc(virtualMemberId).get()).data
+    return { code: 0, data: { member: updated } }
 }
 
 async function setAdmin(event, openid) {

@@ -3,7 +3,8 @@
     {
       "path": "pages/home/index",
       "style": {
-        "navigationBarTitleText": "我要干饭"
+        "navigationBarTitleText": "我要干饭",
+        "enablePullDownRefresh": true
       }
     },
     {
