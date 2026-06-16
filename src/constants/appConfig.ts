@@ -2,7 +2,7 @@ export const APP_NAME = '我要干饭'
 
 export const GROUP_ID = 'lunch_hp'
 
-export const CLOUD_ENV = '<环境ID>'
+export const CLOUD_ENV = 'cloud1-d0g9zww8h390b6f41'
 
 export const ENABLE_SCENE_JOIN = false
 

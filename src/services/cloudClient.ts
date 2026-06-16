@@ -1,6 +1,6 @@
 import { CLOUD_ENV } from '../constants/appConfig'
 
-let db = null
+let db: any = null
 
 export function initCloud() {
     if (!wx.cloud) {

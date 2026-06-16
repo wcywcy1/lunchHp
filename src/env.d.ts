@@ -6,3 +6,11 @@ declare module '*.vue' {
   const component: DefineComponent<{}, {}, any>
   export default component
 }
+
+declare const wx: {
+  cloud: {
+    init(options: { env: string; traceUser?: boolean }): void
+    callFunction(options: { name: string; data?: Record<string, any> }): Promise<any>
+    database(): any
+  }
+}

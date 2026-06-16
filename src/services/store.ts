@@ -1,6 +1,18 @@
 import { reactive } from 'vue'
 
-const store = reactive({
+interface StoreState {
+    member: any
+    role: string | null
+    groupId: string | null
+    menu: any[]
+    members: any[]
+    recentOrders: any[]
+    monthSummary: any
+    recentTimestamp: any
+    initialized: boolean
+}
+
+const store = reactive<StoreState>({
     member: null,
     role: null,
     groupId: null,
@@ -16,7 +28,7 @@ export function useStore() {
     return store
 }
 
-export function setStore(payload) {
+export function setStore(payload: Partial<StoreState>) {
     Object.assign(store, payload)
 }
 

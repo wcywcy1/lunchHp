@@ -9,7 +9,7 @@ export const CACHE_KEYS = {
     SESSION: 'lunch_session',
 }
 
-export const CACHE_TTL = {
+export const CACHE_TTL: Record<string, number> = {
     MEMBERS: 30 * MINUTE,
     MENU: 30 * MINUTE,
     RECENT_ORDERS: 5 * MINUTE,
