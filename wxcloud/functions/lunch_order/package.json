@@ -1,0 +1,9 @@
+{
+  "name": "lunch_order",
+  "version": "1.0.0",
+  "description": "我要干饭 - 订单CRUD + 统计 + 下载 + 导入导出",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "~2.6.3"
+  }
+}

@@ -21,11 +21,11 @@ function copyWxcloudPlugin() {
         name: "copy-wxcloud",
         writeBundle(options: any) {
             const outDir = options.dir || "dist/build/mp-weixin";
-            const wxcloudSrc = join(process.cwd(), "src/wxcloud");
+            const wxcloudSrc = join(process.cwd(), "wxcloud");
             const wxcloudDest = join(outDir, "wxcloud");
             if (existsSync(wxcloudSrc)) {
                 copyDir(wxcloudSrc, wxcloudDest);
-                console.log("[copy-wxcloud] copied src/wxcloud ->", wxcloudDest);
+                console.log("[copy-wxcloud] copied wxcloud ->", wxcloudDest);
             }
         },
     };
