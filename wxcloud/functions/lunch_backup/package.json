@@ -1,0 +1,9 @@
+{
+  "name": "lunch_backup",
+  "version": "1.0.0",
+  "description": "我要干饭 - 数据备份 + 恢复 + 全量导出",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "~2.6.3"
+  }
+}

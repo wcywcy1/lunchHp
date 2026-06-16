@@ -22,6 +22,10 @@ export function useDataManage() {
     const backupList = ref<any[]>([])
     const selectedBackupId = ref('')
     const restoring = ref(false)
+    const backupStep = ref<'list' | 'preview' | 'confirm'>('list')
+    const selectedBackup = ref<any>(null)
+    const backingUp = ref(false)
+    const exportingAll = ref(false)
 
     const isAllSelected = computed(() =>
         pendingOrders.value.length > 0 &&
@@ -300,6 +304,7 @@ export function useDataManage() {
     }
 
     async function manualBackup() {
+        backingUp.value = true
         try {
             const res = await backupAction('backupManual')
             if (res.result.code === 0) {
@@ -307,6 +312,8 @@ export function useDataManage() {
             }
         } catch (e: any) {
             uni.showToast({ title: e.message || '备份失败', icon: 'none' })
+        } finally {
+            backingUp.value = false
         }
     }
 
@@ -319,11 +326,24 @@ export function useDataManage() {
                     uni.showToast({ title: '暂无备份', icon: 'none' })
                     return
                 }
+                selectedBackupId.value = ''
+                selectedBackup.value = null
+                backupStep.value = 'list'
                 showBackupDialog.value = true
             }
         } catch (e: any) {
             uni.showToast({ title: e.message || '获取备份列表失败', icon: 'none' })
         }
+    }
+
+    function selectBackup(bk: any) {
+        selectedBackupId.value = bk._id
+        selectedBackup.value = bk
+        backupStep.value = 'preview'
+    }
+
+    function confirmRestore() {
+        backupStep.value = 'confirm'
     }
 
     async function restoreBackup() {
@@ -343,6 +363,20 @@ export function useDataManage() {
             uni.showToast({ title: e.message || '恢复失败', icon: 'none' })
         } finally {
             restoring.value = false
+        }
+    }
+
+    async function exportAllOrders() {
+        exportingAll.value = true
+        try {
+            const res = await backupAction('exportAllOrders')
+            if (res.result.code === 0 && res.result.data.fileID) {
+                await downloadCloudFile(res.result.data.fileID)
+            }
+        } catch (e: any) {
+            uni.showToast({ title: e.message || '导出失败', icon: 'none' })
+        } finally {
+            exportingAll.value = false
         }
     }
 
@@ -366,6 +400,10 @@ export function useDataManage() {
         backupList,
         selectedBackupId,
         restoring,
+        backupStep,
+        selectedBackup,
+        backingUp,
+        exportingAll,
         loadData,
         toggleSelect,
         toggleSelectAll,
@@ -379,6 +417,9 @@ export function useDataManage() {
         importOrders,
         manualBackup,
         openBackupDialog,
+        selectBackup,
+        confirmRestore,
         restoreBackup,
+        exportAllOrders,
     }
 }

@@ -27,10 +27,13 @@
       <ImportExport
         :exporting="exporting"
         :importing="importing"
+        :backingUp="backingUp"
+        :exportingAll="exportingAll"
         @backup="manualBackup"
         @restore="openBackupDialog"
         @export="exportOrders"
         @import="importOrders"
+        @export-all="exportAllOrders"
       />
     </scroll-view>
 
@@ -63,21 +66,92 @@
 
     <view v-if="showBackupDialog" class="modal-mask" @tap="showBackupDialog = false">
       <view class="backup-modal" @tap.stop>
-        <text class="modal-title">选择备份</text>
-        <scroll-view scroll-y class="backup-scroll">
-          <view
-            v-for="bk in backupList"
-            :key="bk._id"
-            :class="['backup-item', selectedBackupId === bk._id ? 'selected' : '']"
-            @tap="selectedBackupId = bk._id"
-          >
-            <text class="backup-time">{{ formatTime(bk.createdAt) }}</text>
-            <text class="backup-info">{{ bk.type === 'auto' ? '自动' : '手动' }} · 订单:{{ bk.orderCount || 0 }}</text>
+        <text class="modal-title">
+          {{ backupStep === 'list' ? '选择备份' : backupStep === 'preview' ? '备份预览' : '确认恢复' }}
+        </text>
+
+        <scroll-view v-if="backupStep === 'list'" scroll-y class="backup-scroll">
+          <view class="backup-section">
+            <text class="backup-section-title">🟢 自动备份</text>
+            <view
+              v-for="bk in autoBackups"
+              :key="bk._id"
+              class="backup-item"
+              @tap="selectBackup(bk)"
+            >
+              <text class="backup-time">{{ formatTime(bk.createdAt) }}</text>
+              <text class="backup-info">订单:{{ bk.orderCount || 0 }} · 菜品:{{ bk.menuCount || 0 }} · 成员:{{ bk.memberCount || 0 }}</text>
+            </view>
+          </view>
+          <view class="backup-section">
+            <text class="backup-section-title">🔵 手动备份</text>
+            <view
+              v-for="bk in manualBackups"
+              :key="bk._id"
+              class="backup-item"
+              @tap="selectBackup(bk)"
+            >
+              <text class="backup-time">{{ formatTime(bk.createdAt) }}</text>
+              <text class="backup-info">订单:{{ bk.orderCount || 0 }} · 菜品:{{ bk.menuCount || 0 }} · 成员:{{ bk.memberCount || 0 }}</text>
+              <text v-if="bk.remark" class="backup-remark">备注: {{ bk.remark }}</text>
+            </view>
           </view>
         </scroll-view>
+
+        <view v-if="backupStep === 'preview' && selectedBackup" class="preview-content">
+          <view class="preview-row">
+            <text class="preview-label">类型</text>
+            <text class="preview-value">{{ selectedBackup.type === 'auto' ? '自动备份' : '手动备份' }}</text>
+          </view>
+          <view class="preview-row">
+            <text class="preview-label">时间</text>
+            <text class="preview-value">{{ formatTime(selectedBackup.createdAt) }}</text>
+          </view>
+          <view class="preview-row">
+            <text class="preview-label">订单数</text>
+            <text class="preview-value">{{ selectedBackup.orderCount || 0 }}</text>
+          </view>
+          <view class="preview-row">
+            <text class="preview-label">菜品数</text>
+            <text class="preview-value">{{ selectedBackup.menuCount || 0 }}</text>
+          </view>
+          <view class="preview-row">
+            <text class="preview-label">成员数</text>
+            <text class="preview-value">{{ selectedBackup.memberCount || 0 }}</text>
+          </view>
+          <view v-if="selectedBackup.dateRange" class="preview-row">
+            <text class="preview-label">数据范围</text>
+            <text class="preview-value">{{ selectedBackup.dateRange.start }} ~ {{ selectedBackup.dateRange.end }}</text>
+          </view>
+          <view v-if="selectedBackup.remark" class="preview-row">
+            <text class="preview-label">备注</text>
+            <text class="preview-value">{{ selectedBackup.remark }}</text>
+          </view>
+          <view class="preview-tip">
+            <text>恢复前将自动创建一次手动备份，防止误操作</text>
+          </view>
+        </view>
+
+        <view v-if="backupStep === 'confirm'" class="confirm-content">
+          <text class="confirm-warning">⚠️ 确认恢复此备份？</text>
+          <text class="confirm-desc">当前所有数据将被替换为备份数据，恢复前已自动创建手动备份。</text>
+          <view class="confirm-detail">
+            <text>备份时间：{{ formatTime(selectedBackup?.createdAt) }}</text>
+            <text>订单数：{{ selectedBackup?.orderCount || 0 }}</text>
+          </view>
+        </view>
+
         <view class="modal-actions">
-          <view class="modal-btn cancel" @tap="showBackupDialog = false"><text>取消</text></view>
-          <view :class="['modal-btn confirm', !selectedBackupId || restoring ? 'disabled' : '']" @tap="restoreBackup">
+          <view class="modal-btn cancel" @tap="backupStep === 'list' ? (showBackupDialog = false) : (backupStep = backupStep === 'confirm' ? 'preview' : 'list')">
+            <text>{{ backupStep === 'list' ? '取消' : '返回' }}</text>
+          </view>
+          <view v-if="backupStep === 'list'" class="modal-btn confirm disabled">
+            <text>请选择</text>
+          </view>
+          <view v-if="backupStep === 'preview'" class="modal-btn confirm" @tap="confirmRestore">
+            <text>下一步</text>
+          </view>
+          <view v-if="backupStep === 'confirm'" :class="['modal-btn confirm', restoring ? 'disabled' : '']" @tap="restoreBackup">
             <text>{{ restoring ? '恢复中...' : '确认恢复' }}</text>
           </view>
         </view>
@@ -123,6 +197,10 @@ const {
   backupList,
   selectedBackupId,
   restoring,
+  backupStep,
+  selectedBackup,
+  backingUp,
+  exportingAll,
   loadData,
   toggleSelect,
   toggleSelectAll,
@@ -136,10 +214,16 @@ const {
   importOrders,
   manualBackup,
   openBackupDialog,
+  selectBackup,
+  confirmRestore,
   restoreBackup,
+  exportAllOrders,
 } = useDataManage()
 
 const members = computed(() => store.members || [])
+
+const autoBackups = computed(() => backupList.value.filter((b: any) => b.type === 'auto'))
+const manualBackups = computed(() => backupList.value.filter((b: any) => b.type === 'manual'))
 
 function formatTime(ts: any) {
   if (!ts) return ''
@@ -148,6 +232,7 @@ function formatTime(ts: any) {
 }
 
 onShow(() => {
+  if (!store.role) return
   if (!isAdmin.value) {
     uni.switchTab({ url: '/pages/home/index' })
     return
@@ -249,6 +334,17 @@ onShow(() => {
 .backup-scroll {
   max-height: 500rpx;
 }
+.backup-section {
+  margin-bottom: 16rpx;
+}
+.backup-section-title {
+  display: block;
+  font-size: 26rpx;
+  font-weight: bold;
+  color: #666;
+  margin-bottom: 8rpx;
+  padding: 0 8rpx;
+}
 .backup-item {
   padding: 20rpx 16rpx;
   border-bottom: 1rpx solid #f0f0f0;
@@ -266,5 +362,69 @@ onShow(() => {
 .backup-info {
   font-size: 24rpx;
   color: #999;
+}
+.backup-remark {
+  display: block;
+  font-size: 22rpx;
+  color: #888;
+  margin-top: 4rpx;
+  font-style: italic;
+}
+.preview-content {
+  padding: 16rpx 0;
+}
+.preview-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 12rpx 0;
+  border-bottom: 1rpx solid #f5f5f5;
+}
+.preview-label {
+  font-size: 28rpx;
+  color: #666;
+}
+.preview-value {
+  font-size: 28rpx;
+  color: #333;
+  font-weight: 500;
+}
+.preview-tip {
+  margin-top: 20rpx;
+  padding: 16rpx;
+  background: #fff8e1;
+  border-radius: 8rpx;
+}
+.preview-tip text {
+  font-size: 24rpx;
+  color: #f57c00;
+}
+.confirm-content {
+  padding: 16rpx 0;
+  text-align: center;
+}
+.confirm-warning {
+  display: block;
+  font-size: 32rpx;
+  font-weight: bold;
+  color: #d32f2f;
+  margin-bottom: 16rpx;
+}
+.confirm-desc {
+  display: block;
+  font-size: 26rpx;
+  color: #666;
+  margin-bottom: 20rpx;
+  line-height: 1.5;
+}
+.confirm-detail {
+  background: #f5f5f5;
+  border-radius: 8rpx;
+  padding: 16rpx;
+}
+.confirm-detail text {
+  display: block;
+  font-size: 26rpx;
+  color: #333;
+  margin-bottom: 4rpx;
 }
 </style>

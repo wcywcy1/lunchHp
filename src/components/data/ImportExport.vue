@@ -2,8 +2,8 @@
   <view class="import-export">
     <text class="section-title">数据备份</text>
     <view class="btn-row">
-      <view class="action-btn" @tap="$emit('backup')">
-        <text>立即备份</text>
+      <view :class="['action-btn', backingUp ? 'disabled' : '']" @tap="$emit('backup')">
+        <text>{{ backingUp ? '备份中...' : '立即备份' }}</text>
       </view>
       <view class="action-btn" @tap="$emit('restore')">
         <text>恢复备份</text>
@@ -19,6 +19,11 @@
         <text>{{ importing ? '导入中...' : '导入数据' }}</text>
       </view>
     </view>
+    <view class="btn-row" style="margin-top: 16rpx;">
+      <view :class="['action-btn', exportingAll ? 'disabled' : '']" @tap="$emit('export-all')">
+        <text>{{ exportingAll ? '导出中...' : '全量导出' }}</text>
+      </view>
+    </view>
   </view>
 </template>
 
@@ -26,6 +31,8 @@
 defineProps<{
   exporting: boolean
   importing: boolean
+  backingUp: boolean
+  exportingAll: boolean
 }>()
 
 defineEmits<{
@@ -33,6 +40,7 @@ defineEmits<{
   (e: 'restore'): void
   (e: 'export'): void
   (e: 'import'): void
+  (e: 'export-all'): void
 }>()
 </script>
 
