@@ -56,6 +56,8 @@
         </view>
       </view>
     </view>
+
+    <CustomTabBar current="pages/home/index" />
   </view>
 </template>
 
@@ -65,6 +67,7 @@ import HomeHeader from '../../components/home/HomeHeader.vue'
 import MonthlyStats from '../../components/home/MonthlyStats.vue'
 import TodayOrders from '../../components/home/TodayOrders.vue'
 import NameEditDialog from '../../components/home/NameEditDialog.vue'
+import CustomTabBar from '../../components/CustomTabBar/CustomTabBar.vue'
 import { useHome } from '../../hooks/useHome'
 
 const {
@@ -107,7 +110,7 @@ onPullDownRefresh(() => {
 .page-home {
   min-height: 100vh;
   background: #f8f8f8;
-  padding-bottom: calc(20rpx + env(safe-area-inset-bottom));
+  padding-bottom: calc(120rpx + env(safe-area-inset-bottom));
 }
 .modal-mask {
   position: fixed;

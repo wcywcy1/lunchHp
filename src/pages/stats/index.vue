@@ -36,6 +36,8 @@
       @apply="applyFilter"
       @reset="resetFilter"
     />
+
+    <CustomTabBar current="pages/stats/index" />
   </view>
 </template>
 
@@ -47,6 +49,7 @@ import StatsBarChart from '../../components/stats/StatsBarChart.vue'
 import StatsPieChart from '../../components/stats/StatsPieChart.vue'
 import StatsDetail from '../../components/stats/StatsDetail.vue'
 import StatsFilter from '../../components/stats/StatsFilter.vue'
+import CustomTabBar from '../../components/CustomTabBar/CustomTabBar.vue'
 import { useStats } from '../../hooks/useStats'
 
 const {

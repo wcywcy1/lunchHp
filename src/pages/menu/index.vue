@@ -70,6 +70,8 @@
         </view>
       </view>
     </view>
+
+    <CustomTabBar current="pages/menu/index" />
   </view>
 </template>
 
@@ -85,6 +87,7 @@ import MenuFilter from '../../components/menu/MenuFilter.vue'
 import MenuTable from '../../components/menu/MenuTable.vue'
 import MenuEditBar from '../../components/menu/MenuEditBar.vue'
 import OrderBar from '../../components/menu/OrderBar.vue'
+import CustomTabBar from '../../components/CustomTabBar/CustomTabBar.vue'
 
 const store = useStore()
 const { isAdmin } = useAuth()
