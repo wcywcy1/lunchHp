@@ -1,0 +1,21 @@
+{
+    "name" : "我要干饭",
+    "appid" : "__UNI__LUNCH_HP",
+    "description" : "HP公司午饭点餐小程序",
+    "versionName" : "1.0.0",
+    "versionCode" : "100",
+    "transformPx" : false,
+    "mp-weixin" : {
+        "appid" : "wx2501bef392d5257f",
+        "setting" : {
+            "urlCheck" : false
+        },
+        "usingComponents" : true,
+        "cloud" : true
+    },
+    "uniStatistics" : {
+        "enable" : false
+    },
+    "vueVersion" : "3",
+    "locale" : "zh-Hans"
+}
