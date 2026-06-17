@@ -70,6 +70,8 @@ exports.main = async (event, context) => {
         importOrders,
         downloadConfirmed,
         downloadMonthlyData,
+        getHistoryOrderCount,
+        getHistoryOrders,
     }
 
     const fn = handlers[action]
@@ -747,4 +749,43 @@ async function downloadMonthlyData(event, openid) {
     })
 
     return { code: 0, data: { fileID: uploadResult.fileID, count: stats.length, fileName: `月度统计_${yearSuffix}.csv` } }
+}
+
+async function getHistoryOrderCount(event, openid) {
+    const today = getToday()
+    const baseWhere = { groupId: GROUP_ID, date: _.lt(today) }
+
+    const [pendingResult, confirmedResult] = await Promise.all([
+        db.collection(COL.ORDERS).where({ ...baseWhere, status: STATUS.PENDING }).count(),
+        db.collection(COL.ORDERS).where({ ...baseWhere, status: STATUS.CONFIRMED }).count(),
+    ])
+
+    return {
+        code: 0,
+        data: {
+            pendingCount: pendingResult.total,
+            confirmedCount: confirmedResult.total,
+        }
+    }
+}
+
+async function getHistoryOrders(event, openid) {
+    const { status, page = 1, pageSize = 10 } = event
+    const today = getToday()
+    const where = { groupId: GROUP_ID, date: _.lt(today) }
+    if (status) where.status = status
+
+    const skip = (page - 1) * pageSize
+    const [countResult, { data }] = await Promise.all([
+        db.collection(COL.ORDERS).where(where).count(),
+        db.collection(COL.ORDERS)
+            .where(where)
+            .orderBy('date', 'desc')
+            .orderBy('createdAt', 'desc')
+            .skip(skip)
+            .limit(Math.min(pageSize, 100))
+            .get(),
+    ])
+
+    return { code: 0, data: { list: data, total: countResult.total, page, pageSize } }
 }

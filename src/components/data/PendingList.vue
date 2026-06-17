@@ -23,22 +23,62 @@
         <text>{{ confirming ? '确认中...' : '批量确认' }}</text>
       </view>
     </view>
+
+    <view v-if="historyCount > 0" class="history-entry" @tap="$emit('toggle-history')">
+      <text class="history-entry-text">历史订单（{{ historyCount }}条）</text>
+      <text class="history-entry-arrow">{{ showHistory ? '▲' : '▼' }}</text>
+    </view>
+    <view v-if="showHistory" class="history-section">
+      <view v-for="group in historyGroups" :key="group.date" class="date-group">
+        <text class="date-title">{{ group.date }}</text>
+        <view v-for="order in group.orders" :key="order._id" class="order-item">
+          <text class="order-name">{{ order.memberName }}</text>
+          <text class="order-menu">{{ order.menuName }}</text>
+          <text class="order-price">¥{{ order.price }}</text>
+        </view>
+      </view>
+      <view v-if="historyHasMore" class="load-more" @tap="$emit('load-more-history')">
+        <text>{{ loadingHistory ? '加载中...' : '加载更多' }}</text>
+      </view>
+      <view v-if="!historyHasMore && historyOrders.length > 0" class="no-more">
+        <text>没有更多了</text>
+      </view>
+    </view>
   </view>
 </template>
 
 <script setup lang="ts">
-defineProps<{
+import { computed } from 'vue'
+
+const props = defineProps<{
   orders: any[]
   selectedIds: string[]
   isAllSelected: boolean
   confirming: boolean
+  historyCount: number
+  historyOrders: any[]
+  historyHasMore: boolean
+  loadingHistory: boolean
+  showHistory: boolean
 }>()
 
 defineEmits<{
   (e: 'toggle', id: string): void
   (e: 'toggle-all'): void
   (e: 'batch-confirm'): void
+  (e: 'toggle-history'): void
+  (e: 'load-more-history'): void
 }>()
+
+const historyGroups = computed(() => {
+  const map: Record<string, any[]> = {}
+  props.historyOrders.forEach(o => {
+    const key = o.date || '未知日期'
+    if (!map[key]) map[key] = []
+    map[key].push(o)
+  })
+  return Object.entries(map).map(([date, orders]) => ({ date, orders }))
+})
 </script>
 
 <style scoped>
@@ -145,5 +185,47 @@ defineEmits<{
 }
 .confirm-btn.disabled {
   background: #ccc;
+}
+.history-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20rpx 0;
+  margin-top: 16rpx;
+  border-top: 1rpx dashed #ddd;
+}
+.history-entry-text {
+  font-size: 28rpx;
+  color: #1976d2;
+}
+.history-entry-arrow {
+  font-size: 24rpx;
+  color: #1976d2;
+}
+.history-section {
+  margin-top: 8rpx;
+}
+.date-group {
+  margin-bottom: 12rpx;
+}
+.date-title {
+  display: block;
+  padding: 8rpx 0;
+  font-size: 26rpx;
+  font-weight: bold;
+  color: #999;
+  border-bottom: 1rpx solid #f0f0f0;
+}
+.load-more {
+  text-align: center;
+  padding: 20rpx 0;
+  font-size: 28rpx;
+  color: #1976d2;
+}
+.no-more {
+  text-align: center;
+  padding: 16rpx 0;
+  font-size: 24rpx;
+  color: #ccc;
 }
 </style>

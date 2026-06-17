@@ -67,6 +67,19 @@ export function useDataManage() {
     const selectedBackup = ref<any>(null)
     const backingUp = ref(false)
 
+    const historyPendingCount = ref(0)
+    const historyConfirmedCount = ref(0)
+    const historyPendingOrders = ref<any[]>([])
+    const historyConfirmedOrders = ref<any[]>([])
+    const historyPendingPage = ref(0)
+    const historyConfirmedPage = ref(0)
+    const showHistoryPending = ref(false)
+    const showHistoryConfirmed = ref(false)
+    const loadingHistoryPending = ref(false)
+    const loadingHistoryConfirmed = ref(false)
+    const historyPendingHasMore = ref(false)
+    const historyConfirmedHasMore = ref(false)
+
     const isAllSelected = computed(() =>
         pendingOrders.value.length > 0 &&
         pendingOrders.value.every(o => selectedIds.value.includes(o._id))
@@ -92,9 +105,12 @@ export function useDataManage() {
             const res = await orderAction('getRecentOrders')
             if (res.result.code === 0) {
                 const orders = res.result.data || []
-                pendingOrders.value = orders.filter((o: any) => o.status === ORDER_STATUS.PENDING)
-                confirmedOrders.value = orders.filter((o: any) => o.status === ORDER_STATUS.CONFIRMED)
+                const today = getDateStr()
+                const todayOrders = orders.filter((o: any) => o.date === today)
+                pendingOrders.value = todayOrders.filter((o: any) => o.status === ORDER_STATUS.PENDING)
+                confirmedOrders.value = todayOrders.filter((o: any) => o.status === ORDER_STATUS.CONFIRMED)
             }
+            await loadHistoryCount()
         } catch (e) {
             console.error('loadData error:', e)
         } finally {
@@ -142,6 +158,84 @@ export function useDataManage() {
     function getDateStr() {
         const d = new Date()
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    }
+
+    async function loadHistoryCount() {
+        try {
+            const res = await orderAction('getHistoryOrderCount')
+            if (res.result.code === 0) {
+                historyPendingCount.value = res.result.data.pendingCount || 0
+                historyConfirmedCount.value = res.result.data.confirmedCount || 0
+            }
+        } catch (e) {
+            console.error('loadHistoryCount error:', e)
+        }
+    }
+
+    async function toggleHistoryPending() {
+        if (showHistoryPending.value) {
+            showHistoryPending.value = false
+            return
+        }
+        showHistoryPending.value = true
+        if (historyPendingOrders.value.length === 0) {
+            await loadMoreHistoryPending()
+        }
+    }
+
+    async function toggleHistoryConfirmed() {
+        if (showHistoryConfirmed.value) {
+            showHistoryConfirmed.value = false
+            return
+        }
+        showHistoryConfirmed.value = true
+        if (historyConfirmedOrders.value.length === 0) {
+            await loadMoreHistoryConfirmed()
+        }
+    }
+
+    async function loadMoreHistoryPending() {
+        loadingHistoryPending.value = true
+        try {
+            const nextPage = historyPendingPage.value + 1
+            const res = await orderAction('getHistoryOrders', {
+                status: ORDER_STATUS.PENDING,
+                page: nextPage,
+                pageSize: 10,
+            })
+            if (res.result.code === 0) {
+                const { list, total } = res.result.data
+                historyPendingOrders.value = [...historyPendingOrders.value, ...list]
+                historyPendingPage.value = nextPage
+                historyPendingHasMore.value = historyPendingOrders.value.length < total
+            }
+        } catch (e) {
+            console.error('loadMoreHistoryPending error:', e)
+        } finally {
+            loadingHistoryPending.value = false
+        }
+    }
+
+    async function loadMoreHistoryConfirmed() {
+        loadingHistoryConfirmed.value = true
+        try {
+            const nextPage = historyConfirmedPage.value + 1
+            const res = await orderAction('getHistoryOrders', {
+                status: ORDER_STATUS.CONFIRMED,
+                page: nextPage,
+                pageSize: 10,
+            })
+            if (res.result.code === 0) {
+                const { list, total } = res.result.data
+                historyConfirmedOrders.value = [...historyConfirmedOrders.value, ...list]
+                historyConfirmedPage.value = nextPage
+                historyConfirmedHasMore.value = historyConfirmedOrders.value.length < total
+            }
+        } catch (e) {
+            console.error('loadMoreHistoryConfirmed error:', e)
+        } finally {
+            loadingHistoryConfirmed.value = false
+        }
     }
 
     function shareLocalFile(filePath: string, fileName: string): Promise<{ success: boolean; message: string; cancelled?: boolean }> {
@@ -962,6 +1056,17 @@ export function useDataManage() {
         }
     }
 
+    async function toggleSupplierVisible(supplier: string, visible: boolean) {
+        try {
+            const res = await menuAction('batchToggleVisibleBySupplier', { supplier, visible })
+            await loadMenuList()
+            const count = res.result.data?.count || 0
+            uni.showToast({ title: visible ? `已上架${count}道菜` : `已下架${count}道菜`, icon: 'success' })
+        } catch (e: any) {
+            uni.showToast({ title: e.message || '操作失败', icon: 'none' })
+        }
+    }
+
     const menuList = ref<any[]>([])
 
     async function loadMenuList() {
@@ -1005,6 +1110,16 @@ export function useDataManage() {
         menuEditForm,
         isMenuEdit,
         menuList,
+        historyPendingCount,
+        historyConfirmedCount,
+        historyPendingOrders,
+        historyConfirmedOrders,
+        showHistoryPending,
+        showHistoryConfirmed,
+        loadingHistoryPending,
+        loadingHistoryConfirmed,
+        historyPendingHasMore,
+        historyConfirmedHasMore,
         loadData,
         toggleSelect,
         toggleSelectAll,
@@ -1024,6 +1139,7 @@ export function useDataManage() {
         deleteMenuItem,
         moveMenuItem,
         toggleMenuVisible,
+        toggleSupplierVisible,
         loadMenuList,
         exportData,
         importData,
@@ -1032,5 +1148,9 @@ export function useDataManage() {
         selectBackup,
         confirmRestore,
         restoreBackup,
+        toggleHistoryPending,
+        toggleHistoryConfirmed,
+        loadMoreHistoryPending,
+        loadMoreHistoryConfirmed,
     }
 }

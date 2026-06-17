@@ -1,17 +1,18 @@
 <template>
   <view class="menu-filter">
-    <view class="filter-row">
-      <view class="filter-item">
-        <text class="filter-label">供应商</text>
-        <picker :range="supplierDisplayOptions" :value="supplierIndex" @change="onSupplierPick">
-          <view class="filter-picker">
-            <text :class="['picker-text', selectedSupplier ? 'active' : '']">
-              {{ selectedSupplier || '全部' }}
-            </text>
-            <text class="picker-arrow">▼</text>
-          </view>
-        </picker>
+    <scroll-view scroll-x class="tab-scroll">
+      <view class="tab-row">
+        <view
+          v-for="opt in supplierOptions"
+          :key="opt || '__all__'"
+          :class="['tab-item', selectedSupplier === opt ? 'active' : '']"
+          @tap="onSupplierTap(opt)"
+        >
+          <text class="tab-text">{{ opt || '全部' }}</text>
+        </view>
       </view>
+    </scroll-view>
+    <view v-if="selectedSupplier" class="filter-row">
       <view class="filter-item">
         <text class="filter-label">餐品</text>
         <picker :range="menuNameDisplayOptions" :value="menuNameIndex" @change="onMenuNamePick">
@@ -42,12 +43,6 @@ const emit = defineEmits<{
   (e: 'menu-name-change', val: string): void
 }>()
 
-const supplierDisplayOptions = computed(() =>
-  props.supplierOptions.map(s => s || '全部')
-)
-const supplierIndex = computed(() =>
-  props.supplierOptions.indexOf(props.selectedSupplier)
-)
 const menuNameDisplayOptions = computed(() =>
   props.menuNameOptions.map(s => s || '全部')
 )
@@ -55,9 +50,8 @@ const menuNameIndex = computed(() =>
   props.menuNameOptions.indexOf(props.selectedMenuName)
 )
 
-function onSupplierPick(e: any) {
-  const idx = e.detail.value
-  emit('supplier-change', props.supplierOptions[idx] || '')
+function onSupplierTap(val: string) {
+  emit('supplier-change', val)
 }
 
 function onMenuNamePick(e: any) {
@@ -72,9 +66,37 @@ function onMenuNamePick(e: any) {
   background: #fff;
   border-bottom: 1rpx solid #eee;
 }
+.tab-scroll {
+  white-space: nowrap;
+}
+.tab-row {
+  display: inline-flex;
+  gap: 16rpx;
+}
+.tab-item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8rpx 24rpx;
+  background: #f5f5f5;
+  border-radius: 24rpx;
+  flex-shrink: 0;
+}
+.tab-item.active {
+  background: #1976d2;
+}
+.tab-text {
+  font-size: 26rpx;
+  color: #666;
+  white-space: nowrap;
+}
+.tab-item.active .tab-text {
+  color: #fff;
+  font-weight: bold;
+}
 .filter-row {
   display: flex;
-  gap: 24rpx;
+  margin-top: 12rpx;
 }
 .filter-item {
   flex: 1;

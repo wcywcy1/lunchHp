@@ -65,6 +65,7 @@ exports.main = async (event, context) => {
         deleteMenuItem,
         moveMenuItem,
         toggleVisible,
+        batchToggleVisibleBySupplier,
         parseXlsx,
     }
 
@@ -501,6 +502,49 @@ async function toggleVisible(event, openid) {
 
     await updateGroupTimestamp('menuTimestamp')
     return { code: 0, data: { visible: newVisible } }
+}
+
+async function batchToggleVisibleBySupplier(event, openid) {
+    const { supplier, visible } = event
+    if (!supplier || visible === undefined) return { code: 400, msg: 'missing supplier or visible' }
+
+    const caller = await getMemberByOpenid(openid)
+    if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
+
+    const newVisible = !!visible
+
+    const { data: items } = await db.collection(COL.MENU)
+        .where({ groupId: GROUP_ID, supplier })
+        .get()
+
+    if (items.length === 0) return { code: 404, msg: 'no items found for supplier' }
+
+    let maxSortNo = 0
+    if (newVisible) {
+        const { data: visibleItems } = await db.collection(COL.MENU)
+            .where({ groupId: GROUP_ID, visible: true })
+            .orderBy('sortNo', 'desc')
+            .limit(1)
+            .get()
+        maxSortNo = visibleItems.length > 0 ? visibleItems[0].sortNo : 0
+    } else {
+        const { data: hiddenItems } = await db.collection(COL.MENU)
+            .where({ groupId: GROUP_ID, visible: false })
+            .orderBy('sortNo', 'desc')
+            .limit(1)
+            .get()
+        maxSortNo = hiddenItems.length > 0 ? hiddenItems[0].sortNo : 0
+    }
+
+    for (let i = 0; i < items.length; i++) {
+        maxSortNo += 10
+        await db.collection(COL.MENU).doc(items[i]._id).update({
+            data: { visible: newVisible, sortNo: maxSortNo }
+        })
+    }
+
+    await updateGroupTimestamp('menuTimestamp')
+    return { code: 0, data: { supplier, visible: newVisible, count: items.length } }
 }
 
 async function parseXlsx(event) {

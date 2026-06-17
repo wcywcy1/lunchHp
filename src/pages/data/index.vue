@@ -6,14 +6,28 @@
         :selectedIds="selectedIds"
         :isAllSelected="isAllSelected"
         :confirming="confirming"
+        :historyCount="historyPendingCount"
+        :historyOrders="historyPendingOrders"
+        :historyHasMore="historyPendingHasMore"
+        :loadingHistory="loadingHistoryPending"
+        :showHistory="showHistoryPending"
         @toggle="toggleSelect"
         @toggle-all="toggleSelectAll"
         @batch-confirm="batchConfirm"
+        @toggle-history="toggleHistoryPending"
+        @load-more-history="loadMoreHistoryPending"
       />
 
       <ConfirmedList
         :groups="confirmedBySupplier"
+        :historyCount="historyConfirmedCount"
+        :historyOrders="historyConfirmedOrders"
+        :historyHasMore="historyConfirmedHasMore"
+        :loadingHistory="loadingHistoryConfirmed"
+        :showHistory="showHistoryConfirmed"
         @download="showDownloadDialog = true"
+        @toggle-history="toggleHistoryConfirmed"
+        @load-more-history="loadMoreHistoryConfirmed"
       />
 
       <MemberList
@@ -32,6 +46,7 @@
         @delete="deleteMenuItem"
         @move="moveMenuItem"
         @toggle-visible="toggleMenuVisible"
+        @toggle-supplier-visible="toggleSupplierVisible"
       />
 
       <ImportExport
@@ -260,6 +275,16 @@ const {
   menuEditForm,
   isMenuEdit,
   menuList,
+  historyPendingCount,
+  historyConfirmedCount,
+  historyPendingOrders,
+  historyConfirmedOrders,
+  showHistoryPending,
+  showHistoryConfirmed,
+  loadingHistoryPending,
+  loadingHistoryConfirmed,
+  historyPendingHasMore,
+  historyConfirmedHasMore,
   loadData,
   toggleSelect,
   toggleSelectAll,
@@ -279,6 +304,7 @@ const {
   deleteMenuItem,
   moveMenuItem,
   toggleMenuVisible,
+  toggleSupplierVisible,
   loadMenuList,
   exportData,
   importData,
@@ -287,6 +313,10 @@ const {
   selectBackup,
   confirmRestore,
   restoreBackup,
+  toggleHistoryPending,
+  toggleHistoryConfirmed,
+  loadMoreHistoryPending,
+  loadMoreHistoryConfirmed,
 } = useDataManage()
 
 const members = computed(() => store.members || [])
