@@ -133,7 +133,7 @@ async function initGroup(event, openid) {
 async function joinGroup(event, openid) {
     const { nickName, name } = event
     const existing = await getMemberByOpenid(openid)
-    if (existing) {
+    if (existing && existing._id !== 'recovered') {
         return { code: 0, data: { member: existing, isNew: false, virtualMatch: null } }
     }
 
@@ -289,7 +289,9 @@ async function linkVirtualMember(event, openid) {
         await db.collection(COL.MEMBERS).doc(virtualMemberId).update({ data: { role: caller.role } })
     }
 
-    await db.collection(COL.MEMBERS).doc(caller._id).remove()
+    if (caller._id !== 'recovered') {
+        await db.collection(COL.MEMBERS).doc(caller._id).remove()
+    }
 
     await updateGroupTimestamp('membersTimestamp')
     const updated = (await db.collection(COL.MEMBERS).doc(virtualMemberId).get()).data
