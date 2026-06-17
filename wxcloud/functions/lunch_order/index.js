@@ -10,6 +10,7 @@ const COL = {
     MENU: 'lunch_menu',
     MEMBERS: 'lunch_members',
     MONTHLY_STATS: 'lunch_monthly_stats',
+    GROUPS: 'lunch_groups',
 }
 const ROLE = { CREATOR: 'creator', ADMIN: 'admin', MEMBER: 'member' }
 const STATUS = { PENDING: 'pending', CONFIRMED: 'confirmed', CANCELLED: 'cancelled' }
@@ -80,7 +81,7 @@ async function getInitData(event, openid) {
     const today = getToday()
     const yearMonth = today.substring(0, 7)
 
-    const [monthAggResult, todayCountResult, menuResult, membersResult] = await Promise.all([
+    const [monthAggResult, todayCountResult, menuResult, membersResult, groupResult] = await Promise.all([
         db.collection(COL.ORDERS)
             .aggregate()
             .match({
@@ -105,6 +106,7 @@ async function getInitData(event, openid) {
             .where({ groupId: GROUP_ID })
             .orderBy('joinedAt', 'asc')
             .get(),
+        db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => ({ data: {} })),
     ])
 
     const todayCount = todayCountResult.total || 0
@@ -121,6 +123,7 @@ async function getInitData(event, openid) {
         : { totalAmount: 0, count: 0, yearMonth }
 
     const recentTimestamp = recentOrders.length > 0 ? recentOrders[0].createdAt : null
+    const groupData = groupResult.data || {}
 
     return {
         code: 0,
@@ -130,6 +133,8 @@ async function getInitData(event, openid) {
             menu: menuResult.data,
             members: membersResult.data,
             recentTimestamp,
+            menuTimestamp: groupData.menuTimestamp || null,
+            membersTimestamp: groupData.membersTimestamp || null,
         },
     }
 }

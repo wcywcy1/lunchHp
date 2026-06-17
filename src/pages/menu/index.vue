@@ -46,6 +46,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import { useStore } from '../../services/store'
 import { useMenu } from '../../hooks/useMenu'
 import { useMenuFilter } from '../../hooks/useMenuFilter'
@@ -56,7 +57,7 @@ import OrderBar from '../../components/menu/OrderBar.vue'
 import CustomTabBar from '../../components/CustomTabBar/CustomTabBar.vue'
 
 const store = useStore()
-const { menuList, visibleItems, hiddenItems, loading, loadMenu } = useMenu()
+const { menuList, visibleItems, hiddenItems, loading, loadMenu, checkFreshness } = useMenu()
 
 const {
   selectedSupplier,
@@ -96,6 +97,12 @@ onMounted(() => {
     loadMenu()
   }
 })
+
+onShow(() => {
+  if (store.member) {
+    checkFreshness()
+  }
+})
 </script>
 
 <style scoped>
@@ -108,6 +115,6 @@ onMounted(() => {
 .menu-scroll {
   flex: 1;
   overflow: hidden;
-  padding-bottom: 340rpx;
+  padding-bottom: 420rpx;
 }
 </style>

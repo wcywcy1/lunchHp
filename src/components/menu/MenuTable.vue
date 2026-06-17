@@ -103,6 +103,8 @@ function onSelect(menuId: string) {
 }
 .table-row.selected {
   background: #e8f5e9;
+  border-left: 6rpx solid #2e7d32;
+  font-weight: bold;
 }
 .table-row.hidden-row {
   background: #f9f9f9;

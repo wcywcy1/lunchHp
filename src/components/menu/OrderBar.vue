@@ -108,7 +108,8 @@ function onNameInput(e: any) {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8rpx 0;
+  padding: 8rpx 0 8rpx 16rpx;
+  border-left: 6rpx solid #1976d2;
 }
 .selected-name {
   font-size: 28rpx;
@@ -132,8 +133,8 @@ function onNameInput(e: any) {
 .order-for-tab {
   flex: 1;
   text-align: center;
-  padding: 12rpx 0;
-  font-size: 24rpx;
+  padding: 20rpx 0;
+  font-size: 28rpx;
   color: #666;
   background: #f5f5f5;
   border-radius: 8rpx;
@@ -145,7 +146,7 @@ function onNameInput(e: any) {
 }
 .submit-btn {
   text-align: center;
-  padding: 20rpx 0;
+  padding: 28rpx 0;
   background: #1976d2;
   color: #fff;
   border-radius: 12rpx;

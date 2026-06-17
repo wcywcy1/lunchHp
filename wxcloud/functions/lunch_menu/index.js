@@ -45,6 +45,7 @@ exports.main = async (event, context) => {
         initGroup,
         joinGroup,
         getMembers,
+        getDataTimestamps,
         updateMemberName,
         addVirtualMember,
         importMembers,
@@ -69,6 +70,27 @@ exports.main = async (event, context) => {
     } catch (e) {
         console.error(`[lunch_menu] ${action} error:`, e)
         return { code: 500, msg: e.message || 'internal error' }
+    }
+}
+
+async function updateGroupTimestamp(field) {
+    try {
+        await db.collection(COL.GROUPS).doc(GROUP_ID).update({
+            data: { [field]: db.serverDate() }
+        })
+    } catch (e) {
+        console.error(`updateGroupTimestamp(${field}) error:`, e)
+    }
+}
+
+async function getDataTimestamps(event, openid) {
+    const { data } = await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => ({ data: {} }))
+    return {
+        code: 0,
+        data: {
+            menuTimestamp: data.menuTimestamp || null,
+            membersTimestamp: data.membersTimestamp || null,
+        }
     }
 }
 
@@ -137,6 +159,7 @@ async function joinGroup(event, openid) {
         member.role = ROLE.CREATOR
     }
 
+    await updateGroupTimestamp('membersTimestamp')
     return { code: 0, data: { member, isNew: true, virtualMatch } }
 }
 
@@ -163,6 +186,7 @@ async function updateMemberName(event, openid) {
     if (!isSelf && !isAdminOrCreator) return { code: 403, msg: 'no permission' }
 
     await db.collection(COL.MEMBERS).doc(memberId).update({ data: { name } })
+    await updateGroupTimestamp('membersTimestamp')
     return { code: 0 }
 }
 
@@ -187,6 +211,7 @@ async function addVirtualMember(event, openid) {
     }
     const { _id } = await db.collection(COL.MEMBERS).add({ data: member })
     member._id = _id
+    await updateGroupTimestamp('membersTimestamp')
     return { code: 0, data: member }
 }
 
@@ -228,6 +253,7 @@ async function importMembers(event, openid) {
         inserted += chunk.length
     }
 
+    await updateGroupTimestamp('membersTimestamp')
     return { code: 0, data: { count: inserted } }
 }
 
@@ -258,6 +284,7 @@ async function linkVirtualMember(event, openid) {
 
     await db.collection(COL.MEMBERS).doc(caller._id).remove()
 
+    await updateGroupTimestamp('membersTimestamp')
     const updated = (await db.collection(COL.MEMBERS).doc(virtualMemberId).get()).data
     return { code: 0, data: { member: updated } }
 }
@@ -274,6 +301,7 @@ async function deleteMember(event, openid) {
     if (target.role === ROLE.CREATOR) return { code: 400, msg: 'cannot delete creator' }
 
     await db.collection(COL.MEMBERS).doc(memberId).remove()
+    await updateGroupTimestamp('membersTimestamp')
     return { code: 0 }
 }
 
@@ -290,6 +318,7 @@ async function setAdmin(event, openid) {
 
     const newRole = isAdmin ? ROLE.ADMIN : ROLE.MEMBER
     await db.collection(COL.MEMBERS).doc(memberId).update({ data: { role: newRole } })
+    await updateGroupTimestamp('membersTimestamp')
     return { code: 0 }
 }
 
@@ -328,6 +357,7 @@ async function addMenuItem(event, openid) {
     }
     const { _id } = await db.collection(COL.MENU).add({ data: item })
     item._id = _id
+    await updateGroupTimestamp('menuTimestamp')
     return { code: 0, data: item }
 }
 
@@ -375,6 +405,7 @@ async function importMenuItems(event, openid) {
         inserted += chunk.length
     }
 
+    await updateGroupTimestamp('menuTimestamp')
     return { code: 0, data: { count: inserted } }
 }
 
@@ -393,6 +424,7 @@ async function updateMenuItem(event, openid) {
     if (Object.keys(update).length === 0) return { code: 400, msg: 'nothing to update' }
 
     await db.collection(COL.MENU).doc(menuId).update({ data: update })
+    await updateGroupTimestamp('menuTimestamp')
     return { code: 0 }
 }
 
@@ -404,6 +436,7 @@ async function deleteMenuItem(event, openid) {
     if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
 
     await db.collection(COL.MENU).doc(menuId).remove()
+    await updateGroupTimestamp('menuTimestamp')
     return { code: 0 }
 }
 
@@ -435,6 +468,7 @@ async function moveMenuItem(event, openid) {
     await db.collection(COL.MENU).doc(menuId).update({ data: { sortNo: swapItem.sortNo } })
     await db.collection(COL.MENU).doc(swapItem._id).update({ data: { sortNo: target.sortNo } })
 
+    await updateGroupTimestamp('menuTimestamp')
     return { code: 0 }
 }
 
@@ -468,6 +502,7 @@ async function toggleVisible(event, openid) {
         await db.collection(COL.MENU).doc(menuId).update({ data: { visible: false, sortNo: maxSortNo + 10 } })
     }
 
+    await updateGroupTimestamp('menuTimestamp')
     return { code: 0, data: { visible: newVisible } }
 }
 

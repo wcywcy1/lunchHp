@@ -75,12 +75,14 @@ export function useHome() {
         try {
             const res = await orderAction('getInitData')
             if (res.result.code === 0) {
-                const { monthSummary, recentOrders, menu, members, recentTimestamp } = res.result.data
-                setStore({ monthSummary, recentOrders, menu, members, recentTimestamp, initialized: true })
+                const { monthSummary, recentOrders, menu, members, recentTimestamp, menuTimestamp, membersTimestamp } = res.result.data
+                setStore({ monthSummary, recentOrders, menu, members, recentTimestamp, menuTimestamp, membersTimestamp, initialized: true })
                 setCache(CACHE_KEYS.RECENT_ORDERS, recentOrders)
                 setCache(CACHE_KEYS.MENU, menu)
                 setCache(CACHE_KEYS.MEMBERS, members)
                 setCache(CACHE_KEYS.RECENT_TIMESTAMP, recentTimestamp)
+                setCache(CACHE_KEYS.MENU_TIMESTAMP, menuTimestamp)
+                setCache(CACHE_KEYS.MEMBERS_TIMESTAMP, membersTimestamp)
                 setCache(CACHE_KEYS.MONTH_SUMMARY, monthSummary)
                 setRecentLoadTime(Date.now())
             }

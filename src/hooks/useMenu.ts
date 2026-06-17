@@ -21,6 +21,8 @@ interface MenuReturn {
     suppliers: ComputedRef<string[]>
     loading: Ref<boolean>
     loadMenu: (forceRefresh?: boolean) => Promise<MenuItem[]>
+    loadMembers: () => Promise<void>
+    checkFreshness: () => Promise<void>
 }
 
 export function useMenu(): MenuReturn {
@@ -68,6 +70,41 @@ export function useMenu(): MenuReturn {
         }
     }
 
+    async function loadMembers() {
+        try {
+            const res = await menuAction('getMembers')
+            if (res.result.code === 0) {
+                const data = res.result.data || []
+                store.members = data
+                setCache(CACHE_KEYS.MEMBERS, data)
+            }
+        } catch (e) {
+            console.error('loadMembers error:', e)
+        }
+    }
+
+    async function checkFreshness() {
+        try {
+            const res = await menuAction('getDataTimestamps')
+            if (res.result.code !== 0) return
+            const { menuTimestamp, membersTimestamp } = res.result.data
+
+            if (menuTimestamp !== store.menuTimestamp) {
+                await loadMenu(true)
+                store.menuTimestamp = menuTimestamp
+                setCache(CACHE_KEYS.MENU_TIMESTAMP, menuTimestamp)
+            }
+
+            if (membersTimestamp !== store.membersTimestamp) {
+                await loadMembers()
+                store.membersTimestamp = membersTimestamp
+                setCache(CACHE_KEYS.MEMBERS_TIMESTAMP, membersTimestamp)
+            }
+        } catch (e) {
+            console.error('checkFreshness error:', e)
+        }
+    }
+
     return {
         menuList,
         visibleItems,
@@ -75,5 +112,7 @@ export function useMenu(): MenuReturn {
         suppliers,
         loading,
         loadMenu,
+        loadMembers,
+        checkFreshness,
     }
 }

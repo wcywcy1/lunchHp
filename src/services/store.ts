@@ -10,6 +10,8 @@ interface StoreState {
     recentOrders: any[]
     monthSummary: any
     recentTimestamp: any
+    menuTimestamp: any
+    membersTimestamp: any
     initialized: boolean
 }
 
@@ -22,6 +24,8 @@ const store = reactive<StoreState>({
     recentOrders: [],
     monthSummary: null,
     recentTimestamp: null,
+    menuTimestamp: null,
+    membersTimestamp: null,
     initialized: false,
 })
 
@@ -44,6 +48,8 @@ export function resetStore() {
     store.recentOrders = []
     store.monthSummary = null
     store.recentTimestamp = null
+    store.menuTimestamp = null
+    store.membersTimestamp = null
     store.initialized = false
     _recentLoadTime = 0
 }
@@ -95,6 +101,8 @@ export function restoreFromCache() {
     const menu = getCache(CACHE_KEYS.MENU, true)
     const members = getCache(CACHE_KEYS.MEMBERS, true)
     const recentTimestamp = getCache(CACHE_KEYS.RECENT_TIMESTAMP, true)
+    const menuTimestamp = getCache(CACHE_KEYS.MENU_TIMESTAMP, true)
+    const membersTimestamp = getCache(CACHE_KEYS.MEMBERS_TIMESTAMP, true)
     const monthSummary = getCache(CACHE_KEYS.MONTH_SUMMARY, true)
 
     setStore({
@@ -102,6 +110,8 @@ export function restoreFromCache() {
         menu: menu || [],
         members: members || [],
         recentTimestamp: recentTimestamp || null,
+        menuTimestamp: menuTimestamp || null,
+        membersTimestamp: membersTimestamp || null,
         monthSummary: monthSummary || null,
         initialized: true,
     })
