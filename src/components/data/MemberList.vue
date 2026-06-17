@@ -1,45 +1,51 @@
 <template>
   <view class="member-list">
-    <text class="section-title">成员管理</text>
-    <view
-      v-for="member in members"
-      :key="member._id"
-      :class="['member-item', member.isVirtual ? 'virtual' : '']"
-    >
-      <view class="member-info">
-        <text class="member-name">{{ member.name || member.nickName || '未命名' }}</text>
-        <text v-if="member.role === 'creator'" class="role-tag creator">👑创建者</text>
-        <text v-else-if="member.role === 'admin'" class="role-tag admin">🔧管理员</text>
-        <text v-if="member.isVirtual" class="virtual-tag">未登录</text>
-      </view>
-      <view class="member-actions">
-        <view
-          v-if="member.role !== 'creator'"
-          class="action-btn edit"
-          @tap="$emit('edit-name', member)"
-        >
-          <text>✏</text>
-        </view>
-        <view
-          v-if="isCreator && member.role === 'member'"
-          class="action-btn set-admin"
-          @tap="$emit('set-admin', member._id)"
-        >
-          <text>设管</text>
-        </view>
-        <view
-          v-if="isCreator && member.role === 'admin'"
-          class="action-btn remove-admin"
-          @tap="$emit('remove-admin', member._id)"
-        >
-          <text>撤管</text>
-        </view>
-      </view>
+    <view class="section-header" @tap="expanded = !expanded">
+      <text class="section-title">成员管理</text>
+      <text class="expand-arrow">{{ expanded ? '▼' : '▶' }}</text>
     </view>
+    <template v-if="expanded">
+      <view
+        v-for="member in members"
+        :key="member._id"
+        :class="['member-item', member.isVirtual ? 'virtual' : '']"
+      >
+        <view class="member-info">
+          <text class="member-name">{{ member.name || member.nickName || '未命名' }}</text>
+          <text v-if="member.role === 'creator'" class="role-tag creator">👑创建者</text>
+          <text v-else-if="member.role === 'admin'" class="role-tag admin">🔧管理员</text>
+          <text v-if="member.isVirtual" class="virtual-tag">未登录</text>
+        </view>
+        <view class="member-actions">
+          <text
+            v-if="member.role !== 'creator'"
+            class="action-btn edit"
+            @tap="$emit('edit-name', member)"
+          >✏</text>
+          <text
+            v-if="member.role !== 'creator'"
+            class="action-btn delete"
+            @tap="$emit('delete-member', member)"
+          >🗑</text>
+          <text
+            v-if="isCreator && member.role === 'member'"
+            class="action-btn set-admin"
+            @tap="$emit('set-admin', member._id)"
+          >设管</text>
+          <text
+            v-if="isCreator && member.role === 'admin'"
+            class="action-btn remove-admin"
+            @tap="$emit('remove-admin', member._id)"
+          >撤管</text>
+        </view>
+      </view>
+    </template>
   </view>
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
+
 defineProps<{
   members: any[]
   isCreator: boolean
@@ -47,9 +53,12 @@ defineProps<{
 
 defineEmits<{
   (e: 'edit-name', member: any): void
+  (e: 'delete-member', member: any): void
   (e: 'set-admin', memberId: string): void
   (e: 'remove-admin', memberId: string): void
 }>()
+
+const expanded = ref(false)
 </script>
 
 <style scoped>
@@ -60,12 +69,20 @@ defineEmits<{
   padding: 24rpx;
   box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.06);
 }
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
 .section-title {
   font-size: 30rpx;
   font-weight: bold;
   color: #333;
-  margin-bottom: 16rpx;
-  display: block;
+}
+.expand-arrow {
+  font-size: 24rpx;
+  color: #999;
+  padding: 8rpx;
 }
 .member-item {
   display: flex;
@@ -123,19 +140,27 @@ defineEmits<{
   flex-shrink: 0;
 }
 .action-btn {
-  padding: 8rpx 20rpx;
-  border-radius: 8rpx;
-  font-size: 24rpx;
+  font-size: 28rpx;
+  padding: 4rpx 8rpx;
 }
 .action-btn.edit {
-  color: #666;
+  color: #1976d2;
+}
+.action-btn.delete {
+  color: #d32f2f;
 }
 .action-btn.set-admin {
   background: #e3f2fd;
   color: #1976d2;
+  font-size: 24rpx;
+  padding: 8rpx 20rpx;
+  border-radius: 8rpx;
 }
 .action-btn.remove-admin {
   background: #fce4ec;
   color: #c62828;
+  font-size: 24rpx;
+  padding: 8rpx 20rpx;
+  border-radius: 8rpx;
 }
 </style>

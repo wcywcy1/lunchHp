@@ -22,7 +22,7 @@
     {
       "path": "pages/data/index",
       "style": {
-        "navigationBarTitleText": "数据管理"
+        "navigationBarTitleText": "管理"
       }
     }
   ],
@@ -53,7 +53,7 @@
       },
       {
         "pagePath": "pages/data/index",
-        "text": "数据"
+        "text": "管理"
       }
     ]
   }

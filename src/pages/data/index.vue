@@ -20,8 +20,18 @@
         :members="members"
         :isCreator="isCreator"
         @edit-name="openNameEdit"
+        @delete-member="deleteMember"
         @set-admin="setAdminRole"
         @remove-admin="removeAdminRole"
+      />
+
+      <MenuManage
+        :menuList="menuList"
+        @add="openMenuAdd"
+        @edit="openMenuEdit"
+        @delete="deleteMenuItem"
+        @move="moveMenuItem"
+        @toggle-visible="toggleMenuVisible"
       />
 
       <ImportExport
@@ -36,6 +46,8 @@
         @backup="manualBackup"
         @restore="openBackupDialog"
       />
+
+      <DangerZone @delete-data="clearAllData" />
     </scroll-view>
 
     <DownloadDialog
@@ -58,9 +70,47 @@
           <text class="form-label">新姓名</text>
           <input class="form-input" v-model="editingName" placeholder="输入姓名" />
         </view>
+        <view v-if="editingMember?.isVirtual" class="merge-section" @tap="openMergeDialog(editingMember)">
+          <text class="merge-btn">🔗 与微信账号合帐</text>
+        </view>
         <view class="modal-actions">
           <view class="modal-btn cancel" @tap="showNameEditDialog = false"><text>取消</text></view>
           <view class="modal-btn confirm" @tap="saveMemberName"><text>保存</text></view>
+        </view>
+      </view>
+    </view>
+
+    <view v-if="showMergeDialog" class="modal-mask" @tap="showMergeDialog = false">
+      <view class="edit-modal" @tap.stop>
+        <text class="modal-title">与微信账号合帐</text>
+        <view class="merge-info">
+          <text class="merge-desc">将虚拟成员「{{ mergingMember?.name || '未命名' }}」与当前微信账号合并。合并后该虚拟成员将绑定到您的微信，您当前的账号数据将转移过去。</text>
+        </view>
+        <view class="modal-actions">
+          <view class="modal-btn cancel" @tap="showMergeDialog = false"><text>取消</text></view>
+          <view class="modal-btn confirm" @tap="mergeWithWechat"><text>确认合帐</text></view>
+        </view>
+      </view>
+    </view>
+
+    <view v-if="showMenuEditModal" class="modal-mask" @tap="showMenuEditModal = false">
+      <view class="edit-modal" @tap.stop>
+        <text class="modal-title">{{ isMenuEdit ? '编辑菜品' : '添加菜品' }}</text>
+        <view class="form-item">
+          <text class="form-label">供应商</text>
+          <input class="form-input" v-model="menuEditForm.supplier" placeholder="如：享德来" />
+        </view>
+        <view class="form-item">
+          <text class="form-label">餐品名</text>
+          <input class="form-input" v-model="menuEditForm.name" placeholder="如：雞腿飯" />
+        </view>
+        <view class="form-item">
+          <text class="form-label">价格</text>
+          <input class="form-input" v-model="menuEditForm.price" type="digit" placeholder="如：27" />
+        </view>
+        <view class="modal-actions">
+          <view class="modal-btn cancel" @tap="showMenuEditModal = false"><text>取消</text></view>
+          <view class="modal-btn confirm" @tap="saveMenuItem"><text>保存</text></view>
         </view>
       </view>
     </view>
@@ -164,7 +214,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { useStore } from '../../services/store'
 import { useAuth } from '../../hooks/useAuth'
@@ -172,8 +222,10 @@ import { useDataManage } from '../../hooks/useDataManage'
 import PendingList from '../../components/data/PendingList.vue'
 import ConfirmedList from '../../components/data/ConfirmedList.vue'
 import MemberList from '../../components/data/MemberList.vue'
+import MenuManage from '../../components/data/MenuManage.vue'
 import ImportExport from '../../components/data/ImportExport.vue'
 import DataBackup from '../../components/data/DataBackup.vue'
+import DangerZone from '../../components/data/DangerZone.vue'
 import DownloadDialog from '../../components/data/DownloadDialog.vue'
 import CustomTabBar from '../../components/CustomTabBar/CustomTabBar.vue'
 
@@ -202,6 +254,12 @@ const {
   backupStep,
   selectedBackup,
   backingUp,
+  showMergeDialog,
+  mergingMember,
+  showMenuEditModal,
+  menuEditForm,
+  isMenuEdit,
+  menuList,
   loadData,
   toggleSelect,
   toggleSelectAll,
@@ -211,6 +269,17 @@ const {
   saveMemberName,
   setAdminRole,
   removeAdminRole,
+  deleteMember,
+  clearAllData,
+  openMergeDialog,
+  mergeWithWechat,
+  openMenuAdd,
+  openMenuEdit,
+  saveMenuItem,
+  deleteMenuItem,
+  moveMenuItem,
+  toggleMenuVisible,
+  loadMenuList,
   exportData,
   importData,
   manualBackup,
@@ -238,6 +307,7 @@ onShow(() => {
     return
   }
   loadData()
+  loadMenuList()
 })
 </script>
 
@@ -308,6 +378,26 @@ onShow(() => {
   border: 1rpx solid #ddd;
   border-radius: 8rpx;
   font-size: 28rpx;
+}
+.merge-section {
+  margin-bottom: 24rpx;
+}
+.merge-btn {
+  display: block;
+  text-align: center;
+  padding: 16rpx;
+  background: #e3f2fd;
+  border-radius: 12rpx;
+  font-size: 28rpx;
+  color: #1976d2;
+}
+.merge-info {
+  margin-bottom: 24rpx;
+}
+.merge-desc {
+  font-size: 26rpx;
+  color: #666;
+  line-height: 1.6;
 }
 .modal-actions {
   display: flex;

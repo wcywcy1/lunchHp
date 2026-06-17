@@ -27,7 +27,7 @@ const allTabs = [
   { pagePath: 'pages/home/index', text: '首页', icon: '🏠' },
   { pagePath: 'pages/menu/index', text: '菜单', icon: '🍽️' },
   { pagePath: 'pages/stats/index', text: '统计', icon: '📊' },
-  { pagePath: 'pages/data/index', text: '数据', icon: '📁' },
+  { pagePath: 'pages/data/index', text: '管理', icon: '📁' },
 ]
 
 const visibleTabs = computed(() => {
@@ -35,7 +35,7 @@ const visibleTabs = computed(() => {
   if (role === ROLE.CREATOR || role === ROLE.ADMIN) {
     return allTabs
   }
-  return allTabs.filter(t => t.text !== '数据')
+  return allTabs.filter(t => t.text !== '管理')
 })
 
 function switchTab(pagePath: string) {

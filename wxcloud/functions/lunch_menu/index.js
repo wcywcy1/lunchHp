@@ -51,6 +51,7 @@ exports.main = async (event, context) => {
         setAdmin,
         agreePrivacy,
         linkVirtualMember,
+        deleteMember,
         getMenuList,
         addMenuItem,
         importMenuItems,
@@ -259,6 +260,21 @@ async function linkVirtualMember(event, openid) {
 
     const updated = (await db.collection(COL.MEMBERS).doc(virtualMemberId).get()).data
     return { code: 0, data: { member: updated } }
+}
+
+async function deleteMember(event, openid) {
+    const { memberId } = event
+    if (!memberId) return { code: 400, msg: 'missing memberId' }
+
+    const caller = await getMemberByOpenid(openid)
+    if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
+
+    const target = (await db.collection(COL.MEMBERS).doc(memberId).get()).data
+    if (!target) return { code: 404, msg: 'member not found' }
+    if (target.role === ROLE.CREATOR) return { code: 400, msg: 'cannot delete creator' }
+
+    await db.collection(COL.MEMBERS).doc(memberId).remove()
+    return { code: 0 }
 }
 
 async function setAdmin(event, openid) {

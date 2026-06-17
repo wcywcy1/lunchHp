@@ -122,6 +122,7 @@ exports.main = async (event, context) => {
         getBackupList,
         deleteBackup,
         exportAllOrders,
+        clearAllData,
     }
 
     const fn = handlers[action]
@@ -240,4 +241,15 @@ async function exportAllOrders(event, openid) {
     })
 
     return { code: 0, data: { fileID: uploadResult.fileID, count: allOrders.length, fileName: `全量订单_${ts}.csv` } }
+}
+
+async function clearAllData(event, openid) {
+    const caller = await getMemberByOpenid(openid)
+    if (!checkRole(caller, ROLE.CREATOR)) return { code: 403, msg: 'creator only' }
+
+    await db.collection(COL.ORDERS).where({ groupId: GROUP_ID }).remove()
+    await db.collection(COL.MENU).where({ groupId: GROUP_ID }).remove()
+    await db.collection(COL.MEMBERS).where({ groupId: GROUP_ID, role: _.neq('creator') }).remove()
+
+    return { code: 0 }
 }

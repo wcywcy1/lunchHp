@@ -797,6 +797,159 @@ export function useDataManage() {
         }
     }
 
+    async function deleteMember(member: any) {
+        if (member.role === 'creator') return
+        const { confirm } = await uni.showModal({
+            title: '确认删除',
+            content: `删除成员"${member.name || member.nickName || '未命名'}"后不可恢复，确定？`,
+        })
+        if (!confirm) return
+        try {
+            await menuAction('deleteMember', { memberId: member._id })
+            store.members = store.members.filter((m: any) => m._id !== member._id)
+            uni.showToast({ title: '已删除', icon: 'success' })
+        } catch (e: any) {
+            uni.showToast({ title: e.message || '删除失败', icon: 'none' })
+        }
+    }
+
+    async function clearAllData() {
+        const { confirm: c1 } = await uni.showModal({
+            title: '⚠️ 危险操作',
+            content: '将删除本组织所有数据（订单、菜单、成员），确定继续？',
+        })
+        if (!c1) return
+        const { confirm: c2 } = await uni.showModal({
+            title: '二次确认',
+            content: '数据删除后不可恢复，是否已备份？',
+        })
+        if (!c2) return
+        try {
+            await backupAction('clearAllData')
+            store.members = []
+            store.menu = []
+            store.recentOrders = []
+            pendingOrders.value = []
+            confirmedOrders.value = []
+            uni.showToast({ title: '数据已清除', icon: 'success' })
+        } catch (e: any) {
+            uni.showToast({ title: e.message || '操作失败', icon: 'none' })
+        }
+    }
+
+    const showMergeDialog = ref(false)
+    const mergingMember = ref<any>(null)
+
+    function openMergeDialog(member: any) {
+        mergingMember.value = member
+        showMergeDialog.value = true
+    }
+
+    async function mergeWithWechat() {
+        if (!mergingMember.value) return
+        try {
+            const res = await menuAction('linkVirtualMember', { virtualMemberId: mergingMember.value._id })
+            if (res.result.code === 0) {
+                const updated = res.result.data.member
+                store.members = store.members.map((m: any) => m._id === updated._id ? updated : m)
+                store.member = updated
+                saveSession({ groupId: updated.groupId, role: updated.role, member: updated })
+                showMergeDialog.value = false
+                showNameEditDialog.value = false
+                uni.showToast({ title: '合帐成功', icon: 'success' })
+            }
+        } catch (e: any) {
+            uni.showToast({ title: e.message || '合帐失败', icon: 'none' })
+        }
+    }
+
+    const showMenuEditModal = ref(false)
+    const menuEditForm = ref({ menuId: '', supplier: '', name: '', price: '', photo: '' })
+    const isMenuEdit = ref(false)
+
+    function openMenuAdd() {
+        isMenuEdit.value = false
+        menuEditForm.value = { menuId: '', supplier: '', name: '', price: '', photo: '' }
+        showMenuEditModal.value = true
+    }
+
+    function openMenuEdit(item: any) {
+        isMenuEdit.value = true
+        menuEditForm.value = {
+            menuId: item._id,
+            supplier: item.supplier,
+            name: item.name,
+            price: String(item.price),
+            photo: item.photo || '',
+        }
+        showMenuEditModal.value = true
+    }
+
+    async function saveMenuItem() {
+        const { menuId, supplier, name, price, photo } = menuEditForm.value
+        if (!supplier || !name || price === '') {
+            uni.showToast({ title: '请填写完整', icon: 'none' })
+            return
+        }
+        try {
+            if (isMenuEdit.value) {
+                await menuAction('updateMenuItem', { menuId, supplier, name, price: Number(price), photo })
+            } else {
+                await menuAction('addMenuItem', { supplier, name, price: Number(price), photo, visible: true })
+            }
+            showMenuEditModal.value = false
+            await loadMenuList()
+            uni.showToast({ title: isMenuEdit.value ? '已保存' : '已添加', icon: 'success' })
+        } catch (e: any) {
+            uni.showToast({ title: e.message || '操作失败', icon: 'none' })
+        }
+    }
+
+    async function deleteMenuItem(menuId: string) {
+        const { confirm } = await uni.showModal({ title: '确认删除', content: '删除后不可恢复，确定？' })
+        if (!confirm) return
+        try {
+            await menuAction('deleteMenuItem', { menuId })
+            await loadMenuList()
+            uni.showToast({ title: '已删除', icon: 'success' })
+        } catch (e: any) {
+            uni.showToast({ title: e.message || '删除失败', icon: 'none' })
+        }
+    }
+
+    async function moveMenuItem(menuId: string, direction: string) {
+        try {
+            await menuAction('moveMenuItem', { menuId, direction })
+            await loadMenuList()
+        } catch (e: any) {
+            uni.showToast({ title: e.message || '移动失败', icon: 'none' })
+        }
+    }
+
+    async function toggleMenuVisible(menuId: string) {
+        try {
+            await menuAction('toggleVisible', { menuId })
+            await loadMenuList()
+            uni.showToast({ title: '已切换', icon: 'success' })
+        } catch (e: any) {
+            uni.showToast({ title: e.message || '操作失败', icon: 'none' })
+        }
+    }
+
+    const menuList = ref<any[]>([])
+
+    async function loadMenuList() {
+        try {
+            const res = await menuAction('getMenuList')
+            if (res.result.code === 0) {
+                menuList.value = res.result.data || []
+                store.menu = menuList.value
+            }
+        } catch (e) {
+            console.error('loadMenuList error:', e)
+        }
+    }
+
     return {
         loading,
         pendingOrders,
@@ -820,6 +973,12 @@ export function useDataManage() {
         backupStep,
         selectedBackup,
         backingUp,
+        showMergeDialog,
+        mergingMember,
+        showMenuEditModal,
+        menuEditForm,
+        isMenuEdit,
+        menuList,
         loadData,
         toggleSelect,
         toggleSelectAll,
@@ -829,6 +988,17 @@ export function useDataManage() {
         saveMemberName,
         setAdminRole,
         removeAdminRole,
+        deleteMember,
+        clearAllData,
+        openMergeDialog,
+        mergeWithWechat,
+        openMenuAdd,
+        openMenuEdit,
+        saveMenuItem,
+        deleteMenuItem,
+        moveMenuItem,
+        toggleMenuVisible,
+        loadMenuList,
         exportData,
         importData,
         manualBackup,
