@@ -4,6 +4,24 @@ import { menuAction, orderAction, backupAction } from '../services/repositories/
 import { ORDER_STATUS, ROLE } from '../constants/orderStatus'
 
 export function useDataManage() {
+    function writeCsvWithBom(fs: any, path: string, content: string) {
+        const bytes: number[] = [0xEF, 0xBB, 0xBF]
+        for (let i = 0; i < content.length; i++) {
+            let code = content.charCodeAt(i)
+            if (code >= 0x10000) {
+                code -= 0x10000
+                bytes.push(0xF0 | (code >> 18), 0x80 | ((code >> 12) & 0x3F), 0x80 | ((code >> 6) & 0x3F), 0x80 | (code & 0x3F))
+            } else if (code >= 0x800) {
+                bytes.push(0xE0 | (code >> 12), 0x80 | ((code >> 6) & 0x3F), 0x80 | (code & 0x3F))
+            } else if (code >= 0x80) {
+                bytes.push(0xC0 | (code >> 6), 0x80 | (code & 0x3F))
+            } else {
+                bytes.push(code)
+            }
+        }
+        fs.writeFileSync(path, new Uint8Array(bytes).buffer as ArrayBuffer)
+    }
+
     const store = useStore()
     const loading = ref(false)
     const pendingOrders = ref<any[]>([])
@@ -194,7 +212,7 @@ export function useDataManage() {
                     const fs = wx.getFileSystemManager()
                     const fileName = `确认单_${group.supplier}_${getDateStr()}.csv`
                     const path = `${wx.env.USER_DATA_PATH}/${fileName}`
-                    fs.writeFileSync(path, '\uFEFF' + lines.join('\n'), 'utf8')
+                    writeCsvWithBom(fs, path, lines.join('\n'))
                     const shareRes = await shareLocalFile(path, fileName)
                     uni.showToast({ title: shareRes.success ? '分享成功' : (shareRes.cancelled ? '已取消' : '分享失败'), icon: shareRes.success ? 'success' : 'none' })
                 }
@@ -211,7 +229,7 @@ export function useDataManage() {
                 const fs = wx.getFileSystemManager()
                 const fileName = `确认单_全部_${getDateStr()}.csv`
                 const path = `${wx.env.USER_DATA_PATH}/${fileName}`
-                fs.writeFileSync(path, '\uFEFF' + lines.join('\n'), 'utf8')
+                writeCsvWithBom(fs, path, lines.join('\n'))
                 const shareRes = await shareLocalFile(path, fileName)
                 uni.showToast({ title: shareRes.success ? '分享成功' : (shareRes.cancelled ? '已取消' : '分享失败'), icon: shareRes.success ? 'success' : 'none' })
             }
@@ -342,10 +360,15 @@ export function useDataManage() {
         return lines
     }
 
-    function parseXlsxSheet(buffer: ArrayBuffer): string[][] {
-        const view = new Uint8Array(buffer)
-        const text = new TextDecoder('utf-8').decode(view)
-        return splitCsvLines(text).map(l => parseCsvLine(l))
+    async function parseXlsxViaCloud(filePath: string): Promise<string[][]> {
+        const cloudPath = `xlsx_import/${Date.now()}_${Math.random().toString(36).substr(2, 6)}.xlsx`
+        const uploadRes = await wx.cloud.uploadFile({ cloudPath, filePath })
+        const parseRes = await menuAction('parseXlsx', { fileID: uploadRes.fileID })
+        if (parseRes.result.code !== 0) {
+            throw new Error(parseRes.result.msg || 'xlsx解析失败')
+        }
+        try { await wx.cloud.deleteFile({ fileList: [uploadRes.fileID] }) } catch (e) { }
+        return parseRes.result.data.rows
     }
 
     function parseDate(val: string | number | undefined): string {
@@ -387,7 +410,7 @@ export function useDataManage() {
         for (const field of fields) {
             const aliases = HEADER_ALIASES[field] || [field]
             const lowerAliases = aliases.map(a => a.toLowerCase())
-            const idx = lowerHeader.findIndex(h => lowerAliases.some(a => h === a || h.includes(a)))
+            const idx = lowerHeader.findIndex(h => lowerAliases.some(a => h === a || h.includes(a) || a.includes(h)))
             if (idx >= 0) result[field] = idx
         }
         return result
@@ -430,7 +453,7 @@ export function useDataManage() {
             const fs = wx.getFileSystemManager()
             const fileName = `export_orders_${getDateStr()}.csv`
             const path = `${wx.env.USER_DATA_PATH}/${fileName}`
-            fs.writeFileSync(path, lines.join('\n'), 'utf8')
+            writeCsvWithBom(fs, path, lines.join('\n'))
             const shareRes = await shareLocalFile(path, fileName)
             if (shareRes.success) {
                 uni.showToast({ title: allOrders.length === 0 ? '模板已分享' : '分享成功', icon: 'success' })
@@ -454,7 +477,7 @@ export function useDataManage() {
                 const fs = wx.getFileSystemManager()
                 const fileName = `export_menu_${getDateStr()}.csv`
                 const path = `${wx.env.USER_DATA_PATH}/${fileName}`
-                fs.writeFileSync(path, lines.join('\n'), 'utf8')
+                writeCsvWithBom(fs, path, lines.join('\n'))
                 const shareRes = await shareLocalFile(path, fileName)
                 if (shareRes.success) {
                     uni.showToast({ title: menuList.length === 0 ? '模板已分享' : '分享成功', icon: 'success' })
@@ -479,7 +502,7 @@ export function useDataManage() {
                 const fs = wx.getFileSystemManager()
                 const fileName = `export_members_${getDateStr()}.csv`
                 const path = `${wx.env.USER_DATA_PATH}/${fileName}`
-                fs.writeFileSync(path, lines.join('\n'), 'utf8')
+                writeCsvWithBom(fs, path, lines.join('\n'))
                 const shareRes = await shareLocalFile(path, fileName)
                 if (shareRes.success) {
                     uni.showToast({ title: memberList.length === 0 ? '模板已分享' : '分享成功', icon: 'success' })
@@ -529,8 +552,7 @@ export function useDataManage() {
             const content = fs.readFileSync(filePath, 'utf8') as string
             rows = splitCsvLines(content).map(l => parseCsvLine(l))
         } else {
-            const buf = fs.readFileSync(filePath) as ArrayBuffer
-            rows = parseXlsxSheet(buf)
+            rows = await parseXlsxViaCloud(filePath)
         }
         if (rows.length < 2) {
             uni.showToast({ title: '文件为空', icon: 'none' })
@@ -600,8 +622,7 @@ export function useDataManage() {
             const content = fs.readFileSync(filePath, 'utf8') as string
             rows = splitCsvLines(content).map(l => parseCsvLine(l))
         } else {
-            const buf = fs.readFileSync(filePath) as ArrayBuffer
-            rows = parseXlsxSheet(buf)
+            rows = await parseXlsxViaCloud(filePath)
         }
         if (rows.length < 2) {
             uni.showToast({ title: '文件为空', icon: 'none' })
@@ -643,8 +664,7 @@ export function useDataManage() {
             const content = fs.readFileSync(filePath, 'utf8') as string
             rows = splitCsvLines(content).map(l => parseCsvLine(l))
         } else {
-            const buf = fs.readFileSync(filePath) as ArrayBuffer
-            rows = parseXlsxSheet(buf)
+            rows = await parseXlsxViaCloud(filePath)
         }
         if (rows.length < 2) {
             uni.showToast({ title: '文件为空', icon: 'none' })

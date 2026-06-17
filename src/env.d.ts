@@ -14,6 +14,7 @@ declare const wx: {
     database(): any
     downloadFile(options: { fileID: string; success?: (res: any) => void; fail?: (err: any) => void }): void
     deleteFile(options: { fileList: string[] }): Promise<any>
+    uploadFile(options: { cloudPath: string; filePath: string }): Promise<{ fileID: string }>
   }
   createSelectorQuery(): any
   getWindowInfo(): { pixelRatio: number; screenWidth: number; screenHeight: number; windowWidth: number; windowHeight: number }

@@ -4,6 +4,7 @@
   "description": "我要干饭 - 菜单CRUD + 成员管理 + 初始化",
   "main": "index.js",
   "dependencies": {
-    "wx-server-sdk": "~2.6.3"
+    "wx-server-sdk": "~2.6.3",
+    "xlsx": "^0.18.5"
   }
 }

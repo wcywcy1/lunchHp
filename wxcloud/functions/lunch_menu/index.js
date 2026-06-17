@@ -2,6 +2,8 @@ const cloud = require('wx-server-sdk')
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 const _ = db.command
+let XLSX = null
+try { XLSX = require('xlsx') } catch (e) { }
 
 const GROUP_ID = 'lunch_hp'
 const COL = {
@@ -56,6 +58,7 @@ exports.main = async (event, context) => {
         deleteMenuItem,
         moveMenuItem,
         toggleVisible,
+        parseXlsx,
     }
 
     const fn = handlers[action]
@@ -450,4 +453,32 @@ async function toggleVisible(event, openid) {
     }
 
     return { code: 0, data: { visible: newVisible } }
+}
+
+async function parseXlsx(event) {
+    if (!XLSX) return { code: 500, msg: 'xlsx库未安装' }
+    const { fileID } = event
+    if (!fileID) return { code: 400, msg: 'missing fileID' }
+
+    const downloadRes = await cloud.downloadFile({ fileID })
+    const buffer = downloadRes.fileContent
+
+    const workbook = XLSX.read(buffer, { type: 'buffer' })
+    const sheetName = workbook.SheetNames[0]
+    const sheet = workbook.Sheets[sheetName]
+    const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' })
+
+    const rows = jsonData.map(row =>
+        row.map(cell => {
+            if (cell instanceof Date) {
+                const y = cell.getFullYear()
+                const m = String(cell.getMonth() + 1).padStart(2, '0')
+                const d = String(cell.getDate()).padStart(2, '0')
+                return `${y}-${m}-${d}`
+            }
+            return String(cell)
+        })
+    )
+
+    return { code: 0, data: { rows } }
 }
