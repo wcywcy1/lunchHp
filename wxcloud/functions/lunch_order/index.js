@@ -537,10 +537,7 @@ async function doRebuildMonthStats(targetYearMonth) {
         statsWhere.month = Number(targetYearMonth.split('-')[1])
     }
 
-    const oldStats = await fetchAll(db.collection(COL.MONTHLY_STATS), statsWhere)
-    for (const old of oldStats) {
-        await db.collection(COL.MONTHLY_STATS).doc(old._id).remove()
-    }
+    await db.collection(COL.MONTHLY_STATS).where(statsWhere).remove()
 
     const allOrders = await fetchAll(db.collection(COL.ORDERS), where)
 
