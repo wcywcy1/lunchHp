@@ -240,10 +240,26 @@ export function useStats(): StatsReturn {
                 const { fileID } = res.result.data
                 await wx.cloud.downloadFile({
                     fileID,
-                    success: (downloadRes: any) => {
-                        wx.openDocument({
-                            filePath: downloadRes.tempFilePath,
-                            showMenu: true,
+                    success: async (downloadRes: any) => {
+                        const fs = wx.getFileSystemManager()
+                        const fileName = 'monthly_stats.csv'
+                        const localPath = `${wx.env.USER_DATA_PATH}/${fileName}`
+                        fs.saveFileSync(downloadRes.tempFilePath, localPath)
+                        wx.shareFileMessage({
+                            filePath: localPath,
+                            fileName,
+                            success: () => {
+                                try { fs.unlinkSync(localPath) } catch {}
+                                uni.showToast({ title: '分享成功', icon: 'success' })
+                            },
+                            fail: (err: any) => {
+                                try { fs.unlinkSync(localPath) } catch {}
+                                if (err?.errMsg?.indexOf('cancel') > -1) {
+                                    uni.showToast({ title: '已取消', icon: 'none' })
+                                } else {
+                                    uni.showToast({ title: '分享失败', icon: 'none' })
+                                }
+                            },
                         })
                     },
                 })
@@ -253,9 +269,25 @@ export function useStats(): StatsReturn {
                     csvLines.push(`${s.year}-${String(s.month).padStart(2, '0')},${s.totalAmount},${s.orderCount}`)
                 })
                 const fs = wx.getFileSystemManager()
-                const path = `${wx.env.USER_DATA_PATH}/monthly_stats.csv`
+                const fileName = 'monthly_stats.csv'
+                const path = `${wx.env.USER_DATA_PATH}/${fileName}`
                 fs.writeFileSync(path, csvLines.join('\n'), 'utf8')
-                wx.openDocument({ filePath: path, showMenu: true })
+                wx.shareFileMessage({
+                    filePath: path,
+                    fileName,
+                    success: () => {
+                        try { fs.unlinkSync(path) } catch {}
+                        uni.showToast({ title: '分享成功', icon: 'success' })
+                    },
+                    fail: (err: any) => {
+                        try { fs.unlinkSync(path) } catch {}
+                        if (err?.errMsg?.indexOf('cancel') > -1) {
+                            uni.showToast({ title: '已取消', icon: 'none' })
+                        } else {
+                            uni.showToast({ title: '分享失败', icon: 'none' })
+                        }
+                    },
+                })
             }
         } catch (e: any) {
             uni.showToast({ title: e.message || '下载失败', icon: 'none' })

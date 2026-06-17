@@ -6,6 +6,7 @@
       :class="['tab-item', current === tab.pagePath ? 'active' : '']"
       @tap="switchTab(tab.pagePath)"
     >
+      <text class="tab-icon">{{ tab.icon }}</text>
       <text class="tab-text">{{ tab.text }}</text>
     </view>
   </view>
@@ -23,10 +24,10 @@ defineProps<{
 const store = useStore()
 
 const allTabs = [
-  { pagePath: 'pages/home/index', text: '首页' },
-  { pagePath: 'pages/menu/index', text: '菜单' },
-  { pagePath: 'pages/stats/index', text: '统计' },
-  { pagePath: 'pages/data/index', text: '数据' },
+  { pagePath: 'pages/home/index', text: '首页', icon: '🏠' },
+  { pagePath: 'pages/menu/index', text: '菜单', icon: '🍽️' },
+  { pagePath: 'pages/stats/index', text: '统计', icon: '📊' },
+  { pagePath: 'pages/data/index', text: '数据', icon: '📁' },
 ]
 
 const visibleTabs = computed(() => {
@@ -48,7 +49,7 @@ function switchTab(pagePath: string) {
   bottom: 0;
   left: 0;
   right: 0;
-  height: 100rpx;
+  height: 120rpx;
   background: #ffffff;
   border-top: 1rpx solid #e0e0e0;
   display: flex;
@@ -65,9 +66,17 @@ function switchTab(pagePath: string) {
   justify-content: center;
   padding: 8rpx 0;
 }
+.tab-icon {
+  font-size: 40rpx;
+  line-height: 1;
+}
 .tab-text {
-  font-size: 24rpx;
+  font-size: 22rpx;
   color: #999999;
+  margin-top: 4rpx;
+}
+.tab-item.active .tab-icon {
+  transform: scale(1.1);
 }
 .tab-item.active .tab-text {
   color: #333333;

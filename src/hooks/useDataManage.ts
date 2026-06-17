@@ -104,16 +104,51 @@ export function useDataManage() {
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
     }
 
-    async function downloadCloudFile(fileID: string) {
+    function shareLocalFile(filePath: string, fileName: string): Promise<{ success: boolean; message: string; cancelled?: boolean }> {
+        return new Promise((resolve) => {
+            const fs = wx.getFileSystemManager()
+            try {
+                fs.accessSync(filePath)
+            } catch {
+                resolve({ success: false, message: '文件不存在或已过期', cancelled: false })
+                return
+            }
+            wx.shareFileMessage({
+                filePath,
+                fileName,
+                success: () => {
+                    try { fs.unlinkSync(filePath) } catch {}
+                    resolve({ success: true, message: '分享成功', cancelled: false })
+                },
+                fail: (err: any) => {
+                    try { fs.unlinkSync(filePath) } catch {}
+                    if (err?.errMsg?.indexOf('cancel') > -1) {
+                        resolve({ success: false, message: '分享已取消', cancelled: true })
+                    } else {
+                        resolve({ success: false, message: '分享失败', cancelled: false })
+                    }
+                },
+            })
+        })
+    }
+
+    async function downloadCloudFile(fileID: string, fileName?: string) {
         return new Promise<void>((resolve, reject) => {
             wx.cloud.downloadFile({
                 fileID,
                 success: (downloadRes: any) => {
-                    wx.openDocument({
+                    const name = fileName || 'export_file.csv'
+                    wx.shareFileMessage({
                         filePath: downloadRes.tempFilePath,
-                        showMenu: true,
+                        fileName: name,
                         success: () => resolve(),
-                        fail: () => reject(new Error('打开文件失败')),
+                        fail: (err: any) => {
+                            if (err?.errMsg?.indexOf('cancel') > -1) {
+                                resolve()
+                            } else {
+                                reject(new Error('分享失败'))
+                            }
+                        },
                     })
                 },
                 fail: () => reject(new Error('下载文件失败')),
@@ -152,7 +187,8 @@ export function useDataManage() {
                     const fs = wx.getFileSystemManager()
                     const path = `${wx.env.USER_DATA_PATH}/确认单_${group.supplier}_${getDateStr()}.csv`
                     fs.writeFileSync(path, lines.join('\n'), 'utf8')
-                    wx.openDocument({ filePath: path, showMenu: true })
+                    const shareRes = await shareLocalFile(path, `确认单_${group.supplier}_${getDateStr()}.csv`)
+                    uni.showToast({ title: shareRes.success ? '分享成功' : (shareRes.cancelled ? '已取消' : '分享失败'), icon: shareRes.success ? 'success' : 'none' })
                 }
             } else {
                 const lines = ['供应商,姓名,餐品,金额,备注']
@@ -167,7 +203,8 @@ export function useDataManage() {
                 const fs = wx.getFileSystemManager()
                 const path = `${wx.env.USER_DATA_PATH}/确认单_全部_${getDateStr()}.csv`
                 fs.writeFileSync(path, lines.join('\n'), 'utf8')
-                wx.openDocument({ filePath: path, showMenu: true })
+                const shareRes = await shareLocalFile(path, `确认单_全部_${getDateStr()}.csv`)
+                uni.showToast({ title: shareRes.success ? '分享成功' : (shareRes.cancelled ? '已取消' : '分享失败'), icon: shareRes.success ? 'success' : 'none' })
             }
             showDownloadDialog.value = false
         } catch (e: any) {
@@ -251,13 +288,18 @@ export function useDataManage() {
             const allOrders = [...pendingOrders.value, ...confirmedOrders.value]
             const lines = ['日期,菜品,姓名,金额,备注,状态,供应商']
             allOrders.forEach(o => {
-                const statusText = o.status === 'pending' ? '待确认' : o.status === 'confirmed' ? '已确认' : '已取消'
-                lines.push(`${o.date},${o.menuName},${o.memberName},${o.price},${o.note || ''},${statusText},${o.supplier || ''}`)
+                lines.push(`${o.date},${o.menuName},${o.memberName},${o.price},${o.note || ''},${o.status || 'pending'},${o.supplier || ''}`)
             })
             const fs = wx.getFileSystemManager()
-            const path = `${wx.env.USER_DATA_PATH}/export_orders_${getDateStr()}.csv`
+            const fileName = `export_orders_${getDateStr()}.csv`
+            const path = `${wx.env.USER_DATA_PATH}/${fileName}`
             fs.writeFileSync(path, lines.join('\n'), 'utf8')
-            wx.openDocument({ filePath: path, showMenu: true })
+            const shareRes = await shareLocalFile(path, fileName)
+            if (shareRes.success) {
+                uni.showToast({ title: allOrders.length === 0 ? '模板已分享' : '分享成功', icon: 'success' })
+            } else if (!shareRes.cancelled) {
+                uni.showToast({ title: '分享失败', icon: 'none' })
+            }
         } catch (e: any) {
             uni.showToast({ title: e.message || '导出失败', icon: 'none' })
         }

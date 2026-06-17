@@ -22,7 +22,10 @@ declare const wx: {
     writeFileSync(filePath: string, data: string, encoding: string): void
     readFileSync(filePath: string, encoding: string): string
     unlinkSync(filePath: string): void
+    accessSync(filePath: string): void
+    saveFileSync(tempFilePath: string, filePath: string): string
   }
+  shareFileMessage(options: { filePath: string; fileName: string; success?: () => void; fail?: (err: any) => void }): void
   openDocument(options: { filePath: string; showMenu?: boolean; success?: () => void; fail?: (err: any) => void }): void
   chooseMessageFile(options: { count: number; type?: 'all' | 'video' | 'image' | 'file'; extension?: string[]; success: (res: any) => void; fail?: (err: any) => void }): void
   showToast(options: { title: string; icon?: string; duration?: number }): void
