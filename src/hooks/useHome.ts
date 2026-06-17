@@ -81,6 +81,7 @@ export function useHome() {
                 setCache(CACHE_KEYS.MENU, menu)
                 setCache(CACHE_KEYS.MEMBERS, members)
                 setCache(CACHE_KEYS.RECENT_TIMESTAMP, recentTimestamp)
+                setCache(CACHE_KEYS.MONTH_SUMMARY, monthSummary)
                 setRecentLoadTime(Date.now())
             }
         } catch (e) {
@@ -130,9 +131,23 @@ export function useHome() {
                     setCache(CACHE_KEYS.RECENT_TIMESTAMP, newTimestamp)
                 }
                 setRecentLoadTime(Date.now())
+                await refreshMonthSummary()
             }
         } catch (e) {
             console.error('fetchRecentOrders error:', e)
+        }
+    }
+
+    async function refreshMonthSummary() {
+        try {
+            const res = await orderAction('getMonthSummary')
+            if (res.result.code === 0) {
+                const monthSummary = res.result.data
+                setStore({ monthSummary })
+                setCache(CACHE_KEYS.MONTH_SUMMARY, monthSummary)
+            }
+        } catch (e) {
+            console.error('refreshMonthSummary error:', e)
         }
     }
 

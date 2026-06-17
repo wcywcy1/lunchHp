@@ -5,6 +5,7 @@ export const CACHE_KEYS: Record<string, string> = {
     MENU: 'lunch_cache_menu',
     RECENT_ORDERS: 'lunch_cache_recent_orders',
     RECENT_TIMESTAMP: 'lunch_cache_recent_timestamp',
+    MONTH_SUMMARY: 'lunch_cache_month_summary',
     MONTHLY_STATS: 'lunch_cache_monthly_stats',
     MONTHLY_STATS_TIME: 'lunch_cache_monthly_stats_time',
     SESSION: 'lunch_session',
@@ -15,7 +16,8 @@ export const CACHE_TTL: Record<string, number> = {
     MENU: 30 * MINUTE,
     RECENT_ORDERS: 5 * MINUTE,
     RECENT_TIMESTAMP: 0,
-    MONTHLY_STATS: Infinity,
+    MONTH_SUMMARY: 5 * MINUTE,
+    MONTHLY_STATS: 30 * MINUTE,
     MONTHLY_STATS_TIME: 0,
     SESSION: Infinity,
 }

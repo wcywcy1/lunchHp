@@ -51,6 +51,7 @@ exports.main = async (event, context) => {
         getInitData,
         getRecentOrders,
         getRecentTimestamp,
+        getMonthSummary,
         submitOrder,
         batchConfirm,
         cancelOrder,
@@ -162,6 +163,31 @@ async function getRecentTimestamp(event, openid) {
 
     const recentTimestamp = data.length > 0 ? data[0].createdAt : null
     return { code: 0, data: { recentTimestamp } }
+}
+
+async function getMonthSummary(event, openid) {
+    const today = getToday()
+    const yearMonth = today.substring(0, 7)
+
+    const { list } = await db.collection(COL.ORDERS)
+        .aggregate()
+        .match({
+            groupId: GROUP_ID,
+            date: db.RegExp({ regexp: `^${yearMonth}` }),
+            status: _.neq(STATUS.CANCELLED),
+        })
+        .group({
+            _id: null,
+            totalAmount: $.sum('$price'),
+            count: $.sum(1),
+        })
+        .end()
+
+    const monthSummary = list.length > 0
+        ? { totalAmount: list[0].totalAmount, count: list[0].count, yearMonth }
+        : { totalAmount: 0, count: 0, yearMonth }
+
+    return { code: 0, data: monthSummary }
 }
 
 async function submitOrder(event, openid) {
@@ -294,13 +320,45 @@ async function getMonthlyStats(event, openid) {
     const where = { groupId: GROUP_ID }
     if (year) where.year = Number(year)
 
-    const { data } = await db.collection(COL.MONTHLY_STATS)
+    let { data } = await db.collection(COL.MONTHLY_STATS)
         .where(where)
         .orderBy('year', 'asc')
         .orderBy('month', 'asc')
         .get()
 
-    return { code: 0, data }
+    if (data.length === 0) {
+        await doRebuildMonthStats(null)
+        const result = await db.collection(COL.MONTHLY_STATS)
+            .where(where)
+            .orderBy('year', 'asc')
+            .orderBy('month', 'asc')
+            .get()
+        data = result.data
+    }
+
+    const result = data.map(doc => ({
+        _id: doc._id,
+        year: doc.year,
+        month: doc.month,
+        totalAmount: doc.totalAmount || 0,
+        orderCount: doc.orderCount || doc.count || 0,
+        orderByMember: doc.orderByMemberMap || arrayToRecord(doc.orderByMember, 'memberName'),
+        orderBySupplier: doc.orderBySupplierMap || arrayToRecord(doc.orderBySupplier, 'supplier'),
+    }))
+
+    return { code: 0, data: result }
+}
+
+function arrayToRecord(arr, keyField) {
+    if (!arr || !Array.isArray(arr)) return arr || {}
+    if (arr.length === 0) return {}
+    if (typeof arr[0] !== 'object') return arr
+    const record = {}
+    for (const item of arr) {
+        const key = item[keyField] || '未定义'
+        record[key] = item.amount || 0
+    }
+    return record
 }
 
 async function rebuildMonthStats(event, openid) {
@@ -348,14 +406,25 @@ async function doRebuildMonthStats(targetYearMonth) {
         const orderByMember = Object.values(m.byMember)
         const orderBySupplier = Object.values(m.bySupplier)
 
+        const orderByMemberMap = {}
+        for (const item of orderByMember) {
+            orderByMemberMap[item.memberName || '未定义'] = Math.round(item.amount * 100) / 100
+        }
+        const orderBySupplierMap = {}
+        for (const item of orderBySupplier) {
+            orderBySupplierMap[item.supplier || '未定义'] = Math.round(item.amount * 100) / 100
+        }
+
         const doc = {
             groupId: GROUP_ID,
             year: m.year,
             month: m.month,
             totalAmount: Math.round(m.totalAmount * 100) / 100,
-            count: m.count,
+            orderCount: m.count,
             orderByMember,
             orderBySupplier,
+            orderByMemberMap,
+            orderBySupplierMap,
             updatedAt: db.serverDate(),
         }
 

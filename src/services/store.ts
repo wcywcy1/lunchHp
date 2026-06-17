@@ -95,12 +95,14 @@ export function restoreFromCache() {
     const menu = getCache(CACHE_KEYS.MENU, true)
     const members = getCache(CACHE_KEYS.MEMBERS, true)
     const recentTimestamp = getCache(CACHE_KEYS.RECENT_TIMESTAMP, true)
+    const monthSummary = getCache(CACHE_KEYS.MONTH_SUMMARY, true)
 
     setStore({
         recentOrders: recentOrders || [],
         menu: menu || [],
         members: members || [],
         recentTimestamp: recentTimestamp || null,
+        monthSummary: monthSummary || null,
         initialized: true,
     })
 }
