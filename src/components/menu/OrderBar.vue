@@ -95,10 +95,14 @@ function onNameInput(e: any) {
 
 <style scoped>
 .order-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(100rpx + env(safe-area-inset-bottom));
   background: #fff;
   border-top: 1rpx solid #eee;
-  padding: 16rpx 24rpx;
-  padding-bottom: calc(16rpx + env(safe-area-inset-bottom));
+  padding: 16rpx 24rpx 16rpx;
+  z-index: 100;
 }
 .selected-info {
   display: flex;
@@ -158,7 +162,7 @@ function onNameInput(e: any) {
   right: 0;
   bottom: 0;
   background: rgba(0, 0, 0, 0.4);
-  z-index: 100;
+  z-index: 150;
   display: flex;
   align-items: flex-end;
 }
@@ -167,7 +171,7 @@ function onNameInput(e: any) {
   background: #fff;
   border-radius: 24rpx 24rpx 0 0;
   max-height: 60vh;
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-bottom: calc(240rpx + env(safe-area-inset-bottom));
 }
 .picker-title {
   display: block;

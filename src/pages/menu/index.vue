@@ -157,6 +157,7 @@ onMounted(() => {
 .menu-scroll {
   flex: 1;
   overflow: hidden;
+  padding-bottom: 340rpx;
 }
 .modal-mask {
   position: fixed;
