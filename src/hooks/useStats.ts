@@ -135,7 +135,8 @@ export function useStats(): StatsReturn {
         filteredStats.value.forEach(s => {
             if (!s.orderBySupplier) return
             Object.entries(s.orderBySupplier).forEach(([name, amount]) => {
-                supplierMap[name] = (supplierMap[name] || 0) + amount
+                const key = name || '未定义'
+                supplierMap[key] = (supplierMap[key] || 0) + amount
             })
         })
         const total = Object.values(supplierMap).reduce((a, b) => a + b, 0)

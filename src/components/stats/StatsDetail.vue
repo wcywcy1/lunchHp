@@ -21,7 +21,7 @@
         <text class="col-name">{{ order.memberName }}</text>
         <text class="col-menu">{{ order.menuName }}</text>
         <text class="col-price">¥{{ order.price }}</text>
-        <text class="col-supplier">{{ order.supplier }}</text>
+        <text class="col-supplier">{{ order.supplier || '未定义' }}</text>
       </view>
     </view>
     <view v-if="loading" class="loading-tip">

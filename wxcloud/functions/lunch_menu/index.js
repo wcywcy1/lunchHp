@@ -22,6 +22,19 @@ function checkRole(member, ...allowed) {
     return allowed.includes(member.role)
 }
 
+async function fetchAll(collection, where) {
+    const all = []
+    const limit = 1000
+    let skip = 0
+    while (true) {
+        const { data } = await collection.where(where).skip(skip).limit(limit).get()
+        all.push(...data)
+        if (data.length < limit) break
+        skip += limit
+    }
+    return all
+}
+
 exports.main = async (event, context) => {
     const { OPENID } = cloud.getWXContext()
     const { action } = event
@@ -177,9 +190,16 @@ async function importMembers(event, openid) {
     const caller = await getMemberByOpenid(openid)
     if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
 
-    const { members } = event
+    const { members, mode } = event
     if (!Array.isArray(members) || members.length === 0) return { code: 400, msg: 'missing members' }
     if (members.length > 100) return { code: 400, msg: 'max 100 per batch' }
+
+    if (mode === 'rewrite') {
+        const all = await fetchAll(db.collection(COL.MEMBERS), { groupId: GROUP_ID })
+        for (const doc of all) {
+            await db.collection(COL.MEMBERS).doc(doc._id).remove()
+        }
+    }
 
     const now = db.serverDate()
     const batch = members.filter(m => m.name && m.name.trim()).map(m => ({
@@ -296,9 +316,16 @@ async function importMenuItems(event, openid) {
     const caller = await getMemberByOpenid(openid)
     if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
 
-    const { items } = event
+    const { items, mode } = event
     if (!Array.isArray(items) || items.length === 0) return { code: 400, msg: 'missing items' }
     if (items.length > 100) return { code: 400, msg: 'max 100 per batch' }
+
+    if (mode === 'rewrite') {
+        const all = await fetchAll(db.collection(COL.MENU), { groupId: GROUP_ID })
+        for (const doc of all) {
+            await db.collection(COL.MENU).doc(doc._id).remove()
+        }
+    }
 
     const { data: existing } = await db.collection(COL.MENU)
         .where({ groupId: GROUP_ID })

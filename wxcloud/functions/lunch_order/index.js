@@ -455,39 +455,103 @@ async function importOrders(event, openid) {
     const caller = await getMemberByOpenid(openid)
     if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
 
-    const { orders } = event
+    const { orders, mode } = event
     if (!Array.isArray(orders) || orders.length === 0) return { code: 400, msg: 'missing orders' }
     if (orders.length > 100) return { code: 400, msg: 'max 100 per batch' }
 
+    if (mode === 'rewrite') {
+        const all = await fetchAll(db.collection(COL.ORDERS), { groupId: GROUP_ID })
+        for (const doc of all) {
+            await db.collection(COL.ORDERS).doc(doc._id).remove()
+        }
+    }
+
+    const allMembers = await fetchAll(db.collection(COL.MEMBERS), { groupId: GROUP_ID })
+    const memberMap = {}
+    allMembers.forEach(m => { memberMap[m.name] = m })
+
+    const allMenu = await fetchAll(db.collection(COL.MENU), { groupId: GROUP_ID })
+    const menuMap = {}
+    allMenu.forEach(it => {
+        const key = (it.supplier || '') + '|' + it.name
+        menuMap[key] = it
+        if (!menuMap[it.name]) menuMap[it.name] = it
+    })
+
+    let lastDaySet = null
+    if (mode === 'append') {
+        const allOrders = await fetchAll(db.collection(COL.ORDERS), { groupId: GROUP_ID })
+        if (allOrders.length > 0) {
+            const lastDate = allOrders.reduce((max, o) => o.date > max ? o.date : max, '')
+            lastDaySet = new Set(
+                allOrders.filter(o => o.date === lastDate)
+                    .map(o => `${o.memberId}|${o.menuId}`)
+            )
+        }
+    }
+
     const now = db.serverDate()
+    const toInsert = []
     const results = []
 
     for (const o of orders) {
-        if (!o.date || !o.memberId || !o.menuId) {
+        if (!o.date || !o.memberName || !o.menuName) {
             results.push({ error: 'missing required fields', order: o })
             continue
         }
-        const order = {
+
+        const member = memberMap[o.memberName]
+        const menuKey = (o.supplier || '') + '|' + o.menuName
+        const menuItem = menuMap[menuKey] || menuMap[o.menuName]
+
+        if (!member) {
+            results.push({ error: `成员"${o.memberName}"不存在`, order: o })
+            continue
+        }
+        if (!menuItem) {
+            results.push({ error: `菜品"${o.menuName}"不存在`, order: o })
+            continue
+        }
+
+        if (lastDaySet && lastDaySet.has(`${member._id}|${menuItem._id}`)) {
+            results.push({ skipped: true, date: o.date, menuName: o.menuName, reason: 'duplicate on last day' })
+            continue
+        }
+
+        toInsert.push({
             groupId: GROUP_ID,
             date: o.date,
-            memberId: o.memberId,
-            memberName: o.memberName || '',
-            menuId: o.menuId,
-            menuName: o.menuName || '',
+            memberId: member._id,
+            memberName: member.name,
+            menuId: menuItem._id,
+            menuName: menuItem.name,
             supplier: o.supplier || '',
             price: Number(o.price) || 0,
             note: o.note || '',
-            status: o.status || STATUS.PENDING,
+            status: o.status || STATUS.CONFIRMED,
             createdBy: openid,
             createdAt: now,
             updatedAt: now,
+        })
+    }
+
+    if (toInsert.length > 0) {
+        const BATCH_SIZE = 20
+        for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
+            const chunk = toInsert.slice(i, i + BATCH_SIZE)
+            const addResults = await db.collection(COL.ORDERS).add({ data: chunk })
+            if (Array.isArray(addResults.data)) {
+                addResults.data.forEach((r, idx) => {
+                    results.push({ _id: r._id, date: chunk[idx].date, menuName: chunk[idx].menuName })
+                })
+            }
         }
-        const { _id } = await db.collection(COL.ORDERS).add({ data: order })
-        results.push({ _id, date: o.date, menuName: o.menuName })
     }
 
     const successCount = results.filter(r => r._id).length
-    return { code: 0, data: { results, count: successCount } }
+    const errorCount = results.filter(r => r.error).length
+    const skippedCount = results.filter(r => r.skipped).length
+    return { code: 0, data: { results, count: successCount, errors: errorCount, skipped: skippedCount } }
 }
 
 async function downloadConfirmed(event, openid) {

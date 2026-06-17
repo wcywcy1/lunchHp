@@ -4,8 +4,8 @@
     <view v-if="groups.length === 0" class="empty-tip">
       <text>暂无已确认订单</text>
     </view>
-    <view v-for="group in groups" :key="group.supplier" class="supplier-group">
-      <text class="supplier-title">{{ group.supplier }}</text>
+    <view v-for="group in groups" :key="group.supplier || '__undefined__'" class="supplier-group">
+      <text class="supplier-title">{{ group.supplier || '未定义' }}</text>
       <view v-for="order in group.orders" :key="order._id" class="order-item">
         <text class="order-name">{{ order.memberName }}</text>
         <text class="order-menu">{{ order.menuName }}</text>

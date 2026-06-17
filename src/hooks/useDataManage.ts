@@ -348,6 +348,51 @@ export function useDataManage() {
         return splitCsvLines(text).map(l => parseCsvLine(l))
     }
 
+    function parseDate(val: string | number | undefined): string {
+        if (!val) return ''
+        if (typeof val === 'number') {
+            const epoch = new Date(Date.UTC(1899, 11, 30))
+            const d = new Date(epoch.getTime() + val * 86400000)
+            return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+        }
+        const str = String(val).trim()
+        let m = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/)
+        if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`
+        m = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/)
+        if (m) return `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`
+        return ''
+    }
+
+    const HEADER_ALIASES: Record<string, string[]> = {
+        date: ['日期', 'date'],
+        menuName: ['菜品', '菜品名', 'order', 'description'],
+        memberName: ['姓名', 'name', 'name list', '名单'],
+        price: ['金额', '价格', 'price', 'rmb'],
+        note: ['备注', 'note', 'comment', 'column1'],
+        supplier: ['供应商', 'vendor'],
+        status: ['状态', 'status'],
+        supplier_menu: ['供应商', 'vendor'],
+        menuName_menu: ['菜品名', '菜品', 'order', 'description'],
+        price_menu: ['价格', '金额', 'price', 'rmb'],
+        visible: ['可见', 'visible'],
+        name_member: ['姓名', 'name', 'name list', '名单'],
+        nickName: ['昵称', 'nickname', 'nick name'],
+        role: ['角色', 'role'],
+        isVirtual: ['虚拟用户', 'virtual'],
+    }
+
+    function mapHeader(header: string[], fields: string[]): Record<string, number> {
+        const result: Record<string, number> = {}
+        const lowerHeader = header.map(h => h.trim().toLowerCase())
+        for (const field of fields) {
+            const aliases = HEADER_ALIASES[field] || [field]
+            const lowerAliases = aliases.map(a => a.toLowerCase())
+            const idx = lowerHeader.findIndex(h => lowerAliases.some(a => h === a || h.includes(a)))
+            if (idx >= 0) result[field] = idx
+        }
+        return result
+    }
+
     async function exportData(type: 'orders' | 'menu' | 'members') {
         exporting.value = true
         try {
@@ -377,9 +422,10 @@ export function useDataManage() {
     async function localExportOrders() {
         try {
             const allOrders = [...pendingOrders.value, ...confirmedOrders.value]
+            const statusMap: Record<string, string> = { pending: '待确认', confirmed: '已确认', cancelled: '已取消' }
             const lines = ['日期,菜品,姓名,金额,备注,状态,供应商']
             allOrders.forEach(o => {
-                lines.push(`${o.date},${o.menuName},${o.memberName},${o.price},${o.note || ''},${o.status || 'pending'},${o.supplier || ''}`)
+                lines.push(`${o.date},${o.menuName},${o.memberName},${o.price},${o.note || ''},${statusMap[o.status] || o.status},${o.supplier || ''}`)
             })
             const fs = wx.getFileSystemManager()
             const fileName = `export_orders_${getDateStr()}.csv`
@@ -491,24 +537,60 @@ export function useDataManage() {
             return
         }
         const header = rows[0]
-        if (!header.includes('日期') || !header.includes('菜品')) {
-            uni.showToast({ title: '格式不正确', icon: 'none' })
+        const idx = mapHeader(header, ['date', 'menuName', 'memberName', 'price', 'note', 'status', 'supplier'])
+        if (idx.date === undefined || idx.menuName === undefined || idx.memberName === undefined || idx.price === undefined) {
+            uni.showToast({ title: '格式不正确，需包含日期/菜品/姓名/金额', icon: 'none' })
             return
         }
-        const records = rows.slice(1).map(cols => ({
-            date: cols[0] || '',
-            menuName: cols[1] || '',
-            memberName: cols[2] || '',
-            price: Number(cols[3]) || 0,
-            note: cols[4] || '',
-            status: cols[5] || 'pending',
-            supplier: cols[6] || '',
-        }))
-        const res = await orderAction('importOrders', { orders: records })
-        if (res.result.code === 0) {
-            uni.showToast({ title: `导入${res.result.data.count}条`, icon: 'success' })
-            await loadData()
+        const records = rows.slice(1)
+            .filter(cols => cols[idx.date!] && cols[idx.menuName!] && cols[idx.memberName!])
+            .map(cols => {
+                let statusVal = idx.status !== undefined && cols[idx.status] ? cols[idx.status] : 'confirmed'
+                const statusMap: Record<string, string> = { '待确认': 'pending', '已确认': 'confirmed', '已取消': 'cancelled' }
+                statusVal = statusMap[statusVal] || statusVal
+                return {
+                    date: parseDate(cols[idx.date!]),
+                    menuName: cols[idx.menuName!] || '',
+                    memberName: cols[idx.memberName!] || '',
+                    price: Number(cols[idx.price!]) || 0,
+                    note: idx.note !== undefined ? (cols[idx.note] || '') : '',
+                    status: statusVal,
+                    supplier: idx.supplier !== undefined ? (cols[idx.supplier] || '') : '',
+                }
+            })
+            .filter(r => r.date)
+        if (records.length === 0) {
+            uni.showToast({ title: '无有效数据', icon: 'none' })
+            return
         }
+        const mode = await new Promise<'append' | 'rewrite' | ''>(resolve => {
+            uni.showModal({
+                title: '导入方式',
+                content: '追加数据：仅导入新数据，重复跳过\n清库重写：清空所有订单后导入',
+                confirmText: '追加',
+                cancelText: '清库重写',
+                success: res => resolve(res.confirm ? 'append' : 'rewrite'),
+            })
+        })
+        if (!mode) return
+        const BATCH = 100
+        let totalInserted = 0
+        let totalErrors = 0
+        let totalSkipped = 0
+        for (let i = 0; i < records.length; i += BATCH) {
+            const chunk = records.slice(i, i + BATCH)
+            const res = await orderAction('importOrders', { orders: chunk, mode })
+            if (res.result.code === 0) {
+                totalInserted += res.result.data.count
+                totalErrors += res.result.data.errors || 0
+                totalSkipped += res.result.data.skipped || 0
+            }
+        }
+        const parts = [`导入${totalInserted}条`]
+        if (totalSkipped > 0) parts.push(`跳过${totalSkipped}条`)
+        if (totalErrors > 0) parts.push(`${totalErrors}条失败`)
+        uni.showToast({ title: parts.join('，'), icon: totalInserted > 0 ? 'success' : 'none' })
+        await loadData()
     }
 
     async function doImportMenu(filePath: string, ext: string) {
@@ -526,17 +608,18 @@ export function useDataManage() {
             return
         }
         const header = rows[0]
-        if (!header.includes('供应商') || !header.includes('菜品名')) {
-            uni.showToast({ title: '格式不正确', icon: 'none' })
+        const idx = mapHeader(header, ['supplier_menu', 'menuName_menu', 'price_menu', 'visible'])
+        if (idx.supplier_menu === undefined || idx.menuName_menu === undefined) {
+            uni.showToast({ title: '格式不正确，需包含供应商/菜品名', icon: 'none' })
             return
         }
         const items = rows.slice(1)
-            .filter(cols => cols[0] && cols[1])
+            .filter(cols => cols[idx.supplier_menu!] && cols[idx.menuName_menu!])
             .map(cols => ({
-                supplier: cols[0] || '',
-                name: cols[1] || '',
-                price: Number(cols[2]) || 0,
-                visible: cols[3] !== '否',
+                supplier: cols[idx.supplier_menu!] || '',
+                name: cols[idx.menuName_menu!] || '',
+                price: idx.price_menu !== undefined ? (Number(cols[idx.price_menu]) || 0) : 0,
+                visible: idx.visible !== undefined ? cols[idx.visible] !== '否' : true,
             }))
         if (items.length === 0) {
             uni.showToast({ title: '无有效数据', icon: 'none' })
@@ -546,7 +629,7 @@ export function useDataManage() {
         let totalInserted = 0
         for (let i = 0; i < items.length; i += BATCH) {
             const chunk = items.slice(i, i + BATCH)
-            const res = await menuAction('importMenuItems', { items: chunk })
+            const res = await menuAction('importMenuItems', { items: chunk, mode: 'rewrite' })
             if (res.result.code === 0) totalInserted += res.result.data.count
         }
         uni.showToast({ title: `导入${totalInserted}条`, icon: 'success' })
@@ -568,17 +651,18 @@ export function useDataManage() {
             return
         }
         const header = rows[0]
-        if (!header.includes('姓名')) {
-            uni.showToast({ title: '格式不正确', icon: 'none' })
+        const idx = mapHeader(header, ['name_member', 'nickName', 'role', 'isVirtual'])
+        if (idx.name_member === undefined) {
+            uni.showToast({ title: '格式不正确，需包含姓名', icon: 'none' })
             return
         }
         const members = rows.slice(1)
-            .filter(cols => cols[0]?.trim())
+            .filter(cols => cols[idx.name_member!]?.trim())
             .map(cols => ({
-                name: cols[0].trim(),
-                nickName: cols[1] || '',
-                role: cols[2] || 'member',
-                isVirtual: cols[3] !== '否',
+                name: cols[idx.name_member!].trim(),
+                nickName: idx.nickName !== undefined ? (cols[idx.nickName] || '') : '',
+                role: idx.role !== undefined ? (cols[idx.role] || 'member') : 'member',
+                isVirtual: idx.isVirtual !== undefined ? cols[idx.isVirtual] !== '否' : true,
             }))
         if (members.length === 0) {
             uni.showToast({ title: '无有效数据', icon: 'none' })
@@ -588,7 +672,7 @@ export function useDataManage() {
         let totalInserted = 0
         for (let i = 0; i < members.length; i += BATCH) {
             const chunk = members.slice(i, i + BATCH)
-            const res = await menuAction('importMembers', { members: chunk })
+            const res = await menuAction('importMembers', { members: chunk, mode: 'rewrite' })
             if (res.result.code === 0) totalInserted += res.result.data.count
         }
         uni.showToast({ title: `导入${totalInserted}条`, icon: 'success' })
