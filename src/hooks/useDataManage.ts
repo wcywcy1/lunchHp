@@ -491,6 +491,58 @@ export function useDataManage() {
         return parseRes.result.data.rows
     }
 
+    async function doImportXlsx(filePath: string, importType: 'orders' | 'menu' | 'members') {
+        const mode = await new Promise<'append' | 'rewrite' | ''>(resolve => {
+            const typeLabel = importType === 'orders' ? '订单' : importType === 'menu' ? '菜单' : '人员'
+            uni.showModal({
+                title: '导入方式',
+                content: `追加数据：仅导入新${typeLabel}，重复跳过\n清库重写：清空所有${typeLabel}后导入`,
+                confirmText: '追加',
+                cancelText: '清库重写',
+                success: res => resolve(res.confirm ? 'append' : 'rewrite'),
+            })
+        })
+        if (!mode) return
+
+        uni.showLoading({ title: '上传文件...' })
+        try {
+            const cloudPath = `xlsx_import/${Date.now()}_${Math.random().toString(36).substr(2, 6)}.xlsx`
+            const uploadRes = await wx.cloud.uploadFile({ cloudPath, filePath })
+            uni.showLoading({ title: '导入中...' })
+            const res = await orderAction('importFromXlsx', { fileID: uploadRes.fileID, mode, importType })
+            if (res.result.code === 0) {
+                const data = res.result.data
+                const parts = [`导入${data.count}条`]
+                if (data.skipped > 0) parts.push(`跳过${data.skipped}条`)
+                if (data.errors > 0) parts.push(`${data.errors}条失败`)
+                uni.showToast({ title: parts.join('，'), icon: data.count > 0 ? 'success' : 'none' })
+                if (importType === 'orders') {
+                    await loadData()
+                } else if (importType === 'menu') {
+                    try {
+                        const menuRes = await menuAction('getMenuList')
+                        if (menuRes.result.code === 0) {
+                            store.menu = menuRes.result.data || []
+                            setCache(CACHE_KEYS.MENU, store.menu)
+                        }
+                    } catch {}
+                } else {
+                    try {
+                        const memberRes = await menuAction('getMembers')
+                        if (memberRes.result.code === 0) {
+                            store.members = memberRes.result.data || []
+                            setCache(CACHE_KEYS.MEMBERS, store.members)
+                        }
+                    } catch {}
+                }
+            } else {
+                throw new Error(res.result.msg || '导入失败')
+            }
+        } finally {
+            uni.hideLoading()
+        }
+    }
+
     function parseDate(val: string | number | undefined): string {
         if (!val) return ''
         if (typeof val === 'number') {
@@ -666,15 +718,14 @@ export function useDataManage() {
     }
 
     async function doImportOrders(filePath: string, ext: string) {
-        const fs = wx.getFileSystemManager()
-        let rows: string[][]
-        if (ext === 'csv') {
-            let content = fs.readFileSync(filePath, 'utf8') as string
-            if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1)
-            rows = splitCsvLines(content).map(l => parseCsvLine(l))
-        } else {
-            rows = await parseXlsxViaCloud(filePath)
+        if (ext === 'xlsx') {
+            await doImportXlsx(filePath, 'orders')
+            return
         }
+        const fs = wx.getFileSystemManager()
+        let content = fs.readFileSync(filePath, 'utf8') as string
+        if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1)
+        const rows = splitCsvLines(content).map(l => parseCsvLine(l))
         if (rows.length < 2) {
             uni.showToast({ title: '文件为空', icon: 'none' })
             return
@@ -738,15 +789,14 @@ export function useDataManage() {
     }
 
     async function doImportMenu(filePath: string, ext: string) {
-        const fs = wx.getFileSystemManager()
-        let rows: string[][]
-        if (ext === 'csv') {
-            let content = fs.readFileSync(filePath, 'utf8') as string
-            if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1)
-            rows = splitCsvLines(content).map(l => parseCsvLine(l))
-        } else {
-            rows = await parseXlsxViaCloud(filePath)
+        if (ext === 'xlsx') {
+            await doImportXlsx(filePath, 'menu')
+            return
         }
+        const fs = wx.getFileSystemManager()
+        let content = fs.readFileSync(filePath, 'utf8') as string
+        if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1)
+        const rows = splitCsvLines(content).map(l => parseCsvLine(l))
         if (rows.length < 2) {
             uni.showToast({ title: '文件为空', icon: 'none' })
             return
@@ -798,15 +848,14 @@ export function useDataManage() {
     }
 
     async function doImportMembers(filePath: string, ext: string) {
-        const fs = wx.getFileSystemManager()
-        let rows: string[][]
-        if (ext === 'csv') {
-            let content = fs.readFileSync(filePath, 'utf8') as string
-            if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1)
-            rows = splitCsvLines(content).map(l => parseCsvLine(l))
-        } else {
-            rows = await parseXlsxViaCloud(filePath)
+        if (ext === 'xlsx') {
+            await doImportXlsx(filePath, 'members')
+            return
         }
+        const fs = wx.getFileSystemManager()
+        let content = fs.readFileSync(filePath, 'utf8') as string
+        if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1)
+        const rows = splitCsvLines(content).map(l => parseCsvLine(l))
         if (rows.length < 2) {
             uni.showToast({ title: '文件为空', icon: 'none' })
             return

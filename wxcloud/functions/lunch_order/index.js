@@ -3,6 +3,8 @@ cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 const _ = db.command
 const $ = db.command.aggregate
+let XLSX = null
+try { XLSX = require('xlsx') } catch (e) { }
 
 const GROUP_ID = 'lunch_hp'
 const COL = {
@@ -72,6 +74,7 @@ exports.main = async (event, context) => {
         downloadMonthlyData,
         getHistoryOrderCount,
         getHistoryOrders,
+        importFromXlsx,
     }
 
     const fn = handlers[action]
@@ -943,4 +946,303 @@ async function getHistoryOrders(event, openid) {
     ])
 
     return { code: 0, data: { list: data, total: countResult.total, page, pageSize } }
+}
+
+async function importFromXlsx(event, openid) {
+    if (!XLSX) return { code: 500, msg: 'xlsx库未安装' }
+
+    const caller = await getMemberByOpenid(openid)
+    if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
+
+    const { fileID, mode, importType } = event
+    if (!fileID) return { code: 400, msg: 'missing fileID' }
+    if (!importType) return { code: 400, msg: 'missing importType' }
+
+    const downloadRes = await cloud.downloadFile({ fileID })
+    const buffer = downloadRes.fileContent
+    const workbook = XLSX.read(buffer, { type: 'buffer' })
+    const sheetName = workbook.SheetNames[0]
+    const sheet = workbook.Sheets[sheetName]
+    const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' })
+
+    const rows = jsonData.map(row =>
+        row.map(cell => {
+            if (cell instanceof Date) {
+                const y = cell.getFullYear()
+                const m = String(cell.getMonth() + 1).padStart(2, '0')
+                const d = String(cell.getDate()).padStart(2, '0')
+                return `${y}-${m}-${d}`
+            }
+            return String(cell)
+        })
+    )
+
+    try { await cloud.deleteFile({ fileList: [fileID] }) } catch (e) { }
+
+    if (importType === 'orders') {
+        return await _importOrdersFromRows(rows, mode, openid)
+    } else if (importType === 'menu') {
+        return await _importMenuFromRows(rows, mode)
+    } else if (importType === 'members') {
+        return await _importMembersFromRows(rows, mode)
+    }
+    return { code: 400, msg: `unknown importType: ${importType}` }
+}
+
+function _parseDate(val) {
+    if (!val) return ''
+    if (typeof val === 'number') {
+        const epoch = new Date(Date.UTC(1899, 11, 30))
+        const d = new Date(epoch.getTime() + val * 86400000)
+        return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+    }
+    const str = String(val).trim()
+    let m = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/)
+    if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`
+    m = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/)
+    if (m) return `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`
+    return ''
+}
+
+const HEADER_ALIASES = {
+    date: ['日期', 'date'],
+    menuName: ['菜品', '菜品名', 'order', 'description'],
+    memberName: ['姓名', 'name', 'name list', '名单'],
+    price: ['金额', '价格', 'price', 'rmb'],
+    note: ['备注', 'note', 'comment', 'column1'],
+    status: ['状态', 'status'],
+    supplier: ['供应商', 'vendor'],
+    supplier_menu: ['供应商', 'vendor'],
+    menuName_menu: ['菜品名', '菜品', 'order', 'description'],
+    price_menu: ['价格', '金额', 'price', 'rmb'],
+    visible: ['可见', 'visible'],
+    name_member: ['姓名', 'name', 'name list', '名单'],
+    nickName: ['昵称', 'nickname', 'nick name'],
+    role: ['角色', 'role'],
+    isVirtual: ['虚拟用户', 'virtual'],
+}
+
+function _mapHeader(header, fields) {
+    const result = {}
+    const lowerHeader = header.map(h => h.trim().toLowerCase())
+    for (const field of fields) {
+        const aliases = HEADER_ALIASES[field] || [field]
+        const lowerAliases = aliases.map(a => a.toLowerCase())
+        const idx = lowerHeader.findIndex(h => lowerAliases.some(a => h === a || h.includes(a) || a.includes(h)))
+        if (idx >= 0) result[field] = idx
+    }
+    return result
+}
+
+async function _importOrdersFromRows(rows, mode, openid) {
+    if (rows.length < 2) return { code: 400, msg: '文件为空' }
+
+    const header = rows[0]
+    const idx = _mapHeader(header, ['date', 'menuName', 'memberName', 'price', 'note', 'status', 'supplier'])
+    if (idx.date === undefined || idx.menuName === undefined || idx.memberName === undefined || idx.price === undefined) {
+        return { code: 400, msg: '格式不正确，需包含日期/菜品/姓名/金额' }
+    }
+
+    const records = rows.slice(1)
+        .filter(cols => cols[idx.date] && cols[idx.menuName] && cols[idx.memberName])
+        .map(cols => {
+            let statusVal = idx.status !== undefined && cols[idx.status] ? cols[idx.status] : 'confirmed'
+            const statusMap = { '待确认': 'pending', '已确认': 'confirmed', '已取消': 'cancelled' }
+            statusVal = statusMap[statusVal] || statusVal
+            return {
+                date: _parseDate(cols[idx.date]),
+                menuName: cols[idx.menuName] || '',
+                memberName: cols[idx.memberName] || '',
+                price: Number(cols[idx.price]) || 0,
+                note: idx.note !== undefined ? (cols[idx.note] || '') : '',
+                status: statusVal,
+                supplier: idx.supplier !== undefined ? (cols[idx.supplier] || '') : '',
+            }
+        })
+        .filter(r => r.date)
+
+    if (records.length === 0) return { code: 400, msg: '无有效数据' }
+
+    if (mode === 'rewrite') {
+        await db.collection(COL.ORDERS).where({ groupId: GROUP_ID }).remove()
+    }
+
+    const allMembers = await fetchAll(db.collection(COL.MEMBERS), { groupId: GROUP_ID })
+    const memberMap = {}
+    allMembers.forEach(m => { memberMap[m.name] = m })
+
+    const allMenu = await fetchAll(db.collection(COL.MENU), { groupId: GROUP_ID })
+    const menuMap = {}
+    allMenu.forEach(it => {
+        const key = (it.supplier || '') + '|' + it.name
+        menuMap[key] = it
+        if (!menuMap[it.name]) menuMap[it.name] = it
+    })
+
+    let lastDaySet = null
+    if (mode === 'append') {
+        const allOrders = await fetchAll(db.collection(COL.ORDERS), { groupId: GROUP_ID })
+        if (allOrders.length > 0) {
+            const lastDate = allOrders.reduce((max, o) => o.date > max ? o.date : max, '')
+            lastDaySet = new Set(
+                allOrders.filter(o => o.date === lastDate)
+                    .map(o => `${o.memberId}|${o.menuId}`)
+            )
+        }
+    }
+
+    const now = db.serverDate()
+    const toInsert = []
+    let errorCount = 0
+    let skippedCount = 0
+
+    for (const o of records) {
+        const member = memberMap[o.memberName]
+        const menuKey = (o.supplier || '') + '|' + o.menuName
+        const menuItem = menuMap[menuKey] || menuMap[o.menuName]
+
+        if (!member || !menuItem) {
+            errorCount++
+            continue
+        }
+
+        if (lastDaySet && lastDaySet.has(`${member._id}|${menuItem._id}`)) {
+            skippedCount++
+            continue
+        }
+
+        toInsert.push({
+            groupId: GROUP_ID,
+            date: o.date,
+            memberId: member._id,
+            memberName: member.name,
+            menuId: menuItem._id,
+            menuName: menuItem.name,
+            supplier: o.supplier || '',
+            price: Number(o.price) || 0,
+            note: o.note || '',
+            status: o.status || STATUS.CONFIRMED,
+            createdBy: openid,
+            createdAt: now,
+            updatedAt: now,
+        })
+    }
+
+    if (toInsert.length > 0) {
+        const BATCH_SIZE = 100
+        for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
+            await db.collection(COL.ORDERS).add({ data: toInsert.slice(i, i + BATCH_SIZE) })
+        }
+        await _resetDataTimestamp()
+        await _updateOrdersTimestamp()
+    }
+
+    return { code: 0, data: { count: toInsert.length, errors: errorCount, skipped: skippedCount } }
+}
+
+async function _importMenuFromRows(rows, mode) {
+    if (rows.length < 2) return { code: 400, msg: '文件为空' }
+
+    const header = rows[0]
+    const idx = _mapHeader(header, ['supplier_menu', 'menuName_menu', 'price_menu', 'visible'])
+    if (idx.supplier_menu === undefined || idx.menuName_menu === undefined) {
+        return { code: 400, msg: '格式不正确，需包含供应商/菜品名' }
+    }
+
+    const items = rows.slice(1)
+        .filter(cols => cols[idx.supplier_menu] && cols[idx.menuName_menu])
+        .map(cols => ({
+            supplier: cols[idx.supplier_menu] || '',
+            name: cols[idx.menuName_menu] || '',
+            price: idx.price_menu !== undefined ? (Number(cols[idx.price_menu]) || 0) : 0,
+            visible: idx.visible !== undefined ? cols[idx.visible] !== '否' : true,
+        }))
+
+    if (items.length === 0) return { code: 400, msg: '无有效数据' }
+
+    if (mode === 'rewrite') {
+        await db.collection(COL.MENU).where({ groupId: GROUP_ID }).remove()
+    }
+
+    const { data: existing } = await db.collection(COL.MENU)
+        .where({ groupId: GROUP_ID })
+        .orderBy('sortNo', 'desc')
+        .limit(1)
+        .get()
+    let sortNo = existing.length > 0 ? existing[0].sortNo : 0
+
+    const now = db.serverDate()
+    const batch = items.filter(it => it.supplier && it.name).map(it => ({
+        groupId: GROUP_ID,
+        sortNo: sortNo += 10,
+        supplier: it.supplier,
+        name: it.name,
+        price: Number(it.price) || 0,
+        photo: '',
+        visible: it.visible !== false,
+        createdAt: now,
+    }))
+
+    if (batch.length === 0) return { code: 400, msg: 'no valid items' }
+
+    const BATCH_SIZE = 100
+    let inserted = 0
+    for (let i = 0; i < batch.length; i += BATCH_SIZE) {
+        const chunk = batch.slice(i, i + BATCH_SIZE)
+        await db.collection(COL.MENU).add({ data: chunk })
+        inserted += chunk.length
+    }
+
+    return { code: 0, data: { count: inserted } }
+}
+
+async function _importMembersFromRows(rows, mode) {
+    if (rows.length < 2) return { code: 400, msg: '文件为空' }
+
+    const header = rows[0]
+    const idx = _mapHeader(header, ['name_member', 'nickName', 'role', 'isVirtual'])
+    if (idx.name_member === undefined) {
+        return { code: 400, msg: '格式不正确，需包含姓名' }
+    }
+
+    const members = rows.slice(1)
+        .filter(cols => cols[idx.name_member]?.trim())
+        .map(cols => ({
+            name: cols[idx.name_member].trim(),
+            nickName: idx.nickName !== undefined ? (cols[idx.nickName] || '') : '',
+            role: idx.role !== undefined ? (cols[idx.role] || 'member') : 'member',
+            isVirtual: idx.isVirtual !== undefined ? cols[idx.isVirtual] !== '否' : true,
+        }))
+
+    if (members.length === 0) return { code: 400, msg: '无有效数据' }
+
+    if (mode === 'rewrite') {
+        const { OPENID } = cloud.getWXContext()
+        await db.collection(COL.MEMBERS).where({ groupId: GROUP_ID, openid: _.neq(OPENID) }).remove()
+    }
+
+    const now = db.serverDate()
+    const batch = members.filter(m => m.name && m.name.trim()).map(m => ({
+        groupId: GROUP_ID,
+        name: m.name.trim(),
+        nickName: m.nickName || '',
+        avatar: '',
+        openid: '',
+        role: m.role || ROLE.MEMBER,
+        isVirtual: m.isVirtual !== undefined ? m.isVirtual : true,
+        privacyAgreed: false,
+        joinedAt: now,
+    }))
+
+    if (batch.length === 0) return { code: 400, msg: 'no valid members' }
+
+    const BATCH_SIZE = 100
+    let inserted = 0
+    for (let i = 0; i < batch.length; i += BATCH_SIZE) {
+        const chunk = batch.slice(i, i + BATCH_SIZE)
+        await db.collection(COL.MEMBERS).add({ data: chunk })
+        inserted += chunk.length
+    }
+
+    return { code: 0, data: { count: inserted } }
 }
