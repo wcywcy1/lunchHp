@@ -1,6 +1,6 @@
 <template>
   <view v-if="show" class="modal-mask" @tap="$emit('close')">
-    <view class="edit-modal" @tap.stop>
+    <view class="edit-modal" :style="modalStyle" @tap.stop>
       <text class="modal-title">修改姓名</text>
       <view class="current-name">
         <text class="current-label">当前：</text>
@@ -13,6 +13,7 @@
           :value="newName"
           @input="onInput"
           placeholder="输入姓名"
+          @keyboardheightchange="onKeyboardHeightChange"
         />
       </view>
       <view class="modal-actions">
@@ -53,7 +54,9 @@
 </template>
 
 <script setup lang="ts">
-defineProps<{
+import { ref, computed, watch } from 'vue'
+
+const props = defineProps<{
   show: boolean
   currentName: string
   newName: string
@@ -72,6 +75,23 @@ const emit = defineEmits<{
   (e: 'confirm-link'): void
   (e: 'update:newName', val: string): void
 }>()
+
+const keyboardHeight = ref(0)
+
+watch(() => props.show, (val) => {
+  if (!val) keyboardHeight.value = 0
+})
+
+function onKeyboardHeightChange(e: any) {
+  keyboardHeight.value = e.detail.height || 0
+}
+
+const modalStyle = computed(() => {
+  if (keyboardHeight.value > 0) {
+    return { transform: `translateY(-${keyboardHeight.value / 2}px)` }
+  }
+  return {}
+})
 
 function onInput(e: any) {
   emit('update:newName', e.detail.value)

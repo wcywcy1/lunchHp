@@ -42,13 +42,14 @@
     </view>
 
     <view v-if="showWelcomeDialog" class="modal-mask" @tap.stop>
-      <view class="welcome-modal" @tap.stop>
+      <view class="welcome-modal" :style="welcomeModalStyle" @tap.stop>
         <text class="modal-title">欢迎加入！</text>
         <text class="welcome-tip">请输入你的姓名（选填）</text>
         <input
           class="welcome-input"
           v-model="editingName"
           placeholder="不填将使用微信昵称"
+          @keyboardheightchange="onWelcomeKeyboard"
         />
         <view class="modal-actions">
           <view class="modal-btn cancel" @tap="skipWelcome"><text>跳过</text></view>
@@ -62,6 +63,7 @@
 </template>
 
 <script setup lang="ts">
+import { ref, computed, watch } from 'vue'
 import { onShow, onPullDownRefresh } from '@dcloudio/uni-app'
 import HomeHeader from '../../components/home/HomeHeader.vue'
 import MonthlyStats from '../../components/home/MonthlyStats.vue'
@@ -96,6 +98,23 @@ const {
   linkVirtualMember,
   selectVirtual,
 } = useHome()
+
+const welcomeKeyboardHeight = ref(0)
+
+watch(() => showWelcomeDialog.value, (val) => {
+  if (!val) welcomeKeyboardHeight.value = 0
+})
+
+function onWelcomeKeyboard(e: any) {
+  welcomeKeyboardHeight.value = e.detail.height || 0
+}
+
+const welcomeModalStyle = computed(() => {
+  if (welcomeKeyboardHeight.value > 0) {
+    return { transform: `translateY(-${welcomeKeyboardHeight.value / 2}px)` }
+  }
+  return {}
+})
 
 onShow(() => {
   onHomeShow()

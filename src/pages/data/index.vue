@@ -60,7 +60,7 @@
     />
 
     <view v-if="showNameEditDialog" class="modal-mask" @tap="showNameEditDialog = false">
-      <view class="edit-modal" @tap.stop>
+      <view class="edit-modal" :style="nameEditModalStyle" @tap.stop>
         <text class="modal-title">修改姓名</text>
         <view class="current-name">
           <text class="current-label">当前：</text>
@@ -68,7 +68,7 @@
         </view>
         <view class="form-item">
           <text class="form-label">新姓名</text>
-          <input class="form-input" v-model="editingName" placeholder="输入姓名" />
+          <input class="form-input" v-model="editingName" placeholder="输入姓名" @keyboardheightchange="onNameEditKeyboard" />
         </view>
         <view v-if="editingMember?.isVirtual" class="merge-section" @tap="openMergeDialog(editingMember)">
           <text class="merge-btn">🔗 与微信账号合帐</text>
@@ -94,19 +94,19 @@
     </view>
 
     <view v-if="showMenuEditModal" class="modal-mask" @tap="showMenuEditModal = false">
-      <view class="edit-modal" @tap.stop>
+      <view class="edit-modal" :style="menuEditModalStyle" @tap.stop>
         <text class="modal-title">{{ isMenuEdit ? '编辑菜品' : '添加菜品' }}</text>
         <view class="form-item">
           <text class="form-label">供应商</text>
-          <input class="form-input" v-model="menuEditForm.supplier" placeholder="如：享德来" />
+          <input class="form-input" v-model="menuEditForm.supplier" placeholder="如：享德来" @keyboardheightchange="onMenuEditKeyboard" />
         </view>
         <view class="form-item">
           <text class="form-label">餐品名</text>
-          <input class="form-input" v-model="menuEditForm.name" placeholder="如：雞腿飯" />
+          <input class="form-input" v-model="menuEditForm.name" placeholder="如：雞腿飯" @keyboardheightchange="onMenuEditKeyboard" />
         </view>
         <view class="form-item">
           <text class="form-label">价格</text>
-          <input class="form-input" v-model="menuEditForm.price" type="digit" placeholder="如：27" />
+          <input class="form-input" v-model="menuEditForm.price" type="digit" placeholder="如：27" @keyboardheightchange="onMenuEditKeyboard" />
         </view>
         <view class="modal-actions">
           <view class="modal-btn cancel" @tap="showMenuEditModal = false"><text>取消</text></view>
@@ -214,7 +214,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { useStore } from '../../services/store'
 import { useAuth } from '../../hooks/useAuth'
@@ -290,6 +290,29 @@ const {
 } = useDataManage()
 
 const members = computed(() => store.members || [])
+
+const nameEditKeyboardHeight = ref(0)
+const menuEditKeyboardHeight = ref(0)
+
+function onNameEditKeyboard(e: any) {
+  nameEditKeyboardHeight.value = e.detail.height || 0
+}
+function onMenuEditKeyboard(e: any) {
+  menuEditKeyboardHeight.value = e.detail.height || 0
+}
+
+const nameEditModalStyle = computed(() => {
+  if (nameEditKeyboardHeight.value > 0) {
+    return { transform: `translateY(-${nameEditKeyboardHeight.value / 2}px)` }
+  }
+  return {}
+})
+const menuEditModalStyle = computed(() => {
+  if (menuEditKeyboardHeight.value > 0) {
+    return { transform: `translateY(-${menuEditKeyboardHeight.value / 2}px)` }
+  }
+  return {}
+})
 
 const autoBackups = computed(() => backupList.value.filter((b: any) => b.type === 'auto'))
 const manualBackups = computed(() => backupList.value.filter((b: any) => b.type === 'manual'))

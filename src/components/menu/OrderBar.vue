@@ -51,9 +51,9 @@
     </view>
 
     <view v-if="showAddMember" class="member-picker-mask" @tap="$emit('close-add')">
-      <view class="add-member-modal" @tap.stop>
+      <view class="add-member-modal" :style="addModalStyle" @tap.stop>
         <text class="modal-title">新增同事</text>
-        <input class="add-input" :value="newMemberName" @input="onNameInput" placeholder="输入姓名" />
+        <input class="add-input" :value="newMemberName" @input="onNameInput" placeholder="输入姓名" @keyboardheightchange="onKeyboardHeightChange" />
         <view class="modal-btns">
           <view class="modal-btn cancel" @tap="$emit('close-add')"><text>取消</text></view>
           <view class="modal-btn confirm" @tap="$emit('add-virtual')"><text>添加</text></view>
@@ -64,6 +64,8 @@
 </template>
 
 <script setup lang="ts">
+import { ref, computed, watch } from 'vue'
+
 const props = defineProps<{
   selectedMenuItem: any
   orderFor: string
@@ -87,6 +89,23 @@ const emit = defineEmits<{
   (e: 'add-virtual'): void
   (e: 'update:newMemberName', val: string): void
 }>()
+
+const keyboardHeight = ref(0)
+
+watch(() => props.showAddMember, (val) => {
+  if (!val) keyboardHeight.value = 0
+})
+
+function onKeyboardHeightChange(e: any) {
+  keyboardHeight.value = e.detail.height || 0
+}
+
+const addModalStyle = computed(() => {
+  if (keyboardHeight.value > 0) {
+    return { transform: `translate(-50%, calc(-50% - ${keyboardHeight.value / 2}px))` }
+  }
+  return {}
+})
 
 function onNameInput(e: any) {
   emit('update:newMemberName', e.detail.value)
