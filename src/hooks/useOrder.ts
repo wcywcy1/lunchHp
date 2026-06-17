@@ -28,13 +28,12 @@ interface OrderReturn {
     submitting: Ref<boolean>
     showMemberPicker: Ref<boolean>
     showAddMember: Ref<boolean>
-    newMemberName: Ref<string>
     memberList: ComputedRef<MemberItem[]>
     selectMenuItem: (menuId: string) => void
     switchToSelf: () => void
     switchToHelp: () => void
     pickMember: (memberId: string) => void
-    addVirtualAndPick: () => Promise<void>
+    addVirtualAndPick: (name: string) => Promise<void>
     submitOrder: () => Promise<void>
     resetOrder: () => void
 }
@@ -47,7 +46,6 @@ export function useOrder(): OrderReturn {
     const submitting = ref(false)
     const showMemberPicker = ref(false)
     const showAddMember = ref(false)
-    const newMemberName = ref('')
 
     const selectedMenuItem = computed<MenuItem | null>(() => {
         if (!selectedMenuId.value) return null
@@ -84,14 +82,14 @@ export function useOrder(): OrderReturn {
         showMemberPicker.value = false
     }
 
-    async function addVirtualAndPick() {
-        const name = newMemberName.value.trim()
-        if (!name) {
+    async function addVirtualAndPick(name: string) {
+        const trimmed = name.trim()
+        if (!trimmed) {
             uni.showToast({ title: '请输入姓名', icon: 'none' })
             return
         }
         try {
-            const res = await menuAction('addVirtualMember', { name })
+            const res = await menuAction('addVirtualMember', { name: trimmed })
             if (res.result.code === 0) {
                 const newMember = res.result.data
                 store.members = [...(store.members || []), newMember]
@@ -99,7 +97,6 @@ export function useOrder(): OrderReturn {
                 orderFor.value = 'help'
                 showAddMember.value = false
                 showMemberPicker.value = false
-                newMemberName.value = ''
                 uni.showToast({ title: '已添加', icon: 'success' })
             }
         } catch (e: any) {
@@ -189,7 +186,6 @@ export function useOrder(): OrderReturn {
         submitting,
         showMemberPicker,
         showAddMember,
-        newMemberName,
         memberList,
         selectMenuItem,
         switchToSelf,

@@ -27,7 +27,6 @@
       :submitting="submitting"
       :showMemberPicker="showMemberPicker"
       :showAddMember="showAddMember"
-      :newMemberName="newMemberName"
       :memberList="memberList"
       @switch-self="switchToSelf"
       @switch-help="switchToHelp"
@@ -37,7 +36,6 @@
       @show-add="showAddMember = true; showMemberPicker = false"
       @close-add="showAddMember = false"
       @add-virtual="addVirtualAndPick"
-      @update:newMemberName="newMemberName = $event"
     />
 
     <CustomTabBar current="pages/menu/index" />
@@ -82,7 +80,6 @@ const {
   submitting,
   showMemberPicker,
   showAddMember,
-  newMemberName,
   memberList,
   selectMenuItem,
   switchToSelf,
