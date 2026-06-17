@@ -101,7 +101,7 @@ export function useHome() {
             return
         }
         const now = Date.now()
-        if (now - getRecentLoadTime() < CACHE_TTL.RECENT_ORDERS) return
+        if (now - getRecentLoadTime() < 30 * 1000) return
         await checkFreshness()
     }
 

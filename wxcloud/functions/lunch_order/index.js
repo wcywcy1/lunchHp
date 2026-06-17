@@ -202,6 +202,20 @@ async function getMonthSummary(event, openid) {
     return { code: 0, data: monthSummary }
 }
 
+async function _updateDataTimestamp() {
+    const now = db.serverDate()
+    const existing = await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => null)
+    if (existing && existing.data) {
+        await db.collection(COL.GROUPS).doc(GROUP_ID).update({
+            data: { dataTimestamp: now },
+        })
+    } else {
+        await db.collection(COL.GROUPS).add({
+            data: { _id: GROUP_ID, dataTimestamp: now, createdAt: now },
+        })
+    }
+}
+
 async function submitOrder(event, openid) {
     const { date, memberId, memberName, menuId, menuName, supplier, price, note } = event
     if (!date || !memberId || !menuId) return { code: 400, msg: 'missing required fields' }
@@ -266,6 +280,7 @@ async function batchConfirm(event, openid) {
     if (date) {
         await doRebuildMonthStats(date.substring(0, 7))
     }
+    await _updateDataTimestamp()
 
     return { code: 0, data: results }
 }
@@ -284,6 +299,7 @@ async function cancelOrder(event, openid) {
         data: { status: STATUS.CANCELLED, updatedAt: db.serverDate() },
     })
 
+    await _updateDataTimestamp()
     return { code: 0 }
 }
 
@@ -302,6 +318,7 @@ async function updateOrder(event, openid) {
     if (note !== undefined) update.note = note
 
     await db.collection(COL.ORDERS).doc(orderId).update({ data: update })
+    await _updateDataTimestamp()
     return { code: 0 }
 }
 
@@ -328,9 +345,51 @@ async function getConfirmedBySupplier(event, openid) {
 }
 
 async function getMonthlyStats(event, openid) {
-    const { year } = event
+    const { year, since } = event
     const where = { groupId: GROUP_ID }
     if (year) where.year = Number(year)
+
+    const groupRes = await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => ({ data: {} }))
+    const serverTs = groupRes.data && groupRes.data.dataTimestamp
+        ? (groupRes.data.dataTimestamp instanceof Date ? groupRes.data.dataTimestamp.getTime() : new Date(groupRes.data.dataTimestamp).getTime())
+        : 0
+
+    if (since) {
+        const changedWhere = { groupId: GROUP_ID, updatedAt: _.gt(new Date(since)) }
+        if (year) changedWhere.year = Number(year)
+        let { data: changedStats } = await db.collection(COL.MONTHLY_STATS)
+            .where(changedWhere)
+            .orderBy('year', 'asc')
+            .orderBy('month', 'asc')
+            .get()
+
+        const needRebuild = []
+        for (const stat of changedStats) {
+            const statTs = stat.updatedAt
+                ? (stat.updatedAt instanceof Date ? stat.updatedAt.getTime() : new Date(stat.updatedAt).getTime())
+                : 0
+            if (statTs < serverTs) {
+                needRebuild.push(stat)
+            }
+        }
+
+        for (const m of needRebuild) {
+            await doRebuildMonthStats(`${m.year}-${String(m.month).padStart(2, '0')}`)
+        }
+
+        if (needRebuild.length > 0) {
+            const reQueryWhere = { groupId: GROUP_ID, updatedAt: _.gt(new Date(since)) }
+            if (year) reQueryWhere.year = Number(year)
+            changedStats = (await db.collection(COL.MONTHLY_STATS)
+                .where(reQueryWhere)
+                .orderBy('year', 'asc')
+                .orderBy('month', 'asc')
+                .get()).data
+        }
+
+        const result = changedStats.map(doc => _formatStatDoc(doc))
+        return { code: 0, data: result, dataTimestamp: serverTs, incremental: true }
+    }
 
     let { data } = await db.collection(COL.MONTHLY_STATS)
         .where(where)
@@ -346,9 +405,34 @@ async function getMonthlyStats(event, openid) {
             .orderBy('month', 'asc')
             .get()
         data = result.data
+    } else {
+        const needRebuild = []
+        for (const stat of data) {
+            const statTs = stat.updatedAt
+                ? (stat.updatedAt instanceof Date ? stat.updatedAt.getTime() : new Date(stat.updatedAt).getTime())
+                : 0
+            if (statTs < serverTs) {
+                needRebuild.push(stat)
+            }
+        }
+        if (needRebuild.length > 0) {
+            for (const m of needRebuild) {
+                await doRebuildMonthStats(`${m.year}-${String(m.month).padStart(2, '0')}`)
+            }
+            data = (await db.collection(COL.MONTHLY_STATS)
+                .where(where)
+                .orderBy('year', 'asc')
+                .orderBy('month', 'asc')
+                .get()).data
+        }
     }
 
-    const result = data.map(doc => ({
+    const result = data.map(doc => _formatStatDoc(doc))
+    return { code: 0, data: result, dataTimestamp: serverTs, incremental: false }
+}
+
+function _formatStatDoc(doc) {
+    return {
         _id: doc._id,
         year: doc.year,
         month: doc.month,
@@ -356,9 +440,7 @@ async function getMonthlyStats(event, openid) {
         orderCount: doc.orderCount || doc.count || 0,
         orderByMember: doc.orderByMemberMap || arrayToRecord(doc.orderByMember, 'memberName'),
         orderBySupplier: doc.orderBySupplierMap || arrayToRecord(doc.orderBySupplier, 'supplier'),
-    }))
-
-    return { code: 0, data: result }
+    }
 }
 
 function arrayToRecord(arr, keyField) {
@@ -640,6 +722,7 @@ async function importOrders(event, openid) {
     const successCount = results.filter(r => r._id).length
     const errorCount = results.filter(r => r.error).length
     const skippedCount = results.filter(r => r.skipped).length
+    if (successCount > 0) await _updateDataTimestamp()
     return { code: 0, data: { results, count: successCount, errors: errorCount, skipped: skippedCount } }
 }
 

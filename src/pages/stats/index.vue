@@ -43,7 +43,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { onShow, onPullDownRefresh } from '@dcloudio/uni-app'
 import StatsSummary from '../../components/stats/StatsSummary.vue'
 import StatsBarChart from '../../components/stats/StatsBarChart.vue'
 import StatsPieChart from '../../components/stats/StatsPieChart.vue'
@@ -68,6 +68,8 @@ const {
   detailLoading,
   hasMoreDetail,
   loadStats,
+  refreshStats,
+  getStatsLoadTime,
   applyFilter,
   resetFilter,
   openFilter,
@@ -87,9 +89,13 @@ onMounted(() => {
 })
 
 onShow(() => {
-  if (!loading.value) {
-    loadStats()
+  if (!loading.value && Date.now() - getStatsLoadTime() > 30 * 1000) {
+    loadStats(true)
   }
+})
+
+onPullDownRefresh(() => {
+  refreshStats().finally(() => uni.stopPullDownRefresh())
 })
 </script>
 

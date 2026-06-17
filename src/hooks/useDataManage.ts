@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue'
-import { useStore, saveSession, setCache } from '../services/store'
+import { useStore, saveSession, setCache, setRecentLoadTime } from '../services/store'
 import { menuAction, orderAction, backupAction } from '../services/repositories/baseRepository'
 import { ORDER_STATUS, ROLE } from '../constants/orderStatus'
 import { CACHE_KEYS } from '../constants/cacheConfig'
@@ -142,10 +142,13 @@ export function useDataManage() {
         }
         confirming.value = true
         try {
-            const res = await orderAction('batchConfirm', { orderIds: selectedIds.value })
+            const res = await orderAction('batchConfirm', { orderIds: selectedIds.value, date: getDateStr() })
             if (res.result.code === 0) {
                 uni.showToast({ title: '确认成功', icon: 'success' })
                 selectedIds.value = []
+                store.recentTimestamp = res.result.data?.recentTimestamp || store.recentTimestamp
+                setCache(CACHE_KEYS.RECENT_TIMESTAMP, store.recentTimestamp)
+                setRecentLoadTime(Date.now())
                 await loadData()
             }
         } catch (e: any) {

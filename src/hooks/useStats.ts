@@ -1,7 +1,7 @@
 import { ref, computed, ComputedRef, Ref } from 'vue'
 import { useStore, getCache, setCache } from '../services/store'
 import { orderAction } from '../services/repositories/baseRepository'
-import { CACHE_KEYS } from '../constants/cacheConfig'
+import { CACHE_KEYS, CACHE_TTL } from '../constants/cacheConfig'
 
 interface MonthlyStat {
     _id: string
@@ -37,7 +37,9 @@ interface StatsReturn {
     detailOrders: Ref<any[]>
     detailLoading: Ref<boolean>
     hasMoreDetail: ComputedRef<boolean>
-    loadStats: () => Promise<void>
+    loadStats: (forceRefresh?: boolean) => Promise<void>
+    refreshStats: () => Promise<void>
+    getStatsLoadTime: () => number
     applyFilter: (f: FilterState) => Promise<void>
     resetFilter: () => Promise<void>
     openFilter: () => void
@@ -71,10 +73,16 @@ export function useStats(): StatsReturn {
         return Array.from(years).sort((a, b) => b - a)
     })
 
+    let _statsLoadTime = 0
+
     const memberOptions = computed(() => {
         const names = new Set<string>()
         monthlyStats.value.forEach(s => {
             if (s.orderByMember) Object.keys(s.orderByMember).forEach(n => names.add(n))
+        })
+        ;(store.members || []).forEach((m: any) => {
+            const name = m.name || m.nickName
+            if (name) names.add(name)
         })
         return Array.from(names).sort()
     })
@@ -154,25 +162,74 @@ export function useStats(): StatsReturn {
         detailOrders.value.length < detailTotal.value
     )
 
-    async function loadStats() {
-        const cached = getCache(CACHE_KEYS.MONTHLY_STATS)
-        if (cached && cached.length > 0) {
-            monthlyStats.value = cached
-            return
+    async function loadStats(forceRefresh = false) {
+        if (!forceRefresh) {
+            const now = Date.now()
+            if (now - _statsLoadTime < CACHE_TTL.MONTHLY_STATS) {
+                const cached = getCache(CACHE_KEYS.MONTHLY_STATS)
+                if (cached && cached.length > 0) {
+                    monthlyStats.value = cached
+                    return
+                }
+            }
         }
         loading.value = true
         try {
-            const res = await orderAction('getMonthlyStats')
+            const cachedTime = getCache(CACHE_KEYS.MONTHLY_STATS_TIME, true) || 0
+            const since = forceRefresh && cachedTime > 0 ? cachedTime : undefined
+            const params: Record<string, any> = {}
+            if (since) params.since = since
+
+            const res = await orderAction('getMonthlyStats', params)
             if (res.result.code === 0) {
-                const data = res.result.data || []
-                monthlyStats.value = data
-                setCache(CACHE_KEYS.MONTHLY_STATS, data)
+                const freshData = res.result.data || []
+                const serverTs = res.result.dataTimestamp || 0
+                const isIncremental = res.result.incremental === true
+
+                if (isIncremental && freshData.length > 0) {
+                    const cached = getCache(CACHE_KEYS.MONTHLY_STATS, true) || []
+                    const merged = _mergeStats(cached, freshData)
+                    monthlyStats.value = merged
+                    setCache(CACHE_KEYS.MONTHLY_STATS, merged)
+                } else if (!isIncremental) {
+                    monthlyStats.value = freshData
+                    setCache(CACHE_KEYS.MONTHLY_STATS, freshData)
+                } else {
+                    const cached = getCache(CACHE_KEYS.MONTHLY_STATS, true)
+                    monthlyStats.value = cached && cached.length > 0 ? cached : freshData
+                }
+
+                const now = Date.now()
+                _statsLoadTime = now
+                setCache(CACHE_KEYS.MONTHLY_STATS_TIME, serverTs || now)
             }
         } catch (e) {
             console.error('loadStats error:', e)
+            if (monthlyStats.value.length === 0) {
+                const cached = getCache(CACHE_KEYS.MONTHLY_STATS, true)
+                if (cached && cached.length > 0) {
+                    monthlyStats.value = cached
+                }
+            }
         } finally {
             loading.value = false
         }
+    }
+
+    function _mergeStats(cached: MonthlyStat[], fresh: MonthlyStat[]): MonthlyStat[] {
+        const merged = cached.slice()
+        const idSet = new Set<string>()
+        for (const s of merged) idSet.add(s._id || `${s.year}_${s.month}`)
+        for (const s of fresh) {
+            const id = s._id || `${s.year}_${s.month}`
+            if (!idSet.has(id)) {
+                merged.push(s)
+            } else {
+                const idx = merged.findIndex(m => (m._id || `${m.year}_${m.month}`) === id)
+                if (idx >= 0) merged[idx] = s
+            }
+        }
+        return merged
     }
 
     async function applyFilter(f: FilterState) {
@@ -319,6 +376,14 @@ export function useStats(): StatsReturn {
         }
     }
 
+    async function refreshStats() {
+        await loadStats(true)
+    }
+
+    function getStatsLoadTime() {
+        return _statsLoadTime
+    }
+
     return {
         loading,
         monthlyStats,
@@ -336,6 +401,8 @@ export function useStats(): StatsReturn {
         detailLoading,
         hasMoreDetail,
         loadStats,
+        refreshStats,
+        getStatsLoadTime,
         applyFilter,
         resetFilter,
         openFilter,
