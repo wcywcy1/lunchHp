@@ -647,11 +647,21 @@ export function useDataManage() {
             uni.showToast({ title: '无有效数据', icon: 'none' })
             return
         }
+        const mode = await new Promise<'append' | 'rewrite' | ''>(resolve => {
+            uni.showModal({
+                title: '导入方式',
+                content: '追加数据：仅导入新数据，重复跳过\n清库重写：清空所有菜单后导入',
+                confirmText: '追加',
+                cancelText: '清库重写',
+                success: res => resolve(res.confirm ? 'append' : 'rewrite'),
+            })
+        })
+        if (!mode) return
         const BATCH = 100
         let totalInserted = 0
         for (let i = 0; i < items.length; i += BATCH) {
             const chunk = items.slice(i, i + BATCH)
-            const res = await menuAction('importMenuItems', { items: chunk, mode: 'rewrite' })
+            const res = await menuAction('importMenuItems', { items: chunk, mode })
             if (res.result.code === 0) totalInserted += res.result.data.count
         }
         uni.showToast({ title: `导入${totalInserted}条`, icon: 'success' })
@@ -696,11 +706,21 @@ export function useDataManage() {
             uni.showToast({ title: '无有效数据', icon: 'none' })
             return
         }
+        const mode = await new Promise<'append' | 'rewrite' | ''>(resolve => {
+            uni.showModal({
+                title: '导入方式',
+                content: '追加数据：仅导入新数据，重复跳过\n清库重写：清空所有人员后导入',
+                confirmText: '追加',
+                cancelText: '清库重写',
+                success: res => resolve(res.confirm ? 'append' : 'rewrite'),
+            })
+        })
+        if (!mode) return
         const BATCH = 100
         let totalInserted = 0
         for (let i = 0; i < members.length; i += BATCH) {
             const chunk = members.slice(i, i + BATCH)
-            const res = await menuAction('importMembers', { members: chunk, mode: 'rewrite' })
+            const res = await menuAction('importMembers', { members: chunk, mode })
             if (res.result.code === 0) totalInserted += res.result.data.count
         }
         uni.showToast({ title: `导入${totalInserted}条`, icon: 'success' })
