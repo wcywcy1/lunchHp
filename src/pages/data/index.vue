@@ -27,13 +27,14 @@
       <ImportExport
         :exporting="exporting"
         :importing="importing"
+        @export="exportData"
+        @import="importData"
+      />
+
+      <DataBackup
         :backingUp="backingUp"
-        :exportingAll="exportingAll"
         @backup="manualBackup"
         @restore="openBackupDialog"
-        @export="exportOrders"
-        @import="importOrders"
-        @export-all="exportAllOrders"
       />
     </scroll-view>
 
@@ -172,6 +173,7 @@ import PendingList from '../../components/data/PendingList.vue'
 import ConfirmedList from '../../components/data/ConfirmedList.vue'
 import MemberList from '../../components/data/MemberList.vue'
 import ImportExport from '../../components/data/ImportExport.vue'
+import DataBackup from '../../components/data/DataBackup.vue'
 import DownloadDialog from '../../components/data/DownloadDialog.vue'
 import CustomTabBar from '../../components/CustomTabBar/CustomTabBar.vue'
 
@@ -200,7 +202,6 @@ const {
   backupStep,
   selectedBackup,
   backingUp,
-  exportingAll,
   loadData,
   toggleSelect,
   toggleSelectAll,
@@ -210,14 +211,13 @@ const {
   saveMemberName,
   setAdminRole,
   removeAdminRole,
-  exportOrders,
-  importOrders,
+  exportData,
+  importData,
   manualBackup,
   openBackupDialog,
   selectBackup,
   confirmRestore,
   restoreBackup,
-  exportAllOrders,
 } = useDataManage()
 
 const members = computed(() => store.members || [])

@@ -32,11 +32,13 @@ exports.main = async (event, context) => {
         getMembers,
         updateMemberName,
         addVirtualMember,
+        importMembers,
         setAdmin,
         agreePrivacy,
         linkVirtualMember,
         getMenuList,
         addMenuItem,
+        importMenuItems,
         updateMenuItem,
         deleteMenuItem,
         moveMenuItem,
@@ -171,6 +173,40 @@ async function addVirtualMember(event, openid) {
     return { code: 0, data: member }
 }
 
+async function importMembers(event, openid) {
+    const caller = await getMemberByOpenid(openid)
+    if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
+
+    const { members } = event
+    if (!Array.isArray(members) || members.length === 0) return { code: 400, msg: 'missing members' }
+    if (members.length > 100) return { code: 400, msg: 'max 100 per batch' }
+
+    const now = db.serverDate()
+    const batch = members.filter(m => m.name && m.name.trim()).map(m => ({
+        groupId: GROUP_ID,
+        name: m.name.trim(),
+        nickName: m.nickName || '',
+        avatar: '',
+        openid: '',
+        role: m.role || ROLE.MEMBER,
+        isVirtual: m.isVirtual !== undefined ? m.isVirtual : true,
+        privacyAgreed: false,
+        joinedAt: now,
+    }))
+
+    if (batch.length === 0) return { code: 400, msg: 'no valid members' }
+
+    const BATCH_SIZE = 20
+    let inserted = 0
+    for (let i = 0; i < batch.length; i += BATCH_SIZE) {
+        const chunk = batch.slice(i, i + BATCH_SIZE)
+        await db.collection(COL.MEMBERS).add({ data: chunk })
+        inserted += chunk.length
+    }
+
+    return { code: 0, data: { count: inserted } }
+}
+
 async function agreePrivacy(event, openid) {
     const member = await getMemberByOpenid(openid)
     if (!member) return { code: 403, msg: 'not a member' }
@@ -254,6 +290,46 @@ async function addMenuItem(event, openid) {
     const { _id } = await db.collection(COL.MENU).add({ data: item })
     item._id = _id
     return { code: 0, data: item }
+}
+
+async function importMenuItems(event, openid) {
+    const caller = await getMemberByOpenid(openid)
+    if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
+
+    const { items } = event
+    if (!Array.isArray(items) || items.length === 0) return { code: 400, msg: 'missing items' }
+    if (items.length > 100) return { code: 400, msg: 'max 100 per batch' }
+
+    const { data: existing } = await db.collection(COL.MENU)
+        .where({ groupId: GROUP_ID })
+        .orderBy('sortNo', 'desc')
+        .limit(1)
+        .get()
+    let sortNo = existing.length > 0 ? existing[0].sortNo : 0
+
+    const now = db.serverDate()
+    const batch = items.filter(it => it.supplier && it.name && it.price !== undefined).map(it => ({
+        groupId: GROUP_ID,
+        sortNo: sortNo += 10,
+        supplier: it.supplier,
+        name: it.name,
+        price: Number(it.price) || 0,
+        photo: it.photo || '',
+        visible: it.visible !== false,
+        createdAt: now,
+    }))
+
+    if (batch.length === 0) return { code: 400, msg: 'no valid items' }
+
+    const BATCH_SIZE = 20
+    let inserted = 0
+    for (let i = 0; i < batch.length; i += BATCH_SIZE) {
+        const chunk = batch.slice(i, i + BATCH_SIZE)
+        await db.collection(COL.MENU).add({ data: chunk })
+        inserted += chunk.length
+    }
+
+    return { code: 0, data: { count: inserted } }
 }
 
 async function updateMenuItem(event, openid) {

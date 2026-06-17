@@ -21,6 +21,7 @@ declare const wx: {
   getFileSystemManager(): {
     writeFileSync(filePath: string, data: string, encoding: string): void
     readFileSync(filePath: string, encoding: string): string
+    readFileSync(filePath: string): ArrayBuffer
     unlinkSync(filePath: string): void
     accessSync(filePath: string): void
     saveFileSync(tempFilePath: string, filePath: string): string

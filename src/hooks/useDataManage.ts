@@ -25,7 +25,6 @@ export function useDataManage() {
     const backupStep = ref<'list' | 'preview' | 'confirm'>('list')
     const selectedBackup = ref<any>(null)
     const backingUp = ref(false)
-    const exportingAll = ref(false)
 
     const isAllSelected = computed(() =>
         pendingOrders.value.length > 0 &&
@@ -106,27 +105,33 @@ export function useDataManage() {
 
     function shareLocalFile(filePath: string, fileName: string): Promise<{ success: boolean; message: string; cancelled?: boolean }> {
         return new Promise((resolve) => {
-            const fs = wx.getFileSystemManager()
-            try {
-                fs.accessSync(filePath)
-            } catch {
-                resolve({ success: false, message: '文件不存在或已过期', cancelled: false })
-                return
-            }
-            wx.shareFileMessage({
-                filePath,
-                fileName,
-                success: () => {
-                    try { fs.unlinkSync(filePath) } catch {}
-                    resolve({ success: true, message: '分享成功', cancelled: false })
-                },
-                fail: (err: any) => {
-                    try { fs.unlinkSync(filePath) } catch {}
-                    if (err?.errMsg?.indexOf('cancel') > -1) {
-                        resolve({ success: false, message: '分享已取消', cancelled: true })
-                    } else {
-                        resolve({ success: false, message: '分享失败', cancelled: false })
+            uni.showModal({
+                title: '导出成功',
+                content: '是否分享到微信？',
+                confirmText: '分享',
+                cancelText: '取消',
+                success: (modalRes) => {
+                    if (!modalRes.confirm) {
+                        try { wx.getFileSystemManager().unlinkSync(filePath) } catch {}
+                        resolve({ success: false, message: '已取消', cancelled: true })
+                        return
                     }
+                    wx.shareFileMessage({
+                        filePath,
+                        fileName,
+                        success: () => {
+                            try { wx.getFileSystemManager().unlinkSync(filePath) } catch {}
+                            resolve({ success: true, message: '分享成功', cancelled: false })
+                        },
+                        fail: (err: any) => {
+                            try { wx.getFileSystemManager().unlinkSync(filePath) } catch {}
+                            if (err?.errMsg?.indexOf('cancel') > -1) {
+                                resolve({ success: false, message: '分享已取消', cancelled: true })
+                            } else {
+                                resolve({ success: false, message: '分享失败', cancelled: false })
+                            }
+                        },
+                    })
                 },
             })
         })
@@ -138,16 +143,28 @@ export function useDataManage() {
                 fileID,
                 success: (downloadRes: any) => {
                     const name = fileName || 'export_file.csv'
-                    wx.shareFileMessage({
-                        filePath: downloadRes.tempFilePath,
-                        fileName: name,
-                        success: () => resolve(),
-                        fail: (err: any) => {
-                            if (err?.errMsg?.indexOf('cancel') > -1) {
+                    uni.showModal({
+                        title: '下载成功',
+                        content: '是否分享到微信？',
+                        confirmText: '分享',
+                        cancelText: '取消',
+                        success: (modalRes) => {
+                            if (!modalRes.confirm) {
                                 resolve()
-                            } else {
-                                reject(new Error('分享失败'))
+                                return
                             }
+                            wx.shareFileMessage({
+                                filePath: downloadRes.tempFilePath,
+                                fileName: name,
+                                success: () => resolve(),
+                                fail: (err: any) => {
+                                    if (err?.errMsg?.indexOf('cancel') > -1) {
+                                        resolve()
+                                    } else {
+                                        reject(new Error('分享失败'))
+                                    }
+                                },
+                            })
                         },
                     })
                 },
@@ -159,16 +176,6 @@ export function useDataManage() {
     async function downloadConfirmed() {
         downloading.value = true
         try {
-            const res = await orderAction('downloadConfirmed', { mode: downloadMode.value })
-            if (res.result.code === 0 && res.result.data.fileID) {
-                await downloadCloudFile(res.result.data.fileID)
-            } else if (res.result.code === 0 && res.result.data.files) {
-                for (const file of res.result.data.files) {
-                    await downloadCloudFile(file.fileID)
-                }
-            }
-            showDownloadDialog.value = false
-        } catch (e) {
             await localDownloadConfirmed()
         } finally {
             downloading.value = false
@@ -185,9 +192,10 @@ export function useDataManage() {
                     })
                     lines.push(`合计,,${group.subtotal},`)
                     const fs = wx.getFileSystemManager()
-                    const path = `${wx.env.USER_DATA_PATH}/确认单_${group.supplier}_${getDateStr()}.csv`
-                    fs.writeFileSync(path, lines.join('\n'), 'utf8')
-                    const shareRes = await shareLocalFile(path, `确认单_${group.supplier}_${getDateStr()}.csv`)
+                    const fileName = `确认单_${group.supplier}_${getDateStr()}.csv`
+                    const path = `${wx.env.USER_DATA_PATH}/${fileName}`
+                    fs.writeFileSync(path, '\uFEFF' + lines.join('\n'), 'utf8')
+                    const shareRes = await shareLocalFile(path, fileName)
                     uni.showToast({ title: shareRes.success ? '分享成功' : (shareRes.cancelled ? '已取消' : '分享失败'), icon: shareRes.success ? 'success' : 'none' })
                 }
             } else {
@@ -201,9 +209,10 @@ export function useDataManage() {
                 const total = confirmedOrders.value.reduce((s: number, o: any) => s + (o.price || 0), 0)
                 lines.push(`全部,合计,,${total},`)
                 const fs = wx.getFileSystemManager()
-                const path = `${wx.env.USER_DATA_PATH}/确认单_全部_${getDateStr()}.csv`
-                fs.writeFileSync(path, lines.join('\n'), 'utf8')
-                const shareRes = await shareLocalFile(path, `确认单_全部_${getDateStr()}.csv`)
+                const fileName = `确认单_全部_${getDateStr()}.csv`
+                const path = `${wx.env.USER_DATA_PATH}/${fileName}`
+                fs.writeFileSync(path, '\uFEFF' + lines.join('\n'), 'utf8')
+                const shareRes = await shareLocalFile(path, fileName)
                 uni.showToast({ title: shareRes.success ? '分享成功' : (shareRes.cancelled ? '已取消' : '分享失败'), icon: shareRes.success ? 'success' : 'none' })
             }
             showDownloadDialog.value = false
@@ -267,20 +276,102 @@ export function useDataManage() {
         }
     }
 
-    async function exportOrders() {
+    function parseCsvLine(line: string): string[] {
+        const result: string[] = []
+        let current = ''
+        let inQuotes = false
+        for (let i = 0; i < line.length; i++) {
+            const ch = line[i]
+            if (inQuotes) {
+                if (ch === '"') {
+                    if (i + 1 < line.length && line[i + 1] === '"') {
+                        current += '"'
+                        i++
+                    } else {
+                        inQuotes = false
+                    }
+                } else {
+                    current += ch
+                }
+            } else {
+                if (ch === '"') {
+                    inQuotes = true
+                } else if (ch === ',') {
+                    result.push(current)
+                    current = ''
+                } else {
+                    current += ch
+                }
+            }
+        }
+        result.push(current)
+        return result
+    }
+
+    function splitCsvLines(content: string): string[] {
+        const lines: string[] = []
+        let current = ''
+        let inQuotes = false
+        for (let i = 0; i < content.length; i++) {
+            const ch = content[i]
+            if (inQuotes) {
+                current += ch
+                if (ch === '"') {
+                    if (i + 1 < content.length && content[i + 1] === '"') {
+                        i++
+                    } else {
+                        inQuotes = false
+                    }
+                }
+            } else {
+                if (ch === '"') {
+                    inQuotes = true
+                    current += ch
+                } else if (ch === '\r' || ch === '\n') {
+                    if (ch === '\r' && i + 1 < content.length && content[i + 1] === '\n') {
+                        i++
+                    }
+                    if (current.trim()) lines.push(current)
+                    current = ''
+                } else {
+                    current += ch
+                }
+            }
+        }
+        if (current.trim()) lines.push(current)
+        return lines
+    }
+
+    function parseXlsxSheet(buffer: ArrayBuffer): string[][] {
+        const view = new Uint8Array(buffer)
+        const text = new TextDecoder('utf-8').decode(view)
+        return splitCsvLines(text).map(l => parseCsvLine(l))
+    }
+
+    async function exportData(type: 'orders' | 'menu' | 'members') {
         exporting.value = true
+        try {
+            if (type === 'orders') {
+                await exportOrders()
+            } else if (type === 'menu') {
+                await exportMenu()
+            } else {
+                await exportMembers()
+            }
+        } finally {
+            exporting.value = false
+        }
+    }
+
+    async function exportOrders() {
         try {
             const res = await orderAction('exportOrders')
             if (res.result.code === 0 && res.result.data.fileID) {
                 await downloadCloudFile(res.result.data.fileID)
-            } else {
-                await localExportOrders()
+                return
             }
-        } catch (e) {
-            await localExportOrders()
-        } finally {
-            exporting.value = false
-        }
+        } catch {}
+        await localExportOrders()
     }
 
     async function localExportOrders() {
@@ -305,41 +396,76 @@ export function useDataManage() {
         }
     }
 
-    function importOrders() {
+    async function exportMenu() {
+        try {
+            const res = await menuAction('getMenuList')
+            if (res.result.code === 0) {
+                const menuList = res.result.data || []
+                const lines = ['供应商,菜品名,价格,可见']
+                menuList.forEach((m: any) => {
+                    lines.push(`${m.supplier},${m.name},${m.price},${m.visible !== false ? '是' : '否'}`)
+                })
+                const fs = wx.getFileSystemManager()
+                const fileName = `export_menu_${getDateStr()}.csv`
+                const path = `${wx.env.USER_DATA_PATH}/${fileName}`
+                fs.writeFileSync(path, lines.join('\n'), 'utf8')
+                const shareRes = await shareLocalFile(path, fileName)
+                if (shareRes.success) {
+                    uni.showToast({ title: menuList.length === 0 ? '模板已分享' : '分享成功', icon: 'success' })
+                } else if (!shareRes.cancelled) {
+                    uni.showToast({ title: '分享失败', icon: 'none' })
+                }
+            }
+        } catch (e: any) {
+            uni.showToast({ title: e.message || '导出失败', icon: 'none' })
+        }
+    }
+
+    async function exportMembers() {
+        try {
+            const res = await menuAction('getMembers')
+            if (res.result.code === 0) {
+                const memberList = res.result.data || []
+                const lines = ['姓名,昵称,角色,虚拟用户']
+                memberList.forEach((m: any) => {
+                    lines.push(`${m.name || ''},${m.nickName || ''},${m.role || 'member'},${m.isVirtual ? '是' : '否'}`)
+                })
+                const fs = wx.getFileSystemManager()
+                const fileName = `export_members_${getDateStr()}.csv`
+                const path = `${wx.env.USER_DATA_PATH}/${fileName}`
+                fs.writeFileSync(path, lines.join('\n'), 'utf8')
+                const shareRes = await shareLocalFile(path, fileName)
+                if (shareRes.success) {
+                    uni.showToast({ title: memberList.length === 0 ? '模板已分享' : '分享成功', icon: 'success' })
+                } else if (!shareRes.cancelled) {
+                    uni.showToast({ title: '分享失败', icon: 'none' })
+                }
+            }
+        } catch (e: any) {
+            uni.showToast({ title: e.message || '导出失败', icon: 'none' })
+        }
+    }
+
+    function importData(type: 'orders' | 'menu' | 'members') {
         wx.chooseMessageFile({
             count: 1,
             type: 'file',
-            extension: ['csv'],
+            extension: ['csv', 'xlsx'],
             success: async (chooseRes: any) => {
+                const filePath = chooseRes.tempFiles[0].path
+                const ext = filePath.split('.').pop()?.toLowerCase()
+                if (ext !== 'csv' && ext !== 'xlsx') {
+                    uni.showToast({ title: '只支持csv和xlsx格式', icon: 'none' })
+                    return
+                }
                 importing.value = true
                 try {
-                    const fs = wx.getFileSystemManager()
-                    const content = fs.readFileSync(chooseRes.tempFiles[0].path, 'utf8') as string
-                    const lines = content.split('\n').filter(l => l.trim())
-                    if (lines.length < 2) {
-                        uni.showToast({ title: '文件为空', icon: 'none' })
-                        return
-                    }
-                    if (!lines[0].includes('日期') || !lines[0].includes('菜品')) {
-                        uni.showToast({ title: '格式不正确', icon: 'none' })
-                        return
-                    }
-                    const records = lines.slice(1).map(line => {
-                        const parts = line.split(',')
-                        return {
-                            date: parts[0] || '',
-                            menuName: parts[1] || '',
-                            memberName: parts[2] || '',
-                            price: Number(parts[3]) || 0,
-                            note: parts[4] || '',
-                            status: parts[5] || 'pending',
-                            supplier: parts[6] || '',
-                        }
-                    })
-                    const res = await orderAction('importOrders', { orders: records })
-                    if (res.result.code === 0) {
-                        uni.showToast({ title: `导入${res.result.data.count}条`, icon: 'success' })
-                        await loadData()
+                    if (type === 'orders') {
+                        await doImportOrders(filePath, ext)
+                    } else if (type === 'menu') {
+                        await doImportMenu(filePath, ext)
+                    } else {
+                        await doImportMembers(filePath, ext)
                     }
                 } catch (e: any) {
                     uni.showToast({ title: e.message || '导入失败', icon: 'none' })
@@ -348,6 +474,125 @@ export function useDataManage() {
                 }
             },
         })
+    }
+
+    async function doImportOrders(filePath: string, ext: string) {
+        const fs = wx.getFileSystemManager()
+        let rows: string[][]
+        if (ext === 'csv') {
+            const content = fs.readFileSync(filePath, 'utf8') as string
+            rows = splitCsvLines(content).map(l => parseCsvLine(l))
+        } else {
+            const buf = fs.readFileSync(filePath) as ArrayBuffer
+            rows = parseXlsxSheet(buf)
+        }
+        if (rows.length < 2) {
+            uni.showToast({ title: '文件为空', icon: 'none' })
+            return
+        }
+        const header = rows[0]
+        if (!header.includes('日期') || !header.includes('菜品')) {
+            uni.showToast({ title: '格式不正确', icon: 'none' })
+            return
+        }
+        const records = rows.slice(1).map(cols => ({
+            date: cols[0] || '',
+            menuName: cols[1] || '',
+            memberName: cols[2] || '',
+            price: Number(cols[3]) || 0,
+            note: cols[4] || '',
+            status: cols[5] || 'pending',
+            supplier: cols[6] || '',
+        }))
+        const res = await orderAction('importOrders', { orders: records })
+        if (res.result.code === 0) {
+            uni.showToast({ title: `导入${res.result.data.count}条`, icon: 'success' })
+            await loadData()
+        }
+    }
+
+    async function doImportMenu(filePath: string, ext: string) {
+        const fs = wx.getFileSystemManager()
+        let rows: string[][]
+        if (ext === 'csv') {
+            const content = fs.readFileSync(filePath, 'utf8') as string
+            rows = splitCsvLines(content).map(l => parseCsvLine(l))
+        } else {
+            const buf = fs.readFileSync(filePath) as ArrayBuffer
+            rows = parseXlsxSheet(buf)
+        }
+        if (rows.length < 2) {
+            uni.showToast({ title: '文件为空', icon: 'none' })
+            return
+        }
+        const header = rows[0]
+        if (!header.includes('供应商') || !header.includes('菜品名')) {
+            uni.showToast({ title: '格式不正确', icon: 'none' })
+            return
+        }
+        const items = rows.slice(1)
+            .filter(cols => cols[0] && cols[1])
+            .map(cols => ({
+                supplier: cols[0] || '',
+                name: cols[1] || '',
+                price: Number(cols[2]) || 0,
+                visible: cols[3] !== '否',
+            }))
+        if (items.length === 0) {
+            uni.showToast({ title: '无有效数据', icon: 'none' })
+            return
+        }
+        const BATCH = 100
+        let totalInserted = 0
+        for (let i = 0; i < items.length; i += BATCH) {
+            const chunk = items.slice(i, i + BATCH)
+            const res = await menuAction('importMenuItems', { items: chunk })
+            if (res.result.code === 0) totalInserted += res.result.data.count
+        }
+        uni.showToast({ title: `导入${totalInserted}条`, icon: 'success' })
+        await loadData()
+    }
+
+    async function doImportMembers(filePath: string, ext: string) {
+        const fs = wx.getFileSystemManager()
+        let rows: string[][]
+        if (ext === 'csv') {
+            const content = fs.readFileSync(filePath, 'utf8') as string
+            rows = splitCsvLines(content).map(l => parseCsvLine(l))
+        } else {
+            const buf = fs.readFileSync(filePath) as ArrayBuffer
+            rows = parseXlsxSheet(buf)
+        }
+        if (rows.length < 2) {
+            uni.showToast({ title: '文件为空', icon: 'none' })
+            return
+        }
+        const header = rows[0]
+        if (!header.includes('姓名')) {
+            uni.showToast({ title: '格式不正确', icon: 'none' })
+            return
+        }
+        const members = rows.slice(1)
+            .filter(cols => cols[0]?.trim())
+            .map(cols => ({
+                name: cols[0].trim(),
+                nickName: cols[1] || '',
+                role: cols[2] || 'member',
+                isVirtual: cols[3] !== '否',
+            }))
+        if (members.length === 0) {
+            uni.showToast({ title: '无有效数据', icon: 'none' })
+            return
+        }
+        const BATCH = 100
+        let totalInserted = 0
+        for (let i = 0; i < members.length; i += BATCH) {
+            const chunk = members.slice(i, i + BATCH)
+            const res = await menuAction('importMembers', { members: chunk })
+            if (res.result.code === 0) totalInserted += res.result.data.count
+        }
+        uni.showToast({ title: `导入${totalInserted}条`, icon: 'success' })
+        await loadData()
     }
 
     async function manualBackup() {
@@ -413,20 +658,6 @@ export function useDataManage() {
         }
     }
 
-    async function exportAllOrders() {
-        exportingAll.value = true
-        try {
-            const res = await backupAction('exportAllOrders')
-            if (res.result.code === 0 && res.result.data.fileID) {
-                await downloadCloudFile(res.result.data.fileID)
-            }
-        } catch (e: any) {
-            uni.showToast({ title: e.message || '导出失败', icon: 'none' })
-        } finally {
-            exportingAll.value = false
-        }
-    }
-
     return {
         loading,
         pendingOrders,
@@ -450,7 +681,6 @@ export function useDataManage() {
         backupStep,
         selectedBackup,
         backingUp,
-        exportingAll,
         loadData,
         toggleSelect,
         toggleSelectAll,
@@ -460,13 +690,12 @@ export function useDataManage() {
         saveMemberName,
         setAdminRole,
         removeAdminRole,
-        exportOrders,
-        importOrders,
+        exportData,
+        importData,
         manualBackup,
         openBackupDialog,
         selectBackup,
         confirmRestore,
         restoreBackup,
-        exportAllOrders,
     }
 }

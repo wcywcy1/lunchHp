@@ -240,25 +240,37 @@ export function useStats(): StatsReturn {
                 const { fileID } = res.result.data
                 await wx.cloud.downloadFile({
                     fileID,
-                    success: async (downloadRes: any) => {
+                    success: (downloadRes: any) => {
                         const fs = wx.getFileSystemManager()
                         const fileName = 'monthly_stats.csv'
                         const localPath = `${wx.env.USER_DATA_PATH}/${fileName}`
                         fs.saveFileSync(downloadRes.tempFilePath, localPath)
-                        wx.shareFileMessage({
-                            filePath: localPath,
-                            fileName,
-                            success: () => {
-                                try { fs.unlinkSync(localPath) } catch {}
-                                uni.showToast({ title: '分享成功', icon: 'success' })
-                            },
-                            fail: (err: any) => {
-                                try { fs.unlinkSync(localPath) } catch {}
-                                if (err?.errMsg?.indexOf('cancel') > -1) {
-                                    uni.showToast({ title: '已取消', icon: 'none' })
-                                } else {
-                                    uni.showToast({ title: '分享失败', icon: 'none' })
+                        uni.showModal({
+                            title: '下载成功',
+                            content: '是否分享到微信？',
+                            confirmText: '分享',
+                            cancelText: '取消',
+                            success: (modalRes) => {
+                                if (!modalRes.confirm) {
+                                    try { fs.unlinkSync(localPath) } catch {}
+                                    return
                                 }
+                                wx.shareFileMessage({
+                                    filePath: localPath,
+                                    fileName,
+                                    success: () => {
+                                        try { fs.unlinkSync(localPath) } catch {}
+                                        uni.showToast({ title: '分享成功', icon: 'success' })
+                                    },
+                                    fail: (err: any) => {
+                                        try { fs.unlinkSync(localPath) } catch {}
+                                        if (err?.errMsg?.indexOf('cancel') > -1) {
+                                            uni.showToast({ title: '已取消', icon: 'none' })
+                                        } else {
+                                            uni.showToast({ title: '分享失败', icon: 'none' })
+                                        }
+                                    },
+                                })
                             },
                         })
                     },
@@ -272,20 +284,32 @@ export function useStats(): StatsReturn {
                 const fileName = 'monthly_stats.csv'
                 const path = `${wx.env.USER_DATA_PATH}/${fileName}`
                 fs.writeFileSync(path, csvLines.join('\n'), 'utf8')
-                wx.shareFileMessage({
-                    filePath: path,
-                    fileName,
-                    success: () => {
-                        try { fs.unlinkSync(path) } catch {}
-                        uni.showToast({ title: '分享成功', icon: 'success' })
-                    },
-                    fail: (err: any) => {
-                        try { fs.unlinkSync(path) } catch {}
-                        if (err?.errMsg?.indexOf('cancel') > -1) {
-                            uni.showToast({ title: '已取消', icon: 'none' })
-                        } else {
-                            uni.showToast({ title: '分享失败', icon: 'none' })
+                uni.showModal({
+                    title: '导出成功',
+                    content: '是否分享到微信？',
+                    confirmText: '分享',
+                    cancelText: '取消',
+                    success: (modalRes) => {
+                        if (!modalRes.confirm) {
+                            try { fs.unlinkSync(path) } catch {}
+                            return
                         }
+                        wx.shareFileMessage({
+                            filePath: path,
+                            fileName,
+                            success: () => {
+                                try { fs.unlinkSync(path) } catch {}
+                                uni.showToast({ title: '分享成功', icon: 'success' })
+                            },
+                            fail: (err: any) => {
+                                try { fs.unlinkSync(path) } catch {}
+                                if (err?.errMsg?.indexOf('cancel') > -1) {
+                                    uni.showToast({ title: '已取消', icon: 'none' })
+                                } else {
+                                    uni.showToast({ title: '分享失败', icon: 'none' })
+                                }
+                            },
+                        })
                     },
                 })
             }
