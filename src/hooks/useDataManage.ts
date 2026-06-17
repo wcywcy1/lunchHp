@@ -5,6 +5,28 @@ import { ORDER_STATUS, ROLE } from '../constants/orderStatus'
 import { CACHE_KEYS } from '../constants/cacheConfig'
 
 export function useDataManage() {
+    const MAX_BATCH_COUNT = 2000
+    const MAX_BATCH_BYTES = 800 * 1024
+
+    function splitBatches<T>(records: T[]): T[][] {
+        if (records.length === 0) return []
+        const batches: T[][] = []
+        let batch: T[] = []
+        let batchSize = 0
+        for (const record of records) {
+            const recSize = JSON.stringify(record).length * 3
+            if (batch.length >= MAX_BATCH_COUNT || (batch.length > 0 && batchSize + recSize > MAX_BATCH_BYTES)) {
+                batches.push(batch)
+                batch = []
+                batchSize = 0
+            }
+            batch.push(record)
+            batchSize += recSize
+        }
+        if (batch.length > 0) batches.push(batch)
+        return batches
+    }
+
     function writeCsvWithBom(fs: any, path: string, content: string) {
         const bytes: number[] = [0xEF, 0xBB, 0xBF]
         for (let i = 0; i < content.length; i++) {
@@ -550,7 +572,8 @@ export function useDataManage() {
         const fs = wx.getFileSystemManager()
         let rows: string[][]
         if (ext === 'csv') {
-            const content = fs.readFileSync(filePath, 'utf8') as string
+            let content = fs.readFileSync(filePath, 'utf8') as string
+            if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1)
             rows = splitCsvLines(content).map(l => parseCsvLine(l))
         } else {
             rows = await parseXlsxViaCloud(filePath)
@@ -596,17 +619,18 @@ export function useDataManage() {
             })
         })
         if (!mode) return
-        const BATCH = 100
+        const batches = splitBatches(records)
         let totalInserted = 0
         let totalErrors = 0
         let totalSkipped = 0
-        for (let i = 0; i < records.length; i += BATCH) {
-            const chunk = records.slice(i, i + BATCH)
-            const res = await orderAction('importOrders', { orders: chunk, mode })
+        for (const batch of batches) {
+            const res = await orderAction('importOrders', { orders: batch, mode })
             if (res.result.code === 0) {
                 totalInserted += res.result.data.count
                 totalErrors += res.result.data.errors || 0
                 totalSkipped += res.result.data.skipped || 0
+            } else {
+                throw new Error(res.result.msg || '导入失败')
             }
         }
         const parts = [`导入${totalInserted}条`]
@@ -620,7 +644,8 @@ export function useDataManage() {
         const fs = wx.getFileSystemManager()
         let rows: string[][]
         if (ext === 'csv') {
-            const content = fs.readFileSync(filePath, 'utf8') as string
+            let content = fs.readFileSync(filePath, 'utf8') as string
+            if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1)
             rows = splitCsvLines(content).map(l => parseCsvLine(l))
         } else {
             rows = await parseXlsxViaCloud(filePath)
@@ -657,12 +682,12 @@ export function useDataManage() {
             })
         })
         if (!mode) return
-        const BATCH = 100
+        const batches = splitBatches(items)
         let totalInserted = 0
-        for (let i = 0; i < items.length; i += BATCH) {
-            const chunk = items.slice(i, i + BATCH)
-            const res = await menuAction('importMenuItems', { items: chunk, mode })
+        for (const batch of batches) {
+            const res = await menuAction('importMenuItems', { items: batch, mode })
             if (res.result.code === 0) totalInserted += res.result.data.count
+            else throw new Error(res.result.msg || '导入失败')
         }
         uni.showToast({ title: `导入${totalInserted}条`, icon: 'success' })
         try {
@@ -679,7 +704,8 @@ export function useDataManage() {
         const fs = wx.getFileSystemManager()
         let rows: string[][]
         if (ext === 'csv') {
-            const content = fs.readFileSync(filePath, 'utf8') as string
+            let content = fs.readFileSync(filePath, 'utf8') as string
+            if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1)
             rows = splitCsvLines(content).map(l => parseCsvLine(l))
         } else {
             rows = await parseXlsxViaCloud(filePath)
@@ -716,12 +742,12 @@ export function useDataManage() {
             })
         })
         if (!mode) return
-        const BATCH = 100
+        const batches = splitBatches(members)
         let totalInserted = 0
-        for (let i = 0; i < members.length; i += BATCH) {
-            const chunk = members.slice(i, i + BATCH)
-            const res = await menuAction('importMembers', { members: chunk, mode })
+        for (const batch of batches) {
+            const res = await menuAction('importMembers', { members: batch, mode })
             if (res.result.code === 0) totalInserted += res.result.data.count
+            else throw new Error(res.result.msg || '导入失败')
         }
         uni.showToast({ title: `导入${totalInserted}条`, icon: 'success' })
         try {

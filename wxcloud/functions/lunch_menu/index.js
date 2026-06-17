@@ -16,7 +16,12 @@ const ROLE = { CREATOR: 'creator', ADMIN: 'admin', MEMBER: 'member' }
 async function getMemberByOpenid(openid) {
     const { data } = await db.collection(COL.MEMBERS)
         .where({ groupId: GROUP_ID, openid }).get()
-    return data[0] || null
+    if (data[0]) return data[0]
+    const groupData = (await db.collection(COL.GROUPS).doc(GROUP_ID).get()).data
+    if (groupData && groupData.creatorId === openid) {
+        return { _id: 'recovered', groupId: GROUP_ID, openid, role: ROLE.CREATOR, name: 'creator' }
+    }
+    return null
 }
 
 function checkRole(member, ...allowed) {
@@ -221,13 +226,9 @@ async function importMembers(event, openid) {
 
     const { members, mode } = event
     if (!Array.isArray(members) || members.length === 0) return { code: 400, msg: 'missing members' }
-    if (members.length > 100) return { code: 400, msg: 'max 100 per batch' }
 
     if (mode === 'rewrite') {
-        const all = await fetchAll(db.collection(COL.MEMBERS), { groupId: GROUP_ID })
-        for (const doc of all) {
-            await db.collection(COL.MEMBERS).doc(doc._id).remove()
-        }
+        await db.collection(COL.MEMBERS).where({ groupId: GROUP_ID, openid: _.neq(openid) }).remove()
     }
 
     const now = db.serverDate()
@@ -245,7 +246,7 @@ async function importMembers(event, openid) {
 
     if (batch.length === 0) return { code: 400, msg: 'no valid members' }
 
-    const BATCH_SIZE = 20
+    const BATCH_SIZE = 100
     let inserted = 0
     for (let i = 0; i < batch.length; i += BATCH_SIZE) {
         const chunk = batch.slice(i, i + BATCH_SIZE)
@@ -367,13 +368,9 @@ async function importMenuItems(event, openid) {
 
     const { items, mode } = event
     if (!Array.isArray(items) || items.length === 0) return { code: 400, msg: 'missing items' }
-    if (items.length > 100) return { code: 400, msg: 'max 100 per batch' }
 
     if (mode === 'rewrite') {
-        const all = await fetchAll(db.collection(COL.MENU), { groupId: GROUP_ID })
-        for (const doc of all) {
-            await db.collection(COL.MENU).doc(doc._id).remove()
-        }
+        await db.collection(COL.MENU).where({ groupId: GROUP_ID }).remove()
     }
 
     const { data: existing } = await db.collection(COL.MENU)
@@ -397,7 +394,7 @@ async function importMenuItems(event, openid) {
 
     if (batch.length === 0) return { code: 400, msg: 'no valid items' }
 
-    const BATCH_SIZE = 20
+    const BATCH_SIZE = 100
     let inserted = 0
     for (let i = 0; i < batch.length; i += BATCH_SIZE) {
         const chunk = batch.slice(i, i + BATCH_SIZE)

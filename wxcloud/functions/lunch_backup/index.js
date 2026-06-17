@@ -19,7 +19,12 @@ const BATCH_SIZE = 100
 async function getMemberByOpenid(openid) {
     const { data } = await db.collection(COL.MEMBERS)
         .where({ groupId: GROUP_ID, openid }).get()
-    return data[0] || null
+    if (data[0]) return data[0]
+    const groupData = (await db.collection(COL.GROUPS).doc(GROUP_ID).get()).data
+    if (groupData && groupData.creatorId === openid) {
+        return { _id: 'recovered', groupId: GROUP_ID, openid, role: ROLE.CREATOR, name: 'creator' }
+    }
+    return null
 }
 
 function checkRole(member, ...allowed) {
@@ -105,10 +110,8 @@ async function cleanupOldBackups(type, maxKeep) {
 
     if (all.length <= maxKeep) return
 
-    const toDelete = all.slice(maxKeep)
-    for (const item of toDelete) {
-        await db.collection(COL.BACKUPS).doc(item._id).remove()
-    }
+    const toDeleteIds = all.slice(maxKeep).map(item => item._id)
+    await db.collection(COL.BACKUPS).where({ _id: _.in(toDeleteIds) }).remove()
 }
 
 exports.main = async (event, context) => {

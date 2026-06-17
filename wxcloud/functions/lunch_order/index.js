@@ -18,7 +18,12 @@ const STATUS = { PENDING: 'pending', CONFIRMED: 'confirmed', CANCELLED: 'cancell
 async function getMemberByOpenid(openid) {
     const { data } = await db.collection(COL.MEMBERS)
         .where({ groupId: GROUP_ID, openid }).get()
-    return data[0] || null
+    if (data[0]) return data[0]
+    const groupData = (await db.collection(COL.GROUPS).doc(GROUP_ID).get()).data
+    if (groupData && groupData.creatorId === openid) {
+        return { _id: 'recovered', groupId: GROUP_ID, openid, role: ROLE.CREATOR, name: 'creator' }
+    }
+    return null
 }
 
 function checkRole(member, ...allowed) {
@@ -531,13 +536,9 @@ async function importOrders(event, openid) {
 
     const { orders, mode } = event
     if (!Array.isArray(orders) || orders.length === 0) return { code: 400, msg: 'missing orders' }
-    if (orders.length > 100) return { code: 400, msg: 'max 100 per batch' }
 
     if (mode === 'rewrite') {
-        const all = await fetchAll(db.collection(COL.ORDERS), { groupId: GROUP_ID })
-        for (const doc of all) {
-            await db.collection(COL.ORDERS).doc(doc._id).remove()
-        }
+        await db.collection(COL.ORDERS).where({ groupId: GROUP_ID }).remove()
     }
 
     const allMembers = await fetchAll(db.collection(COL.MEMBERS), { groupId: GROUP_ID })
@@ -610,13 +611,25 @@ async function importOrders(event, openid) {
     }
 
     if (toInsert.length > 0) {
-        const BATCH_SIZE = 20
+        const BATCH_SIZE = 100
         for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
             const chunk = toInsert.slice(i, i + BATCH_SIZE)
-            const addResults = await db.collection(COL.ORDERS).add({ data: chunk })
-            if (Array.isArray(addResults.data)) {
-                addResults.data.forEach((r, idx) => {
-                    results.push({ _id: r._id, date: chunk[idx].date, menuName: chunk[idx].menuName })
+            try {
+                const addResults = await db.collection(COL.ORDERS).add({ data: chunk })
+                if (Array.isArray(addResults.data)) {
+                    addResults.data.forEach((r, idx) => {
+                        results.push({ _id: r._id, date: chunk[idx].date, menuName: chunk[idx].menuName })
+                    })
+                } else if (addResults._id) {
+                    results.push({ _id: addResults._id, date: chunk[0].date, menuName: chunk[0].menuName })
+                } else {
+                    chunk.forEach(item => {
+                        results.push({ _id: 'batch_inserted', date: item.date, menuName: item.menuName })
+                    })
+                }
+            } catch (addErr) {
+                chunk.forEach(item => {
+                    results.push({ error: `插入失败: ${addErr.message || addErr}`, order: item })
                 })
             }
         }

@@ -12,7 +12,8 @@
         },
         "usingComponents" : true,
         "cloud" : true,
-        "cloudfunctionRoot" : "wxcloud/functions/"
+        "cloudfunctionRoot" : "wxcloud/functions/",
+        "lazyCodeLoading" : "requiredComponents"
     },
     "uniStatistics" : {
         "enable" : false
