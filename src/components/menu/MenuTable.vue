@@ -66,7 +66,9 @@ defineProps<{
   isAdmin: boolean
 }>()
 
-defineEmits<{
+const hiddenExpanded = ref(false)
+
+const emit = defineEmits<{
   (e: 'select', menuId: string): void
   (e: 'edit', item: any): void
   (e: 'delete', menuId: string): void
@@ -74,10 +76,8 @@ defineEmits<{
   (e: 'toggle-visible', menuId: string): void
 }>()
 
-const hiddenExpanded = ref(false)
-
 function onSelect(menuId: string) {
-  // emit handled by parent
+  emit('select', menuId)
 }
 </script>
 

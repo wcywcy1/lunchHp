@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue'
-import { useStore } from '../services/store'
+import { useStore, saveSession } from '../services/store'
 import { menuAction, orderAction, backupAction } from '../services/repositories/baseRepository'
 import { ORDER_STATUS, ROLE } from '../constants/orderStatus'
 
@@ -188,6 +188,10 @@ export function useDataManage() {
             await menuAction('updateMemberName', { memberId: editingMember.value._id, name })
             const member = store.members.find((m: any) => m._id === editingMember.value._id)
             if (member) member.name = name
+            if (store.member?._id === editingMember.value._id) {
+                store.member.name = name
+                saveSession({ groupId: store.member.groupId, role: store.member.role, member: store.member })
+            }
             showNameEditDialog.value = false
             uni.showToast({ title: '已保存', icon: 'success' })
         } catch (e: any) {
@@ -197,14 +201,14 @@ export function useDataManage() {
 
     async function setAdminRole(memberId: string) {
         try {
-            await menuAction('setAdmin', { memberId, role: ROLE.ADMIN })
+            await menuAction('setAdmin', { memberId, isAdmin: true })
             const member = store.members.find((m: any) => m._id === memberId)
             if (member) member.role = ROLE.ADMIN
             if (store.member?._id === memberId) {
                 store.member.role = ROLE.ADMIN
                 store.role = ROLE.ADMIN
+                saveSession({ groupId: store.member.groupId, role: ROLE.ADMIN, member: store.member })
             }
-            uni.showToast({ title: '已设为管理员', icon: 'success' })
         } catch (e: any) {
             uni.showToast({ title: e.message || '操作失败', icon: 'none' })
         }
@@ -212,12 +216,13 @@ export function useDataManage() {
 
     async function removeAdminRole(memberId: string) {
         try {
-            await menuAction('setAdmin', { memberId, role: ROLE.MEMBER })
+            await menuAction('setAdmin', { memberId, isAdmin: false })
             const member = store.members.find((m: any) => m._id === memberId)
             if (member) member.role = ROLE.MEMBER
             if (store.member?._id === memberId) {
                 store.member.role = ROLE.MEMBER
                 store.role = ROLE.MEMBER
+                saveSession({ groupId: store.member.groupId, role: ROLE.MEMBER, member: store.member })
             }
             uni.showToast({ title: '已撤除管理员', icon: 'success' })
         } catch (e: any) {
@@ -289,7 +294,7 @@ export function useDataManage() {
                             supplier: parts[6] || '',
                         }
                     })
-                    const res = await orderAction('importOrders', { records })
+                    const res = await orderAction('importOrders', { orders: records })
                     if (res.result.code === 0) {
                         uni.showToast({ title: `导入${res.result.data.count}条`, icon: 'success' })
                         await loadData()

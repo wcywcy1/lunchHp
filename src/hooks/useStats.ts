@@ -204,7 +204,7 @@ export function useStats(): StatsReturn {
         detailLoading.value = true
         try {
             const f = filter.value
-            const params: Record<string, any> = { page: detailPage.value, pageSize }
+            const params: Record<string, any> = { page: detailPage.value + 1, pageSize }
             if (f.year !== null) params.year = f.year
             if (f.months.length > 0) params.months = f.months
             if (f.members.length > 0) params.members = f.members

@@ -375,18 +375,33 @@ async function doRebuildMonthStats(targetYearMonth) {
 }
 
 async function searchOrders(event, openid) {
-    const { startDate, endDate, memberId, supplier, status, page = 1, pageSize = 50 } = event
+    const { startDate, endDate, memberId, supplier, status, members, suppliers, year, months, page = 1, pageSize = 50 } = event
 
     const where = { groupId: GROUP_ID }
-    if (startDate && endDate) {
+
+    if (year) {
+        if (months && months.length > 0) {
+            const patterns = months.map(m => `^${year}-${String(m).padStart(2, '0')}`)
+            if (patterns.length === 1) {
+                where.date = db.RegExp({ regexp: patterns[0] })
+            } else {
+                where.date = _.in(patterns.map(p => db.RegExp({ regexp: p })))
+            }
+        } else {
+            where.date = db.RegExp({ regexp: `^${year}-` })
+        }
+    } else if (startDate && endDate) {
         where.date = _.gte(startDate).and(_.lte(endDate))
     } else if (startDate) {
         where.date = _.gte(startDate)
     } else if (endDate) {
         where.date = _.lte(endDate)
     }
+
     if (memberId) where.memberId = memberId
     if (supplier) where.supplier = supplier
+    if (members && members.length > 0) where.memberName = _.in(members)
+    if (suppliers && suppliers.length > 0) where.supplier = _.in(suppliers)
     if (status) where.status = status
 
     const skip = (page - 1) * pageSize
@@ -471,7 +486,8 @@ async function importOrders(event, openid) {
         results.push({ _id, date: o.date, menuName: o.menuName })
     }
 
-    return { code: 0, data: results }
+    const successCount = results.filter(r => r._id).length
+    return { code: 0, data: { results, count: successCount } }
 }
 
 async function downloadConfirmed(event, openid) {

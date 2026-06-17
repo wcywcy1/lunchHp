@@ -259,7 +259,7 @@ function onConfirm() {
   background: #fff;
   border-radius: 24rpx 24rpx 0 0;
   padding: 32rpx;
-  padding-bottom: calc(32rpx + env(safe-area-inset-bottom));
+  padding-bottom: calc(32rpx + 100rpx + env(safe-area-inset-bottom));
 }
 .panel-header {
   display: flex;

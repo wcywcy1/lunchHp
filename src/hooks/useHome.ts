@@ -93,6 +93,10 @@ export function useHome() {
             await initApp()
             return
         }
+        if (!store.member.privacyAgreed) {
+            showPrivacyDialog.value = true
+            return
+        }
         const now = Date.now()
         if (now - getRecentLoadTime() < CACHE_TTL.RECENT_ORDERS) return
         await checkFreshness()
@@ -147,6 +151,7 @@ export function useHome() {
         try {
             await menuAction('agreePrivacy')
             store.member.privacyAgreed = true
+            saveSession({ groupId: store.member.groupId, role: store.member.role, member: store.member })
             showPrivacyDialog.value = false
             if (!store.member.name) {
                 showWelcomeDialog.value = true
@@ -166,6 +171,7 @@ export function useHome() {
         try {
             await menuAction('updateMemberName', { memberId: store.member._id, name })
             store.member.name = name
+            saveSession({ groupId: store.member.groupId, role: store.member.role, member: store.member })
             editingName.value = ''
             showNameDialog.value = false
             showWelcomeDialog.value = false
