@@ -176,7 +176,8 @@ export function useStats(): StatsReturn {
         loading.value = true
         try {
             const cachedTime = getCache(CACHE_KEYS.MONTHLY_STATS_TIME, true) || 0
-            const since = forceRefresh && cachedTime > 0 ? cachedTime : undefined
+            const oneHourAgo = Date.now() - 60 * 60 * 1000
+            const since = forceRefresh && cachedTime > 0 && cachedTime > oneHourAgo ? cachedTime : undefined
             const params: Record<string, any> = {}
             if (since) params.since = since
 
@@ -195,8 +196,8 @@ export function useStats(): StatsReturn {
                     monthlyStats.value = freshData
                     setCache(CACHE_KEYS.MONTHLY_STATS, freshData)
                 } else {
-                    const cached = getCache(CACHE_KEYS.MONTHLY_STATS, true)
-                    monthlyStats.value = cached && cached.length > 0 ? cached : freshData
+                    monthlyStats.value = []
+                    setCache(CACHE_KEYS.MONTHLY_STATS, [])
                 }
 
                 const now = Date.now()
@@ -218,15 +219,13 @@ export function useStats(): StatsReturn {
 
     function _mergeStats(cached: MonthlyStat[], fresh: MonthlyStat[]): MonthlyStat[] {
         const merged = cached.slice()
-        const idSet = new Set<string>()
-        for (const s of merged) idSet.add(s._id || `${s.year}_${s.month}`)
         for (const s of fresh) {
-            const id = s._id || `${s.year}_${s.month}`
-            if (!idSet.has(id)) {
-                merged.push(s)
+            const key = `${s.year}_${s.month}`
+            const idx = merged.findIndex(m => `${m.year}_${m.month}` === key)
+            if (idx >= 0) {
+                merged[idx] = s
             } else {
-                const idx = merged.findIndex(m => (m._id || `${m.year}_${m.month}`) === id)
-                if (idx >= 0) merged[idx] = s
+                merged.push(s)
             }
         }
         return merged

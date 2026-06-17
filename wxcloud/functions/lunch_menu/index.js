@@ -256,6 +256,11 @@ async function importMembers(event, openid) {
     }
 
     await updateGroupTimestamp('membersTimestamp')
+    if (mode === 'rewrite') {
+        await db.collection(COL.GROUPS).doc(GROUP_ID).update({
+            data: { dataTimestamp: 0 },
+        }).catch(() => { })
+    }
     return { code: 0, data: { count: inserted } }
 }
 

@@ -129,7 +129,6 @@ async function getInitData(event, openid) {
         ? { totalAmount: monthAggResult.list[0].totalAmount, count: monthAggResult.list[0].count, yearMonth }
         : { totalAmount: 0, count: 0, yearMonth }
 
-    const recentTimestamp = recentOrders.length > 0 ? recentOrders[0].createdAt : null
     const groupData = groupResult.data || {}
 
     return {
@@ -139,7 +138,7 @@ async function getInitData(event, openid) {
             recentOrders,
             menu: menuResult.data,
             members: membersResult.data,
-            recentTimestamp,
+            recentTimestamp: groupData.ordersTimestamp || null,
             menuTimestamp: groupData.menuTimestamp || null,
             membersTimestamp: groupData.membersTimestamp || null,
         },
@@ -166,14 +165,8 @@ async function getRecentOrders(event, openid) {
 }
 
 async function getRecentTimestamp(event, openid) {
-    const { data } = await db.collection(COL.ORDERS)
-        .where({ groupId: GROUP_ID })
-        .orderBy('createdAt', 'desc')
-        .limit(1)
-        .field({ createdAt: true })
-        .get()
-
-    const recentTimestamp = data.length > 0 ? data[0].createdAt : null
+    const { data } = await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => ({ data: {} }))
+    const recentTimestamp = data.ordersTimestamp || null
     return { code: 0, data: { recentTimestamp } }
 }
 
@@ -216,6 +209,29 @@ async function _updateDataTimestamp() {
     }
 }
 
+async function _updateOrdersTimestamp() {
+    const now = db.serverDate()
+    const existing = await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => null)
+    if (existing && existing.data) {
+        await db.collection(COL.GROUPS).doc(GROUP_ID).update({
+            data: { ordersTimestamp: now },
+        })
+    } else {
+        await db.collection(COL.GROUPS).add({
+            data: { _id: GROUP_ID, ordersTimestamp: now, createdAt: now },
+        })
+    }
+}
+
+async function _resetDataTimestamp() {
+    const existing = await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => null)
+    if (existing && existing.data) {
+        await db.collection(COL.GROUPS).doc(GROUP_ID).update({
+            data: { dataTimestamp: 0 },
+        })
+    }
+}
+
 async function submitOrder(event, openid) {
     const { date, memberId, memberName, menuId, menuName, supplier, price, note } = event
     if (!date || !memberId || !menuId) return { code: 400, msg: 'missing required fields' }
@@ -251,6 +267,8 @@ async function submitOrder(event, openid) {
 
     const { _id } = await db.collection(COL.ORDERS).add({ data: order })
     order._id = _id
+    await _updateOrdersTimestamp()
+    await _updateDataTimestamp()
     return { code: 0, data: order }
 }
 
@@ -281,6 +299,7 @@ async function batchConfirm(event, openid) {
         await doRebuildMonthStats(date.substring(0, 7))
     }
     await _updateDataTimestamp()
+    await _updateOrdersTimestamp()
 
     return { code: 0, data: results }
 }
@@ -299,7 +318,9 @@ async function cancelOrder(event, openid) {
         data: { status: STATUS.CANCELLED, updatedAt: db.serverDate() },
     })
 
+    await doRebuildMonthStats(order.date.substring(0, 7))
     await _updateDataTimestamp()
+    await _updateOrdersTimestamp()
     return { code: 0 }
 }
 
@@ -310,6 +331,11 @@ async function updateOrder(event, openid) {
     const caller = await getMemberByOpenid(openid)
     if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
 
+    const priceChanged = price !== undefined
+    const order = priceChanged
+        ? (await db.collection(COL.ORDERS).doc(orderId).get()).data
+        : null
+
     const update = { updatedAt: db.serverDate() }
     if (menuId !== undefined) update.menuId = menuId
     if (menuName !== undefined) update.menuName = menuName
@@ -318,7 +344,12 @@ async function updateOrder(event, openid) {
     if (note !== undefined) update.note = note
 
     await db.collection(COL.ORDERS).doc(orderId).update({ data: update })
-    await _updateDataTimestamp()
+
+    if (priceChanged && order) {
+        await doRebuildMonthStats(order.date.substring(0, 7))
+        await _updateDataTimestamp()
+    }
+    await _updateOrdersTimestamp()
     return { code: 0 }
 }
 
@@ -354,6 +385,22 @@ async function getMonthlyStats(event, openid) {
         ? (groupRes.data.dataTimestamp instanceof Date ? groupRes.data.dataTimestamp.getTime() : new Date(groupRes.data.dataTimestamp).getTime())
         : 0
 
+    if (serverTs === 0) {
+        await doRebuildMonthStats(null)
+        await _updateDataTimestamp()
+        const { data } = await db.collection(COL.MONTHLY_STATS)
+            .where(where)
+            .orderBy('year', 'asc')
+            .orderBy('month', 'asc')
+            .get()
+        const result = data.map(doc => _formatStatDoc(doc))
+        const newGroupRes = await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => ({ data: {} }))
+        const newTs = newGroupRes.data && newGroupRes.data.dataTimestamp
+            ? (newGroupRes.data.dataTimestamp instanceof Date ? newGroupRes.data.dataTimestamp.getTime() : new Date(newGroupRes.data.dataTimestamp).getTime())
+            : Date.now()
+        return { code: 0, data: result, dataTimestamp: newTs, incremental: false }
+    }
+
     if (since) {
         const changedWhere = { groupId: GROUP_ID, updatedAt: _.gt(new Date(since)) }
         if (year) changedWhere.year = Number(year)
@@ -362,6 +409,23 @@ async function getMonthlyStats(event, openid) {
             .orderBy('year', 'asc')
             .orderBy('month', 'asc')
             .get()
+
+        if (changedStats.length === 0) {
+            const { total } = await db.collection(COL.MONTHLY_STATS)
+                .where(where)
+                .count()
+            if (total === 0) {
+                await doRebuildMonthStats(null)
+                const { data: rebuilt } = await db.collection(COL.MONTHLY_STATS)
+                    .where(where)
+                    .orderBy('year', 'asc')
+                    .orderBy('month', 'asc')
+                    .get()
+                const result = rebuilt.map(doc => _formatStatDoc(doc))
+                return { code: 0, data: result, dataTimestamp: serverTs, incremental: false }
+            }
+            return { code: 0, data: [], dataTimestamp: serverTs, incremental: true }
+        }
 
         const needRebuild = []
         for (const stat of changedStats) {
@@ -466,8 +530,16 @@ async function rebuildMonthStats(event, openid) {
 
 async function doRebuildMonthStats(targetYearMonth) {
     const where = { groupId: GROUP_ID, status: STATUS.CONFIRMED }
+    const statsWhere = { groupId: GROUP_ID }
     if (targetYearMonth) {
         where.date = db.RegExp({ regexp: `^${targetYearMonth}` })
+        statsWhere.year = Number(targetYearMonth.split('-')[0])
+        statsWhere.month = Number(targetYearMonth.split('-')[1])
+    }
+
+    const oldStats = await fetchAll(db.collection(COL.MONTHLY_STATS), statsWhere)
+    for (const old of oldStats) {
+        await db.collection(COL.MONTHLY_STATS).doc(old._id).remove()
     }
 
     const allOrders = await fetchAll(db.collection(COL.ORDERS), where)
@@ -722,7 +794,10 @@ async function importOrders(event, openid) {
     const successCount = results.filter(r => r._id).length
     const errorCount = results.filter(r => r.error).length
     const skippedCount = results.filter(r => r.skipped).length
-    if (successCount > 0) await _updateDataTimestamp()
+    if (successCount > 0) {
+        await _resetDataTimestamp()
+        await _updateOrdersTimestamp()
+    }
     return { code: 0, data: { results, count: successCount, errors: errorCount, skipped: skippedCount } }
 }
 
