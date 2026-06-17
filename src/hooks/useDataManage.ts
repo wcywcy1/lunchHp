@@ -1,7 +1,8 @@
 import { ref, computed } from 'vue'
-import { useStore, saveSession } from '../services/store'
+import { useStore, saveSession, setCache } from '../services/store'
 import { menuAction, orderAction, backupAction } from '../services/repositories/baseRepository'
 import { ORDER_STATUS, ROLE } from '../constants/orderStatus'
+import { CACHE_KEYS } from '../constants/cacheConfig'
 
 export function useDataManage() {
     function writeCsvWithBom(fs: any, path: string, content: string) {
@@ -654,7 +655,14 @@ export function useDataManage() {
             if (res.result.code === 0) totalInserted += res.result.data.count
         }
         uni.showToast({ title: `导入${totalInserted}条`, icon: 'success' })
-        await loadData()
+        try {
+            const res = await menuAction('getMenuList')
+            if (res.result.code === 0) {
+                const data = res.result.data || []
+                store.menu = data
+                setCache(CACHE_KEYS.MENU, data)
+            }
+        } catch {}
     }
 
     async function doImportMembers(filePath: string, ext: string) {
@@ -696,7 +704,14 @@ export function useDataManage() {
             if (res.result.code === 0) totalInserted += res.result.data.count
         }
         uni.showToast({ title: `导入${totalInserted}条`, icon: 'success' })
-        await loadData()
+        try {
+            const res = await menuAction('getMembers')
+            if (res.result.code === 0) {
+                const data = res.result.data || []
+                store.members = data
+                setCache(CACHE_KEYS.MEMBERS, data)
+            }
+        } catch {}
     }
 
     async function manualBackup() {
