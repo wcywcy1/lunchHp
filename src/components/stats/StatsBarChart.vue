@@ -1,27 +1,34 @@
 <template>
   <view class="stats-bar-chart">
-    <text class="section-title">月度趋势</text>
+    <text class="section-title">月度趋势{{ visibleYear ? ' ' + visibleYear : '' }}</text>
     <view v-if="data.length === 0" class="empty-tip">
       <text>暂无数据</text>
     </view>
-    <view v-else class="chart-container">
+    <scroll-view
+      v-else
+      class="chart-container"
+      scroll-x
+      :scroll-left="scrollLeft"
+      @scroll="onScroll"
+    >
       <view class="chart-area">
         <view
           v-for="(item, index) in data"
           :key="index"
           class="bar-group"
         >
-          <text class="bar-label-top">¥{{ item.amount }}</text>
           <view class="bar-wrapper">
             <view
               class="bar-fill"
               :style="{ height: barHeight(item.value) + '%' }"
-            />
+            >
+              <text class="bar-label-top">{{ formatAmount(item.amount) }}</text>
+            </view>
           </view>
           <text class="bar-label-bottom">{{ item.label }}</text>
         </view>
       </view>
-    </view>
+    </scroll-view>
     <view v-if="data.length > 0" class="download-btn" @tap="$emit('download')">
       <text>下载月度数据</text>
     </view>
@@ -29,15 +36,37 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch, nextTick, getCurrentInstance } from 'vue'
 
 const props = defineProps<{
-  data: { label: string; value: number; amount: number }[]
+  data: { label: string; value: number; amount: number; year: number }[]
 }>()
 
 defineEmits<{
   (e: 'download'): void
 }>()
+
+const instance = getCurrentInstance()
+const visibleYear = ref<number | null>(null)
+const scrollLeft = ref(0)
+let containerWidth = 0
+
+watch(() => props.data, (val) => {
+  if (val.length > 0) {
+    visibleYear.value = val[val.length - 1].year
+    nextTick(() => {
+      scrollLeft.value = 9999
+      measureContainer()
+    })
+  }
+}, { immediate: true })
+
+function measureContainer() {
+  const query = uni.createSelectorQuery().in(instance)
+  query.select('.chart-container').boundingClientRect((rect: any) => {
+    if (rect) containerWidth = rect.width
+  }).exec()
+}
 
 const maxValue = computed(() => {
   if (props.data.length === 0) return 1
@@ -47,6 +76,27 @@ const maxValue = computed(() => {
 
 function barHeight(value: number): number {
   return Math.max((value / maxValue.value) * 100, 2)
+}
+
+function formatAmount(amount: number): string {
+  return amount.toLocaleString('zh-CN')
+}
+
+function onScroll(e: any) {
+  const scrollLeftVal = e.detail.scrollLeft
+  const scrollWidth = e.detail.scrollWidth
+  const cw = containerWidth
+  if (!scrollWidth || !cw) return
+
+  const midPoint = scrollLeftVal + cw / 2
+  const barCount = props.data.length
+  if (barCount === 0) return
+
+  const barWidth = scrollWidth / barCount
+  const idx = Math.min(Math.floor(midPoint / barWidth), barCount - 1)
+  if (idx >= 0 && props.data[idx]) {
+    visibleYear.value = props.data[idx].year
+  }
 }
 </script>
 
@@ -72,8 +122,7 @@ function barHeight(value: number): number {
   font-size: 28rpx;
 }
 .chart-container {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
+  width: 100%;
 }
 .chart-area {
   display: flex;
@@ -94,8 +143,11 @@ function barHeight(value: number): number {
   font-size: 20rpx;
   color: #e65100;
   font-weight: bold;
-  margin-bottom: 8rpx;
   white-space: nowrap;
+  position: absolute;
+  top: -28rpx;
+  left: 50%;
+  transform: translateX(-50%);
 }
 .bar-wrapper {
   width: 100%;
@@ -110,6 +162,7 @@ function barHeight(value: number): number {
   border-radius: 8rpx 8rpx 0 0;
   min-height: 8rpx;
   transition: height 0.3s ease;
+  position: relative;
 }
 .bar-label-bottom {
   font-size: 22rpx;

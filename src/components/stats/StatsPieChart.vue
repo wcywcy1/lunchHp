@@ -5,13 +5,10 @@
       <text>暂无数据</text>
     </view>
     <view v-else class="pie-container">
-      <view class="pie-canvas-wrapper">
-        <canvas
-          canvas-id="pieCanvas"
-          id="pieCanvas"
-          class="pie-canvas"
-          :style="{ width: '200px', height: '200px' }"
-        />
+      <view class="pie-ring-wrapper">
+        <view class="pie-ring" :style="conicGradientStyle">
+          <view class="pie-ring-inner" />
+        </view>
       </view>
       <view class="pie-legend">
         <view
@@ -21,7 +18,7 @@
         >
           <view class="legend-dot" :style="{ background: colors[index % colors.length] }" />
           <text class="legend-name">{{ item.name }}</text>
-          <text class="legend-amount">¥{{ item.amount.toLocaleString('zh-CN') }}</text>
+          <text class="legend-amount">{{ item.amount.toLocaleString('zh-CN') }}</text>
           <text class="legend-percent">{{ item.percent }}%</text>
         </view>
       </view>
@@ -30,7 +27,7 @@
 </template>
 
 <script setup lang="ts">
-import { watch, nextTick, onMounted } from 'vue'
+import { computed } from 'vue'
 
 const props = defineProps<{
   data: { name: string; value: number; amount: number; percent: string }[]
@@ -42,72 +39,21 @@ const colors = [
   '#1565c0', '#ef6c00',
 ]
 
-function drawPie() {
-  if (props.data.length === 0) return
-  const query = wx.createSelectorQuery()
-  query.select('#pieCanvas')
-    .fields({ node: true, size: true })
-    .exec((res: any) => {
-      if (!res || !res[0]) {
-        drawPieFallback()
-        return
-      }
-      const canvas = res[0].node
-      if (!canvas) {
-        drawPieFallback()
-        return
-      }
-      const ctx = canvas.getContext('2d')
-      const dpr = wx.getWindowInfo().pixelRatio
-      canvas.width = res[0].width * dpr
-      canvas.height = res[0].height * dpr
-      ctx.scale(dpr, dpr)
-      drawPieWithCtx(ctx, res[0].width, res[0].height)
-    })
-}
-
-function drawPieFallback() {
-  const ctx = wx.createCanvasContext('pieCanvas')
-  drawPieWithCtx(ctx, 200, 200)
-  ctx.draw()
-}
-
-function drawPieWithCtx(ctx: any, w: number, h: number) {
+const conicGradientStyle = computed(() => {
+  if (props.data.length === 0) return {}
   const total = props.data.reduce((sum, d) => sum + d.value, 0)
-  if (total === 0) return
+  if (total === 0) return {}
 
-  const cx = w / 2
-  const cy = h / 2
-  const r = Math.min(cx, cy) - 8
-  let startAngle = -Math.PI / 2
-
+  let currentDeg = 0
+  const stops: string[] = []
   props.data.forEach((item, index) => {
-    const sliceAngle = (item.value / total) * 2 * Math.PI
-    const endAngle = startAngle + sliceAngle
-
-    ctx.beginPath()
-    ctx.moveTo(cx, cy)
-    ctx.arc(cx, cy, r, startAngle, endAngle)
-    ctx.closePath()
-    ctx.fillStyle = colors[index % colors.length]
-    ctx.fill()
-
-    startAngle = endAngle
+    const deg = (item.value / total) * 360
+    const color = colors[index % colors.length]
+    stops.push(`${color} ${currentDeg}deg ${currentDeg + deg}deg`)
+    currentDeg += deg
   })
-
-  ctx.beginPath()
-  ctx.arc(cx, cy, r * 0.45, 0, Math.PI * 2)
-  ctx.fillStyle = '#ffffff'
-  ctx.fill()
-}
-
-onMounted(() => {
-  nextTick(() => drawPie())
+  return { background: `conic-gradient(${stops.join(', ')})` }
 })
-
-watch(() => props.data, () => {
-  nextTick(() => drawPie())
-}, { deep: true })
 </script>
 
 <style scoped>
@@ -133,21 +79,35 @@ watch(() => props.data, () => {
 }
 .pie-container {
   display: flex;
+  flex-direction: column;
   align-items: center;
   gap: 24rpx;
 }
-.pie-canvas-wrapper {
-  flex-shrink: 0;
-}
-.pie-canvas {
+.pie-ring-wrapper {
   width: 200px;
   height: 200px;
+  flex-shrink: 0;
+}
+.pie-ring {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+}
+.pie-ring-inner {
+  width: 45%;
+  height: 45%;
+  background: #fff;
+  border-radius: 50%;
+  position: relative;
+  top: 27.5%;
+  left: 27.5%;
 }
 .pie-legend {
-  flex: 1;
+  width: 100%;
   display: flex;
   flex-direction: column;
   gap: 12rpx;
+  overflow: hidden;
 }
 .legend-item {
   display: flex;
@@ -177,6 +137,5 @@ watch(() => props.data, () => {
 .legend-percent {
   font-size: 22rpx;
   color: #999;
-  margin-left: auto;
 }
 </style>

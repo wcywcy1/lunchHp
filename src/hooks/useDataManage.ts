@@ -797,7 +797,8 @@ export function useDataManage() {
         let totalSkipped = 0
         for (let i = 0; i < batches.length; i++) {
             const batchMode = i === 0 ? mode : (mode === 'rewrite' ? 'rewrite_continue' : 'append')
-            const res = await orderAction('importOrders', { orders: batches[i], mode: batchMode })
+            const isLastBatch = i === batches.length - 1
+            const res = await orderAction('importOrders', { orders: batches[i], mode: batchMode, isLastBatch })
             if (res.result.code === 0) {
                 totalInserted += res.result.data.count
                 totalErrors += res.result.data.errors || 0

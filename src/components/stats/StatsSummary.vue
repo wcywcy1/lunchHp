@@ -2,7 +2,7 @@
   <view class="stats-summary">
     <view class="summary-card">
       <text class="summary-label">总金额</text>
-      <text class="summary-amount">¥{{ formattedAmount }}</text>
+      <text class="summary-amount">{{ formattedAmount }}</text>
     </view>
     <view class="summary-card">
       <text class="summary-label">订单数</text>

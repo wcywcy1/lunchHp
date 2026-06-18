@@ -32,7 +32,7 @@ interface StatsReturn {
     yearOptions: ComputedRef<number[]>
     memberOptions: ComputedRef<string[]>
     supplierOptions: ComputedRef<string[]>
-    barChartData: ComputedRef<{ label: string; value: number; amount: number }[]>
+    barChartData: ComputedRef<{ label: string; value: number; amount: number; year: number }[]>
     pieChartData: ComputedRef<{ name: string; value: number; amount: number; percent: string }[]>
     detailOrders: Ref<any[]>
     detailLoading: Ref<boolean>
@@ -135,6 +135,7 @@ export function useStats(): StatsReturn {
             label: `${s.month}月`,
             value: s.totalAmount || 0,
             amount: s.totalAmount || 0,
+            year: s.year,
         }))
     )
 
@@ -175,11 +176,12 @@ export function useStats(): StatsReturn {
         }
         loading.value = true
         try {
-            const cachedTime = getCache(CACHE_KEYS.MONTHLY_STATS_TIME, true) || 0
-            const oneHourAgo = Date.now() - 60 * 60 * 1000
-            const since = forceRefresh && cachedTime > 0 && cachedTime > oneHourAgo ? cachedTime : undefined
             const params: Record<string, any> = {}
-            if (since) params.since = since
+            if (!forceRefresh) {
+                const cachedTime = getCache(CACHE_KEYS.MONTHLY_STATS_TIME, true) || 0
+                const oneHourAgo = Date.now() - 60 * 60 * 1000
+                if (cachedTime > 0 && cachedTime > oneHourAgo) params.since = cachedTime
+            }
 
             const res = await orderAction('getMonthlyStats', params)
             if (res.result.code === 0) {
@@ -195,9 +197,6 @@ export function useStats(): StatsReturn {
                 } else if (!isIncremental) {
                     monthlyStats.value = freshData
                     setCache(CACHE_KEYS.MONTHLY_STATS, freshData)
-                } else {
-                    monthlyStats.value = []
-                    setCache(CACHE_KEYS.MONTHLY_STATS, [])
                 }
 
                 const now = Date.now()

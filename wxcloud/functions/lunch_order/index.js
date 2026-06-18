@@ -389,8 +389,14 @@ async function getMonthlyStats(event, openid) {
         : 0
 
     if (serverTs === 0) {
-        await doRebuildMonthStats(null)
+        // 立即占位，防止并发请求也触发 rebuild
         await _updateDataTimestamp()
+        try {
+            await doRebuildMonthStats(null)
+        } catch (e) {
+            await _resetDataTimestamp()
+            throw e
+        }
         const { data } = await db.collection(COL.MONTHLY_STATS)
             .where(where)
             .orderBy('year', 'asc')
@@ -540,6 +546,7 @@ async function doRebuildMonthStats(targetYearMonth) {
         statsWhere.month = Number(targetYearMonth.split('-')[1])
     }
 
+    // 清除旧记录（包括自动生成_id的旧格式）
     await db.collection(COL.MONTHLY_STATS).where(statsWhere).remove()
 
     const allOrders = await fetchAll(db.collection(COL.ORDERS), where)
@@ -569,7 +576,6 @@ async function doRebuildMonthStats(targetYearMonth) {
     }
 
     const now = db.serverDate()
-    const toInsert = []
     for (const [ym, m] of Object.entries(monthMap)) {
         const orderByMember = Object.values(m.byMember)
         const orderBySupplier = Object.values(m.bySupplier)
@@ -583,26 +589,23 @@ async function doRebuildMonthStats(targetYearMonth) {
             orderBySupplierMap[item.supplier || '未定义'] = Math.round(item.amount * 100) / 100
         }
 
-        toInsert.push({
-            groupId: GROUP_ID,
-            year: m.year,
-            month: m.month,
-            totalAmount: Math.round(m.totalAmount * 100) / 100,
-            orderCount: m.count,
-            orderByMember,
-            orderBySupplier,
-            orderByMemberMap,
-            orderBySupplierMap,
-            createdAt: now,
-            updatedAt: now,
+        // 用确定性 _id 写入，并发 rebuild 写同一个 _id 不会产生重复
+        const docId = `${GROUP_ID}_${m.year}_${m.month}`
+        await db.collection(COL.MONTHLY_STATS).doc(docId).set({
+            data: {
+                groupId: GROUP_ID,
+                year: m.year,
+                month: m.month,
+                totalAmount: Math.round(m.totalAmount * 100) / 100,
+                orderCount: m.count,
+                orderByMember,
+                orderBySupplier,
+                orderByMemberMap,
+                orderBySupplierMap,
+                createdAt: now,
+                updatedAt: now,
+            },
         })
-    }
-
-    if (toInsert.length > 0) {
-        const BATCH_SIZE = 100
-        for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
-            await db.collection(COL.MONTHLY_STATS).add({ data: toInsert.slice(i, i + BATCH_SIZE) })
-        }
     }
 
     return { rebuiltMonths: Object.keys(monthMap) }
@@ -799,8 +802,11 @@ async function importOrders(event, openid) {
         for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
             await db.collection(COL.ORDERS).add({ data: toInsert.slice(i, i + BATCH_SIZE) })
         }
-        await _resetDataTimestamp()
         await _updateOrdersTimestamp()
+        // 仅最后一批清零 dataTimestamp，由前端传 isLastBatch 标记
+        if (event.isLastBatch) {
+            await _resetDataTimestamp()
+        }
     }
 
     return { code: 0, data: { count: toInsert.length, errors: errorCount, skipped: skippedCount } }
@@ -1054,7 +1060,7 @@ function _mapHeader(header, fields) {
     return result
 }
 
-async function _importOrdersFromRows(rows, mode, openid) {
+async function _importOrdersFromRows(rows, mode, openid, isLastBatch = true) {
     if (rows.length < 2) return { code: 400, msg: '文件为空' }
 
     const header = rows[0]
@@ -1181,8 +1187,10 @@ async function _importOrdersFromRows(rows, mode, openid) {
         for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
             await db.collection(COL.ORDERS).add({ data: toInsert.slice(i, i + BATCH_SIZE) })
         }
-        await _resetDataTimestamp()
         await _updateOrdersTimestamp()
+        if (isLastBatch) {
+            await _resetDataTimestamp()
+        }
     }
 
     return { code: 0, data: { count: toInsert.length, errors: errorCount, skipped: skippedCount } }

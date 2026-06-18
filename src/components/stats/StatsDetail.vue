@@ -20,7 +20,7 @@
         <text class="col-date">{{ formatDate(order.date) }}</text>
         <text class="col-name">{{ order.memberName }}</text>
         <text class="col-menu">{{ order.menuName }}</text>
-        <text class="col-price">¥{{ order.price }}</text>
+        <text class="col-price">{{ order.price }}</text>
         <text class="col-supplier">{{ order.supplier || '未定义' }}</text>
       </view>
     </view>
@@ -77,6 +77,7 @@ function formatDate(date: string) {
 }
 .detail-table {
   width: 100%;
+  overflow: hidden;
 }
 .detail-header {
   display: flex;
