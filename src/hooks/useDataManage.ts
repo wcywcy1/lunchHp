@@ -569,17 +569,17 @@ export function useDataManage() {
 
     const HEADER_ALIASES: Record<string, string[]> = {
         date: ['日期', 'date'],
-        menuName: ['菜品', '菜品名', 'order', 'description'],
-        memberName: ['姓名', 'name', 'name list', '名单'],
+        menuName: ['菜品', '菜品名', 'menuname', 'order', 'description'],
+        memberName: ['姓名', 'membername', 'name list', '名单'],
         price: ['金额', '价格', 'price', 'rmb'],
         note: ['备注', 'note', 'comment', 'column1'],
         supplier: ['供应商', 'vendor'],
         status: ['状态', 'status'],
         supplier_menu: ['供应商', 'vendor'],
-        menuName_menu: ['菜品名', '菜品', 'order', 'description'],
+        menuName_menu: ['菜品名', '菜品', 'menuname', 'order', 'description'],
         price_menu: ['价格', '金额', 'price', 'rmb'],
         visible: ['可见', 'visible'],
-        name_member: ['姓名', 'name', 'name list', '名单'],
+        name_member: ['姓名', 'membername', 'name list', '名单'],
         nickName: ['昵称', 'nickname', 'nick name'],
         role: ['角色', 'role'],
         isVirtual: ['虚拟用户', 'virtual'],
@@ -588,11 +588,20 @@ export function useDataManage() {
     function mapHeader(header: string[], fields: string[]): Record<string, number> {
         const result: Record<string, number> = {}
         const lowerHeader = header.map(h => (h ?? '').trim().toLowerCase())
+        // Pass 1: exact match
         for (const field of fields) {
             const aliases = HEADER_ALIASES[field] || [field]
             const lowerAliases = aliases.map(a => a.toLowerCase())
-            const idx = lowerHeader.findIndex(h => lowerAliases.some(a => h === a || h.includes(a) || a.includes(h)))
+            const idx = lowerHeader.findIndex(h => lowerAliases.some(a => h === a))
             if (idx >= 0) result[field] = idx
+        }
+        // Pass 2: fuzzy match (only for unmatched fields, avoid already-assigned columns)
+        for (const field of fields) {
+            if (result[field] !== undefined) continue
+            const aliases = HEADER_ALIASES[field] || [field]
+            const lowerAliases = aliases.map(a => a.toLowerCase())
+            const idx = lowerHeader.findIndex(h => lowerAliases.some(a => h.includes(a) || a.includes(h)))
+            if (idx >= 0 && !Object.values(result).includes(idx)) result[field] = idx
         }
         return result
     }
@@ -781,7 +790,7 @@ export function useDataManage() {
         let totalErrors = 0
         let totalSkipped = 0
         for (let i = 0; i < batches.length; i++) {
-            const batchMode = i === 0 ? mode : 'append'
+            const batchMode = i === 0 ? mode : (mode === 'rewrite' ? 'rewrite_continue' : 'append')
             const res = await orderAction('importOrders', { orders: batches[i], mode: batchMode })
             if (res.result.code === 0) {
                 totalInserted += res.result.data.count
@@ -842,7 +851,7 @@ export function useDataManage() {
         const batches = splitBatches(items)
         let totalInserted = 0
         for (let i = 0; i < batches.length; i++) {
-            const batchMode = i === 0 ? mode : 'append'
+            const batchMode = i === 0 ? mode : (mode === 'rewrite' ? 'rewrite_continue' : 'append')
             const res = await menuAction('importMenuItems', { items: batches[i], mode: batchMode })
             if (res.result.code === 0) totalInserted += res.result.data.count
             else throw new Error(res.result.msg || '导入失败')
@@ -902,7 +911,7 @@ export function useDataManage() {
         const batches = splitBatches(members)
         let totalInserted = 0
         for (let i = 0; i < batches.length; i++) {
-            const batchMode = i === 0 ? mode : 'append'
+            const batchMode = i === 0 ? mode : (mode === 'rewrite' ? 'rewrite_continue' : 'append')
             const res = await menuAction('importMembers', { members: batches[i], mode: batchMode })
             if (res.result.code === 0) totalInserted += res.result.data.count
             else throw new Error(res.result.msg || '导入失败')

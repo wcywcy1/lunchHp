@@ -1011,17 +1011,17 @@ function _parseDate(val) {
 
 const HEADER_ALIASES = {
     date: ['日期', 'date'],
-    menuName: ['菜品', '菜品名', 'order', 'description'],
-    memberName: ['姓名', 'name', 'name list', '名单'],
+    menuName: ['菜品', '菜品名', 'menuname', 'order', 'description'],
+    memberName: ['姓名', 'membername', 'name list', '名单'],
     price: ['金额', '价格', 'price', 'rmb'],
     note: ['备注', 'note', 'comment', 'column1'],
     status: ['状态', 'status'],
     supplier: ['供应商', 'vendor'],
     supplier_menu: ['供应商', 'vendor'],
-    menuName_menu: ['菜品名', '菜品', 'order', 'description'],
+    menuName_menu: ['菜品名', '菜品', 'menuname', 'order', 'description'],
     price_menu: ['价格', '金额', 'price', 'rmb'],
     visible: ['可见', 'visible'],
-    name_member: ['姓名', 'name', 'name list', '名单'],
+    name_member: ['姓名', 'membername', 'name list', '名单'],
     nickName: ['昵称', 'nickname', 'nick name'],
     role: ['角色', 'role'],
     isVirtual: ['虚拟用户', 'virtual'],
@@ -1030,11 +1030,20 @@ const HEADER_ALIASES = {
 function _mapHeader(header, fields) {
     const result = {}
     const lowerHeader = header.map(h => (h || '').trim().toLowerCase())
+    // Pass 1: exact match
     for (const field of fields) {
         const aliases = HEADER_ALIASES[field] || [field]
         const lowerAliases = aliases.map(a => a.toLowerCase())
-        const idx = lowerHeader.findIndex(h => lowerAliases.some(a => h === a || h.includes(a) || a.includes(h)))
+        const idx = lowerHeader.findIndex(h => lowerAliases.some(a => h === a))
         if (idx >= 0) result[field] = idx
+    }
+    // Pass 2: fuzzy match (only for fields not yet matched)
+    for (const field of fields) {
+        if (result[field] !== undefined) continue
+        const aliases = HEADER_ALIASES[field] || [field]
+        const lowerAliases = aliases.map(a => a.toLowerCase())
+        const idx = lowerHeader.findIndex(h => lowerAliases.some(a => h.includes(a) || a.includes(h)))
+        if (idx >= 0 && !Object.values(result).includes(idx)) result[field] = idx
     }
     return result
 }
