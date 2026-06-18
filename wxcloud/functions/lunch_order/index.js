@@ -968,7 +968,7 @@ async function importFromXlsx(event, openid) {
     const workbook = XLSX.read(buffer, { type: 'buffer' })
     const sheetName = workbook.SheetNames[0]
     const sheet = workbook.Sheets[sheetName]
-    const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' })
+    const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false })
 
     const rows = jsonData.map(row =>
         row.map(cell => {
@@ -1006,13 +1006,19 @@ function _parseDate(val) {
     if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`
     m = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/)
     if (m) return `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`
+    // 2-digit year: M/D/YY or MM/DD/YY → assume 20XX
+    m = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2})$/)
+    if (m) {
+        const yr = Number(m[3]) + 2000
+        return `${yr}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`
+    }
     return ''
 }
 
 const HEADER_ALIASES = {
     date: ['日期', 'date'],
     menuName: ['菜品', '菜品名', 'menuname', 'order', 'description'],
-    memberName: ['姓名', 'membername', 'name list', '名单'],
+    memberName: ['姓名', 'membername', 'name', 'name list', '名单'],
     price: ['金额', '价格', 'price', 'rmb'],
     note: ['备注', 'note', 'comment', 'column1'],
     status: ['状态', 'status'],
@@ -1021,7 +1027,7 @@ const HEADER_ALIASES = {
     menuName_menu: ['菜品名', '菜品', 'menuname', 'order', 'description'],
     price_menu: ['价格', '金额', 'price', 'rmb'],
     visible: ['可见', 'visible'],
-    name_member: ['姓名', 'membername', 'name list', '名单'],
+    name_member: ['姓名', 'membername', 'name', 'name list', '名单'],
     nickName: ['昵称', 'nickname', 'nick name'],
     role: ['角色', 'role'],
     isVirtual: ['虚拟用户', 'virtual'],

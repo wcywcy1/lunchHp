@@ -565,7 +565,7 @@ async function parseXlsx(event) {
     const workbook = XLSX.read(buffer, { type: 'buffer' })
     const sheetName = workbook.SheetNames[0]
     const sheet = workbook.Sheets[sheetName]
-    const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' })
+    const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false })
 
     const rows = jsonData.map(row =>
         row.map(cell => {
