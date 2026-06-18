@@ -98,6 +98,8 @@ async function getDataTimestamps(event, openid) {
         data: {
             menuTimestamp: data.menuTimestamp || null,
             membersTimestamp: data.membersTimestamp || null,
+            notice: data.notice || '',
+            noticeUpdatedAt: data.noticeUpdatedAt || null,
         }
     }
 }

@@ -144,6 +144,8 @@ async function getInitData(event, openid) {
             recentTimestamp: groupData.ordersTimestamp || null,
             menuTimestamp: groupData.menuTimestamp || null,
             membersTimestamp: groupData.membersTimestamp || null,
+            notice: groupData.notice || '',
+            noticeUpdatedAt: groupData.noticeUpdatedAt || null,
         },
     }
 }

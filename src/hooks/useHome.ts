@@ -94,7 +94,7 @@ export function useHome() {
         try {
             const res = await orderAction('getInitData')
             if (res.result.code === 0) {
-                const { monthSummary, recentOrders, menu, members, recentTimestamp, menuTimestamp, membersTimestamp } = res.result.data
+                const { monthSummary, recentOrders, menu, members, recentTimestamp, menuTimestamp, membersTimestamp, notice, noticeUpdatedAt } = res.result.data
                 setStore({ monthSummary, recentOrders, menu, members, recentTimestamp, menuTimestamp, membersTimestamp, initialized: true })
                 setCache(CACHE_KEYS.RECENT_ORDERS, recentOrders)
                 setCache(CACHE_KEYS.MENU, menu)
@@ -104,6 +104,12 @@ export function useHome() {
                 setCache(CACHE_KEYS.MEMBERS_TIMESTAMP, membersTimestamp)
                 setCache(CACHE_KEYS.MONTH_SUMMARY, monthSummary)
                 setRecentLoadTime(Date.now())
+                // 设置通知
+                if (notice && isNoticeToday(noticeUpdatedAt)) {
+                    noticeContent.value = notice
+                } else {
+                    noticeContent.value = ''
+                }
             }
         } catch (e) {
             console.error('loadInitData error:', e)
@@ -119,6 +125,8 @@ export function useHome() {
             showPrivacyDialog.value = true
             return
         }
+        // 每次都拉取最新通知（轻量，只读一个文档）
+        await fetchNotice()
         const now = Date.now()
         if (now - getRecentLoadTime() < 30 * 1000) {
             startRealtimeWatch()
@@ -126,6 +134,22 @@ export function useHome() {
         }
         await checkFreshness()
         startRealtimeWatch()
+    }
+
+    async function fetchNotice() {
+        try {
+            const res = await menuAction('getDataTimestamps')
+            if (res.result.code === 0) {
+                const { notice, noticeUpdatedAt } = res.result.data
+                if (notice && isNoticeToday(noticeUpdatedAt)) {
+                    noticeContent.value = notice
+                } else {
+                    noticeContent.value = ''
+                }
+            }
+        } catch (e) {
+            console.error('fetchNotice error:', e)
+        }
     }
 
     function startRealtimeWatch() {
