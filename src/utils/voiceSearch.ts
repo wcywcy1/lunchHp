@@ -52,29 +52,34 @@ export function useVoiceSearch(options: VoiceSearchOptions = {}) {
             recorderManager.onStop((res: any) => {
                 recordTempFilePath = res.tempFilePath
                 recorderReady = true
+                // 必须依靠pendingStop判断是否是主动停止录音
                 if (pendingStop) {
+                    processVoiceRecord(recordTempFilePath)
+                } else {
+                    // 超时自动结束录音，直接重置状态
+                    state.value = 'idle'
                     pendingStop = false
-                    if (recordTempFilePath) {
-                        processVoiceRecord(recordTempFilePath)
-                    } else {
-                        state.value = 'idle'
-                        options.onError?.('录音失败，请重试')
-                    }
                 }
             })
             recorderManager.onError(() => {
-                state.value = 'idle'
-                recorderReady = true
-                pendingStop = false
-                recordTempFilePath = ''
-                options.onError?.('录音出错')
+                resetAllStatus()
+                options.onError?.('录音出错，请重试')
             })
             // #endif
         }
         return recorderManager
     }
 
+    // 统一重置所有状态（新增复用函数，解决状态残留问题）
+    function resetAllStatus() {
+        state.value = 'idle'
+        recorderReady = true
+        pendingStop = false
+        recordTempFilePath = ''
+    }
+
     function start() {
+        // 识别中禁止重复点击
         if (state.value !== 'idle' || !recorderReady) return
         // #ifdef MP-WEIXIN
         uni.getSetting({
@@ -83,7 +88,7 @@ export function useVoiceSearch(options: VoiceSearchOptions = {}) {
                     uni.authorize({
                         scope: 'scope.record',
                         success() { doStart() },
-                        fail() { options.onError?.('需要录音权限') },
+                        fail() { options.onError?.('需要开启麦克风录音权限') },
                     })
                 } else {
                     doStart()
@@ -96,7 +101,7 @@ export function useVoiceSearch(options: VoiceSearchOptions = {}) {
     function doStart() {
         const manager = getRecorderManager()
         if (!manager) {
-            options.onError?.('录音不可用')
+            options.onError?.('录音初始化失败')
             return
         }
         recorderReady = false
@@ -116,7 +121,7 @@ export function useVoiceSearch(options: VoiceSearchOptions = {}) {
     function stop() {
         if (state.value !== 'recording') return
         state.value = 'recognizing'
-        endingStop = true
+        pendingStop = true // 恢复这一行，不能注释
         getRecorderManager()?.stop()
     }
 
@@ -129,7 +134,6 @@ export function useVoiceSearch(options: VoiceSearchOptions = {}) {
     }
 
     async function processVoiceRecord(filePath: string) {
-        state.value = 'recognizing'
         try {
             // 1. 上传到云存储
             const cloudPath = 'voice/' + Date.now() + '_' + Math.random().toString(36).substr(2, 6) + '.mp3'
@@ -152,22 +156,23 @@ export function useVoiceSearch(options: VoiceSearchOptions = {}) {
             // 3. 清理临时文件
             wx.cloud.deleteFile({ fileList: [uploadRes.fileID] })
 
-            state.value = 'idle'
             const result = res.result || {}
             if (result.success && result.text) {
                 const keywords = extractKeywords(result.text)
                 options.onStop?.(result.text, keywords)
             } else {
-                options.onError?.(result.message || '识别失败，请重试')
+                options.onError?.(result.message || '语音识别失败，请再说一遍')
             }
             // #endif
             // #ifndef MP-WEIXIN
-            state.value = 'idle'
-            options.onError?.('仅支持小程序端语音识别')
+            options.onError?.('仅微信小程序端支持语音识别')
             // #endif
         } catch (err) {
-            state.value = 'idle'
-            options.onError?.('语音识别失败')
+            console.error('语音识别异常：', err)
+            options.onError?.('网络异常，识别失败')
+        } finally {
+            // 无论成功失败，最后统一重置全部状态
+            resetAllStatus()
         }
     }
 
