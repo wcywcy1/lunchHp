@@ -1,0 +1,14 @@
+{
+  "name": "lunch_voice",
+  "version": "1.0.0",
+  "description": "我要干饭 - 语音识别（腾讯云ASR）",
+  "main": "index.js",
+  "dependencies": {
+    "tencentcloud-sdk-nodejs": "^4.1.252",
+    "wx-server-sdk": "~2.6.3"
+  },
+  "cloudfunctionconfig": {
+    "memorySize": 256,
+    "timeout": 20
+  }
+}

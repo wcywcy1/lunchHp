@@ -13,13 +13,7 @@
         "usingComponents" : true,
         "cloud" : true,
         "cloudfunctionRoot" : "wxcloud/functions/",
-        "lazyCodeLoading" : "requiredComponents",
-        "plugins" : {
-            "WechatSI" : {
-                "version" : "0.3.6",
-                "provider" : "wx069ba97219f66d99"
-            }
-        }
+        "lazyCodeLoading" : "requiredComponents"
     },
     "uniStatistics" : {
         "enable" : false

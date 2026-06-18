@@ -25,6 +25,13 @@
         </picker>
       </view>
     </view>
+    <view v-if="keyword" class="keyword-row">
+      <text class="keyword-label">语音筛选</text>
+      <view class="keyword-tag">
+        <text class="keyword-text">{{ keyword }}</text>
+        <text class="keyword-close" @tap="$emit('clear-keyword')">×</text>
+      </view>
+    </view>
   </view>
 </template>
 
@@ -34,6 +41,7 @@ import { computed } from 'vue'
 const props = defineProps<{
   selectedSupplier: string
   selectedMenuName: string
+  keyword: string
   supplierOptions: string[]
   menuNameOptions: string[]
 }>()
@@ -41,6 +49,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'supplier-change', val: string): void
   (e: 'menu-name-change', val: string): void
+  (e: 'clear-keyword'): void
 }>()
 
 const menuNameDisplayOptions = computed(() =>
@@ -97,6 +106,34 @@ function onMenuNamePick(e: any) {
 .filter-row {
   display: flex;
   margin-top: 12rpx;
+}
+.keyword-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  margin-top: 12rpx;
+}
+.keyword-label {
+  font-size: 24rpx;
+  color: #1976d2;
+  white-space: nowrap;
+}
+.keyword-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 8rpx;
+  padding: 6rpx 16rpx;
+  background: #e3f2fd;
+  border-radius: 20rpx;
+}
+.keyword-text {
+  font-size: 26rpx;
+  color: #1976d2;
+}
+.keyword-close {
+  font-size: 28rpx;
+  color: #1976d2;
+  padding-left: 4rpx;
 }
 .filter-item {
   flex: 1;

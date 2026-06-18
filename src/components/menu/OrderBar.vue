@@ -24,10 +24,31 @@
     </view>
 
     <view
-      :class="['submit-btn', (!selectedMenuItem || submitting) ? 'disabled' : '']"
+      v-if="!selectedMenuItem"
+      :class="['submit-btn', 'voice-btn', voiceState !== 'idle' ? 'recording' : '']"
+      @tap="$emit('voice-toggle')"
+    >
+      <text>{{ voiceState === 'recording' ? '点击结束' : voiceState === 'recognizing' ? '识别中...' : '点击说话' }}</text>
+    </view>
+    <view
+      v-else
+      :class="['submit-btn', submitting ? 'disabled' : '']"
       @tap="$emit('submit')"
     >
       <text>{{ submitting ? '提交中...' : '提交点餐' }}</text>
+    </view>
+
+    <!-- 语音录音遮罩动画 -->
+    <view v-if="voiceState !== 'idle'" class="voice-mask" @tap="$emit('voice-toggle')">
+      <view class="voice-pulse-wrap" @tap.stop>
+        <view class="voice-pulse-ring ring1"></view>
+        <view class="voice-pulse-ring ring2"></view>
+        <view class="voice-pulse-ring ring3"></view>
+        <view class="voice-pulse-core">
+          <text class="voice-icon">🎤</text>
+        </view>
+      </view>
+      <text class="voice-tip">{{ voiceState === 'recognizing' ? '识别中...' : '点击结束录音' }}</text>
     </view>
 
     <view v-if="showMemberPicker" class="member-picker-mask" @tap="$emit('close-picker')">
@@ -75,12 +96,14 @@ const props = defineProps<{
   showMemberPicker: boolean
   showAddMember: boolean
   memberList: any[]
+  voiceState: string
 }>()
 
 const emit = defineEmits<{
   (e: 'switch-self'): void
   (e: 'switch-help'): void
   (e: 'submit'): void
+  (e: 'voice-toggle'): void
   (e: 'pick-member', memberId: string): void
   (e: 'close-picker'): void
   (e: 'show-add'): void
@@ -172,6 +195,61 @@ const addModalStyle = computed(() => {
 }
 .submit-btn.disabled {
   background: #ccc;
+}
+.voice-btn.recording {
+  background: #e65100;
+}
+.voice-mask {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.voice-pulse-wrap {
+  position: relative;
+  width: 200rpx;
+  height: 200rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.voice-pulse-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 4rpx solid rgba(255, 255, 255, 0.6);
+  animation: voicePulse 1.5s ease-out infinite;
+}
+.ring1 { width: 120rpx; height: 120rpx; animation-delay: 0s; }
+.ring2 { width: 160rpx; height: 160rpx; animation-delay: 0.3s; }
+.ring3 { width: 200rpx; height: 200rpx; animation-delay: 0.6s; }
+.voice-pulse-core {
+  width: 100rpx;
+  height: 100rpx;
+  border-radius: 50%;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+}
+.voice-icon {
+  font-size: 48rpx;
+}
+.voice-tip {
+  margin-top: 40rpx;
+  font-size: 28rpx;
+  color: #fff;
+}
+@keyframes voicePulse {
+  0% { transform: scale(0.8); opacity: 1; }
+  100% { transform: scale(1.2); opacity: 0; }
 }
 .member-picker-mask {
   position: fixed;

@@ -108,7 +108,7 @@ function formatDate(date: string) {
   color: #666 !important;
 }
 .col-name {
-  width: 80rpx;
+  width: 160rpx;
   flex-shrink: 0;
   overflow: hidden;
   text-overflow: ellipsis;

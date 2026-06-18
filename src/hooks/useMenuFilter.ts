@@ -12,17 +12,20 @@ interface MenuItem {
 interface MenuFilterReturn {
     selectedSupplier: Ref<string>
     selectedMenuName: Ref<string>
+    keyword: Ref<string>
     supplierOptions: ComputedRef<string[]>
     menuNameOptions: ComputedRef<string[]>
     filteredList: ComputedRef<MenuItem[]>
     onSupplierChange: (val: string) => void
     onMenuNameChange: (val: string) => void
+    setKeyword: (val: string) => void
     resetFilter: () => void
 }
 
 export function useMenuFilter(menuList: Ref<MenuItem[]>): MenuFilterReturn {
     const selectedSupplier = ref('')
     const selectedMenuName = ref('')
+    const keyword = ref('')
 
     const supplierOptions = computed(() => {
         const set = new Set<string>()
@@ -49,6 +52,12 @@ export function useMenuFilter(menuList: Ref<MenuItem[]>): MenuFilterReturn {
         if (selectedMenuName.value) {
             list = list.filter((i: MenuItem) => i.name === selectedMenuName.value)
         }
+        if (keyword.value) {
+            const kw = keyword.value
+            list = list.filter((i: MenuItem) =>
+                i.name.includes(kw) || i.supplier.includes(kw)
+            )
+        }
         return list
     })
 
@@ -68,19 +77,31 @@ export function useMenuFilter(menuList: Ref<MenuItem[]>): MenuFilterReturn {
         }
     }
 
+    function setKeyword(val: string) {
+        keyword.value = val
+        if (val) {
+            // 关键词筛选时清除供应商/餐品精确选择
+            selectedSupplier.value = ''
+            selectedMenuName.value = ''
+        }
+    }
+
     function resetFilter() {
         selectedSupplier.value = ''
         selectedMenuName.value = ''
+        keyword.value = ''
     }
 
     return {
         selectedSupplier,
         selectedMenuName,
+        keyword,
         supplierOptions,
         menuNameOptions,
         filteredList,
         onSupplierChange,
         onMenuNameChange,
+        setKeyword,
         resetFilter,
     }
 }
