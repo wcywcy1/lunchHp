@@ -1,6 +1,6 @@
 <template>
   <view class="stats-bar-chart">
-    <text class="section-title">月度趋势{{ visibleYear ? ' ' + visibleYear : '' }}</text>
+    <text class="section-title">月度趋势{{ yearLabel ? ' ' + yearLabel : '' }}</text>
     <view v-if="data.length === 0" class="empty-tip">
       <text>暂无数据</text>
     </view>
@@ -47,19 +47,23 @@ defineEmits<{
 }>()
 
 const instance = getCurrentInstance()
-const visibleYear = ref<number | null>(null)
+const yearLabel = ref('')
 const scrollLeft = ref(0)
 let containerWidth = 0
 
 watch(() => props.data, (val) => {
   if (val.length > 0) {
-    visibleYear.value = val[val.length - 1].year
+    updateYearLabel(val[val.length - 1].year, val[val.length - 1].year)
     nextTick(() => {
       scrollLeft.value = 9999
       measureContainer()
     })
   }
 }, { immediate: true })
+
+function updateYearLabel(leftYear: number, rightYear: number) {
+  yearLabel.value = leftYear === rightYear ? String(leftYear) : `${leftYear}->${rightYear}`
+}
 
 function measureContainer() {
   const query = uni.createSelectorQuery().in(instance)
@@ -88,14 +92,16 @@ function onScroll(e: any) {
   const cw = containerWidth
   if (!scrollWidth || !cw) return
 
-  const midPoint = scrollLeftVal + cw / 2
   const barCount = props.data.length
   if (barCount === 0) return
 
   const barWidth = scrollWidth / barCount
-  const idx = Math.min(Math.floor(midPoint / barWidth), barCount - 1)
-  if (idx >= 0 && props.data[idx]) {
-    visibleYear.value = props.data[idx].year
+  const leftIdx = Math.min(Math.floor(scrollLeftVal / barWidth), barCount - 1)
+  const rightIdx = Math.min(Math.floor((scrollLeftVal + cw) / barWidth), barCount - 1)
+  const leftYear = props.data[leftIdx]?.year
+  const rightYear = props.data[rightIdx]?.year
+  if (leftYear != null && rightYear != null) {
+    updateYearLabel(leftYear, rightYear)
   }
 }
 </script>
