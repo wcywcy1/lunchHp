@@ -75,6 +75,7 @@ export function useDataManage() {
     const showNoticeSendDialog = ref(false)
     const noticeInput = ref('')
     const sendingNotice = ref(false)
+    const currentNotice = ref('')
 
     const historyPendingCount = ref(0)
     const historyConfirmedCount = ref(0)
@@ -1208,6 +1209,7 @@ export function useDataManage() {
         try {
             const res = await menuAction('setNotice', { content })
             if (res.result.code === 0) {
+                currentNotice.value = content
                 uni.showToast({ title: '通知已发送', icon: 'success' })
                 showNoticeSendDialog.value = false
                 noticeInput.value = ''
@@ -1224,6 +1226,7 @@ export function useDataManage() {
     async function clearNotice() {
         try {
             await menuAction('clearNotice')
+            currentNotice.value = ''
             uni.showToast({ title: '通知已清除', icon: 'success' })
         } catch (e: any) {
             uni.showToast({ title: e.message || '操作失败', icon: 'none' })
@@ -1272,6 +1275,7 @@ export function useDataManage() {
         showNoticeSendDialog,
         noticeInput,
         sendingNotice,
+        currentNotice,
         loadData,
         toggleSelect,
         toggleSelectAll,

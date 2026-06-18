@@ -22,12 +22,22 @@ export function useHome() {
     const showLinkDialog = ref(false)
     const selectedVirtualId = ref('')
     const saving = ref(false)
-    const showNoticeDialog = ref(false)
     const noticeContent = ref('')
     const realtime = useRealtimeWatch()
 
     // 记录已展示过的 notice 更新时间，避免重复弹窗
     let lastShownNoticeTime: number = 0
+
+    // 判断通知是否是今天的（0点自动过期）
+    function isNoticeToday(noticeTime: any): boolean {
+        if (!noticeTime) return false
+        const t = noticeTime instanceof Date ? noticeTime : new Date(noticeTime)
+        if (isNaN(t.getTime())) return false
+        const today = new Date()
+        return t.getFullYear() === today.getFullYear()
+            && t.getMonth() === today.getMonth()
+            && t.getDate() === today.getDate()
+    }
 
     const displayName = computed(() => {
         const m = store.member
@@ -128,37 +138,34 @@ export function useHome() {
         // 监听 notice 通知
         realtime.watchGroupNotice((snapshot: any) => {
             if (snapshot.type === 'init') {
-                // 初始化时如果已有 notice，也展示
                 const docs = snapshot.docs
                 if (docs && docs[0] && docs[0].notice) {
                     const noticeTime = docs[0].noticeUpdatedAt || 0
-                    if (noticeTime > lastShownNoticeTime) {
+                    if (isNoticeToday(noticeTime)) {
                         noticeContent.value = docs[0].notice
-                        showNoticeDialog.value = true
-                        lastShownNoticeTime = noticeTime
+                    } else {
+                        noticeContent.value = ''
                     }
                 }
                 return
             }
-            // 变更事件
             const docChanges = snapshot.docChanges || []
             for (const change of docChanges) {
                 if (change.dataType === 'update' || change.dataType === 'replace') {
                     const notice = change.updatedFields?.notice || change.doc?.notice
                     const noticeTime = change.updatedFields?.noticeUpdatedAt || change.doc?.noticeUpdatedAt || 0
-                    if (notice && noticeTime > lastShownNoticeTime) {
+                    if (notice && isNoticeToday(noticeTime)) {
                         noticeContent.value = notice
-                        showNoticeDialog.value = true
-                        lastShownNoticeTime = noticeTime
+                    } else {
+                        noticeContent.value = ''
                     }
                 }
             }
         })
     }
 
-    function dismissNotice() {
-        showNoticeDialog.value = false
-    }
+    // 是否显示通知（有内容且是今天的）
+    const showNoticeBanner = computed(() => noticeContent.value.length > 0)
 
     async function checkFreshness() {
         try {
@@ -316,8 +323,8 @@ export function useHome() {
         virtualMembers,
         showLinkDialog,
         selectedVirtualId,
-        showNoticeDialog,
         noticeContent,
+        showNoticeBanner,
         initApp,
         onShow,
         onHide: () => realtime.closeAll(),
@@ -331,6 +338,5 @@ export function useHome() {
         openLinkDialog,
         linkVirtualMember,
         selectVirtual,
-        dismissNotice,
     }
 }

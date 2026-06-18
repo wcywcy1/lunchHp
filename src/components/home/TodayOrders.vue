@@ -1,6 +1,13 @@
 <template>
   <view class="today-orders">
-    <text class="section-title">今日点单</text>
+    <view class="section-header">
+      <text class="section-title">今日点单</text>
+      <view v-if="notice" class="notice-scroll-wrap">
+        <view class="notice-scroll-inner">
+          <text class="notice-scroll-text">{{ notice }}</text>
+        </view>
+      </view>
+    </view>
     <view v-if="orders.length === 0" class="empty-tip">
       <text>暂无点单</text>
     </view>
@@ -22,6 +29,7 @@
 <script setup lang="ts">
 defineProps<{
   orders: any[]
+  notice?: string
 }>()
 </script>
 
@@ -33,12 +41,37 @@ defineProps<{
   padding: 24rpx;
   box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.06);
 }
+.section-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 16rpx;
+}
 .section-title {
   font-size: 30rpx;
   font-weight: bold;
   color: #333;
-  margin-bottom: 16rpx;
-  display: block;
+  flex-shrink: 0;
+  margin-right: 16rpx;
+}
+.notice-scroll-wrap {
+  flex: 1;
+  overflow: hidden;
+  height: 36rpx;
+  line-height: 36rpx;
+}
+.notice-scroll-inner {
+  display: inline-block;
+  white-space: nowrap;
+  animation: notice-scroll 8s linear infinite;
+}
+.notice-scroll-text {
+  font-size: 24rpx;
+  color: #d32f2f;
+  font-weight: 500;
+}
+@keyframes notice-scroll {
+  0% { transform: translateX(100%); }
+  100% { transform: translateX(-100%); }
 }
 .empty-tip {
   padding: 40rpx 0;

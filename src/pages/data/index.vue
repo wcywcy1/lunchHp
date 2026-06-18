@@ -1,6 +1,21 @@
 <template>
   <view class="page-data">
     <scroll-view scroll-y class="data-scroll">
+      <view class="notice-section">
+        <view class="notice-header">
+          <text class="notice-title">发送通知</text>
+          <text class="notice-hint">通知将实时推送给所有在线成员，今天0点过期</text>
+        </view>
+        <view v-if="currentNotice" class="notice-current">
+          <text class="notice-current-label">当前通知：</text>
+          <text class="notice-current-text">{{ currentNotice }}</text>
+        </view>
+        <view class="notice-actions">
+          <view class="notice-btn" @tap="openNoticeSendDialog"><text>发送通知</text></view>
+          <view class="notice-btn secondary" @tap="clearNotice"><text>清除通知</text></view>
+        </view>
+      </view>
+
       <PendingList
         :orders="pendingOrders"
         :selectedIds="selectedIds"
@@ -17,17 +32,6 @@
         @toggle-history="toggleHistoryPending"
         @load-more-history="loadMoreHistoryPending"
       />
-
-      <view class="notice-section">
-        <view class="notice-header" @tap="openNoticeSendDialog">
-          <text class="notice-title">发送通知</text>
-          <text class="notice-hint">向所有在线成员推送消息</text>
-        </view>
-        <view class="notice-actions">
-          <view class="notice-btn" @tap="openNoticeSendDialog"><text>发送通知</text></view>
-          <view class="notice-btn secondary" @tap="clearNotice"><text>清除通知</text></view>
-        </view>
-      </view>
 
       <ConfirmedList
         :groups="confirmedBySupplier"
@@ -236,12 +240,12 @@
     </view>
 
     <view v-if="showNoticeSendDialog" class="modal-mask" @tap="showNoticeSendDialog = false">
-      <view class="edit-modal" @tap.stop>
+      <view class="edit-modal" :style="noticeSendModalStyle" @tap.stop>
         <text class="modal-title">发送通知</text>
-        <text class="notice-send-hint">通知将实时推送给所有在线成员</text>
+        <text class="notice-send-hint">通知将实时推送给所有在线成员，今天0点过期</text>
         <view class="form-item">
           <text class="form-label">内容</text>
-          <input class="form-input" v-model="noticeInput" placeholder="如：已停止接单，电话联系" />
+          <input class="form-input" v-model="noticeInput" placeholder="如：已停止接单，电话联系" @keyboardheightchange="onNoticeSendKeyboard" />
         </view>
         <view class="modal-actions">
           <view class="modal-btn cancel" @tap="showNoticeSendDialog = false"><text>取消</text></view>
@@ -314,6 +318,7 @@ const {
   showNoticeSendDialog,
   noticeInput,
   sendingNotice,
+  currentNotice,
   loadData,
   toggleSelect,
   toggleSelectAll,
@@ -357,12 +362,16 @@ const members = computed(() => store.members || [])
 
 const nameEditKeyboardHeight = ref(0)
 const menuEditKeyboardHeight = ref(0)
+const noticeSendKeyboardHeight = ref(0)
 
 function onNameEditKeyboard(e: any) {
   nameEditKeyboardHeight.value = e.detail.height || 0
 }
 function onMenuEditKeyboard(e: any) {
   menuEditKeyboardHeight.value = e.detail.height || 0
+}
+function onNoticeSendKeyboard(e: any) {
+  noticeSendKeyboardHeight.value = e.detail.height || 0
 }
 
 const nameEditModalStyle = computed(() => {
@@ -374,6 +383,12 @@ const nameEditModalStyle = computed(() => {
 const menuEditModalStyle = computed(() => {
   if (menuEditKeyboardHeight.value > 0) {
     return { transform: `translateY(-${menuEditKeyboardHeight.value / 2}px)` }
+  }
+  return {}
+})
+const noticeSendModalStyle = computed(() => {
+  if (noticeSendKeyboardHeight.value > 0) {
+    return { transform: `translateY(-${noticeSendKeyboardHeight.value / 2}px)` }
   }
   return {}
 })
@@ -629,6 +644,22 @@ onHide(() => {
   font-size: 24rpx;
   color: #999;
   margin-top: 4rpx;
+}
+.notice-current {
+  margin: 12rpx 0;
+  padding: 16rpx;
+  background: #fff3e0;
+  border-radius: 8rpx;
+  border: 1rpx solid #ffe0b2;
+}
+.notice-current-label {
+  font-size: 24rpx;
+  color: #e65100;
+  font-weight: bold;
+}
+.notice-current-text {
+  font-size: 26rpx;
+  color: #d32f2f;
 }
 .notice-actions {
   display: flex;

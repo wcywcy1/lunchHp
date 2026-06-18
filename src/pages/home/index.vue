@@ -11,7 +11,7 @@
       :todayAmount="todayAmount"
     />
 
-    <TodayOrders :orders="todayOrders" />
+    <TodayOrders :orders="todayOrders" :notice="showNoticeBanner ? noticeContent : ''" />
 
     <NameEditDialog
       :show="showNameDialog"
@@ -58,16 +58,6 @@
       </view>
     </view>
 
-    <view v-if="showNoticeDialog" class="modal-mask" @tap="dismissNotice">
-      <view class="notice-modal" @tap.stop>
-        <text class="modal-title">通知</text>
-        <text class="notice-content">{{ noticeContent }}</text>
-        <view class="modal-actions">
-          <view class="modal-btn confirm full" @tap="dismissNotice"><text>知道了</text></view>
-        </view>
-      </view>
-    </view>
-
     <CustomTabBar current="pages/home/index" />
   </view>
 </template>
@@ -96,8 +86,8 @@ const {
   virtualMembers,
   showLinkDialog,
   selectedVirtualId,
-  showNoticeDialog,
   noticeContent,
+  showNoticeBanner,
   onShow: onHomeShow,
   onHide: onHomeHide,
   refreshData,
@@ -110,7 +100,6 @@ const {
   openLinkDialog,
   linkVirtualMember,
   selectVirtual,
-  dismissNotice,
 } = useHome()
 
 const welcomeKeyboardHeight = ref(0)
@@ -214,22 +203,5 @@ onPullDownRefresh(() => {
 .modal-btn.confirm {
   background: #1976d2;
   color: #fff;
-}
-.modal-btn.confirm.full {
-  width: 100%;
-}
-.notice-modal {
-  width: 600rpx;
-  background: #fff;
-  border-radius: 24rpx;
-  padding: 40rpx;
-}
-.notice-content {
-  display: block;
-  font-size: 28rpx;
-  color: #333;
-  line-height: 1.6;
-  margin-bottom: 32rpx;
-  text-align: center;
 }
 </style>
