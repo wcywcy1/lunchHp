@@ -83,11 +83,13 @@ export function useOrder(): OrderReturn {
     }
 
     async function addVirtualAndPick(name: string) {
+        if (submitting.value) return
         const trimmed = name.trim()
         if (!trimmed) {
             uni.showToast({ title: '请输入姓名', icon: 'none' })
             return
         }
+        submitting.value = true
         try {
             const res = await menuAction('addVirtualMember', { name: trimmed })
             if (res.result.code === 0) {
@@ -101,6 +103,8 @@ export function useOrder(): OrderReturn {
             }
         } catch (e: any) {
             uni.showToast({ title: e.message || '添加失败', icon: 'none' })
+        } finally {
+            submitting.value = false
         }
     }
 

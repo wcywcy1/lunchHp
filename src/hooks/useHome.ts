@@ -19,6 +19,7 @@ export function useHome() {
     const editingName = ref('')
     const showLinkDialog = ref(false)
     const selectedVirtualId = ref('')
+    const saving = ref(false)
 
     const displayName = computed(() => {
         const m = store.member
@@ -183,8 +184,10 @@ export function useHome() {
     }
 
     async function saveName() {
+        if (saving.value) return
         const name = editingName.value.trim()
         if (!store.member) return
+        saving.value = true
         try {
             await menuAction('updateMemberName', { memberId: store.member._id, name })
             store.member.name = name
@@ -195,6 +198,8 @@ export function useHome() {
             uni.showToast({ title: '已保存', icon: 'success' })
         } catch (e: any) {
             uni.showToast({ title: e.message || '保存失败', icon: 'none' })
+        } finally {
+            saving.value = false
         }
     }
 
@@ -218,7 +223,9 @@ export function useHome() {
     }
 
     async function linkVirtualMember() {
+        if (saving.value) return
         if (!selectedVirtualId.value || !store.member) return
+        saving.value = true
         try {
             const res = await menuAction('linkVirtualMember', { virtualMemberId: selectedVirtualId.value })
             if (res.result.code === 0) {
@@ -232,6 +239,8 @@ export function useHome() {
             }
         } catch (e: any) {
             uni.showToast({ title: e.message || '关联失败', icon: 'none' })
+        } finally {
+            saving.value = false
         }
     }
 

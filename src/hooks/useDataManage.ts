@@ -66,6 +66,7 @@ export function useDataManage() {
     const backupStep = ref<'list' | 'preview' | 'confirm'>('list')
     const selectedBackup = ref<any>(null)
     const backingUp = ref(false)
+    const saving = ref(false)
 
     const historyPendingCount = ref(0)
     const historyConfirmedCount = ref(0)
@@ -366,8 +367,10 @@ export function useDataManage() {
     }
 
     async function saveMemberName() {
+        if (saving.value) return
         if (!editingMember.value) return
         const name = editingName.value.trim()
+        saving.value = true
         try {
             await menuAction('updateMemberName', { memberId: editingMember.value._id, name })
             const member = store.members.find((m: any) => m._id === editingMember.value._id)
@@ -380,6 +383,8 @@ export function useDataManage() {
             uni.showToast({ title: '已保存', icon: 'success' })
         } catch (e: any) {
             uni.showToast({ title: e.message || '保存失败', icon: 'none' })
+        } finally {
+            saving.value = false
         }
     }
 
@@ -1046,7 +1051,9 @@ export function useDataManage() {
     }
 
     async function mergeWithWechat() {
+        if (saving.value) return
         if (!mergingMember.value) return
+        saving.value = true
         try {
             const res = await menuAction('linkVirtualMember', { virtualMemberId: mergingMember.value._id })
             if (res.result.code === 0) {
@@ -1060,6 +1067,8 @@ export function useDataManage() {
             }
         } catch (e: any) {
             uni.showToast({ title: e.message || '合帐失败', icon: 'none' })
+        } finally {
+            saving.value = false
         }
     }
 
@@ -1086,11 +1095,13 @@ export function useDataManage() {
     }
 
     async function saveMenuItem() {
+        if (saving.value) return
         const { menuId, supplier, name, price, photo } = menuEditForm.value
         if (!supplier || !name || price === '') {
             uni.showToast({ title: '请填写完整', icon: 'none' })
             return
         }
+        saving.value = true
         try {
             if (isMenuEdit.value) {
                 await menuAction('updateMenuItem', { menuId, supplier, name, price: Number(price), photo })
@@ -1102,6 +1113,8 @@ export function useDataManage() {
             uni.showToast({ title: isMenuEdit.value ? '已保存' : '已添加', icon: 'success' })
         } catch (e: any) {
             uni.showToast({ title: e.message || '操作失败', icon: 'none' })
+        } finally {
+            saving.value = false
         }
     }
 
