@@ -708,6 +708,35 @@ async function importOrders(event, openid) {
         if (!menuMap[it.name]) menuMap[it.name] = it
     })
 
+    // auto-create missing members and menu items
+    const now = db.serverDate()
+    const newMembers = {}
+    const newMenuItems = {}
+
+    for (const o of orders) {
+        if (!o.memberName || memberMap[o.memberName] || newMembers[o.memberName]) continue
+        const addRes = await db.collection(COL.MEMBERS).add({ data: {
+            groupId: GROUP_ID, name: o.memberName, nickName: '', avatar: '', openid: '',
+            role: ROLE.MEMBER, isVirtual: true, privacyAgreed: false, joinedAt: now,
+        }})
+        newMembers[o.memberName] = { _id: addRes._id, name: o.memberName }
+    }
+    Object.assign(memberMap, newMembers)
+
+    for (const o of orders) {
+        if (!o.menuName) continue
+        const menuKey = (o.supplier || '') + '|' + o.menuName
+        if (menuMap[menuKey] || menuMap[o.menuName] || newMenuItems[menuKey]) continue
+        const addRes = await db.collection(COL.MENU).add({ data: {
+            groupId: GROUP_ID, sortNo: (allMenu.length + Object.keys(newMenuItems).length + 1) * 10,
+            supplier: o.supplier || '', name: o.menuName, price: Number(o.price) || 0,
+            photo: '', visible: true, createdAt: now,
+        }})
+        newMenuItems[menuKey] = { _id: addRes._id, name: o.menuName, supplier: o.supplier || '' }
+        if (!newMenuItems[o.menuName]) newMenuItems[o.menuName] = newMenuItems[menuKey]
+    }
+    Object.assign(menuMap, newMenuItems)
+
     let lastDaySet = null
     if (mode === 'append') {
         const allOrders = await fetchAll(db.collection(COL.ORDERS), { groupId: GROUP_ID })
@@ -720,7 +749,6 @@ async function importOrders(event, openid) {
         }
     }
 
-    const now = db.serverDate()
     const toInsert = []
     let errorCount = 0
     let skippedCount = 0
@@ -1056,6 +1084,35 @@ async function _importOrdersFromRows(rows, mode, openid) {
         if (!menuMap[it.name]) menuMap[it.name] = it
     })
 
+    // auto-create missing members and menu items
+    const now = db.serverDate()
+    const newMembers = {}
+    const newMenuItems = {}
+
+    for (const o of records) {
+        if (!o.memberName || memberMap[o.memberName] || newMembers[o.memberName]) continue
+        const addRes = await db.collection(COL.MEMBERS).add({ data: {
+            groupId: GROUP_ID, name: o.memberName, nickName: '', avatar: '', openid: '',
+            role: ROLE.MEMBER, isVirtual: true, privacyAgreed: false, joinedAt: now,
+        }})
+        newMembers[o.memberName] = { _id: addRes._id, name: o.memberName }
+    }
+    Object.assign(memberMap, newMembers)
+
+    for (const o of records) {
+        if (!o.menuName) continue
+        const menuKey = (o.supplier || '') + '|' + o.menuName
+        if (menuMap[menuKey] || menuMap[o.menuName] || newMenuItems[menuKey]) continue
+        const addRes = await db.collection(COL.MENU).add({ data: {
+            groupId: GROUP_ID, sortNo: (allMenu.length + Object.keys(newMenuItems).length + 1) * 10,
+            supplier: o.supplier || '', name: o.menuName, price: Number(o.price) || 0,
+            photo: '', visible: true, createdAt: now,
+        }})
+        newMenuItems[menuKey] = { _id: addRes._id, name: o.menuName, supplier: o.supplier || '' }
+        if (!newMenuItems[o.menuName]) newMenuItems[o.menuName] = newMenuItems[menuKey]
+    }
+    Object.assign(menuMap, newMenuItems)
+
     let lastDaySet = null
     if (mode === 'append') {
         const allOrders = await fetchAll(db.collection(COL.ORDERS), { groupId: GROUP_ID })
@@ -1068,7 +1125,6 @@ async function _importOrdersFromRows(rows, mode, openid) {
         }
     }
 
-    const now = db.serverDate()
     const toInsert = []
     let errorCount = 0
     let skippedCount = 0
