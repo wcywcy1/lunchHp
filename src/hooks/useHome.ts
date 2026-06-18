@@ -1,9 +1,11 @@
 import { ref, computed } from 'vue'
+import { onShow, onHide } from '@dcloudio/uni-app'
 import { useStore, setStore, getCache, setCache, saveSession, getRecentLoadTime, setRecentLoadTime } from '../services/store'
 import { menuAction, orderAction } from '../services/repositories/baseRepository'
 import { waitForInit } from '../services/appInit'
 import { CACHE_KEYS, CACHE_TTL } from '../constants/cacheConfig'
 import { ORDER_STATUS } from '../constants/orderStatus'
+import { useRealtimeWatch } from './useRealtimeWatch'
 
 function getToday() {
     const d = new Date()
@@ -20,6 +22,12 @@ export function useHome() {
     const showLinkDialog = ref(false)
     const selectedVirtualId = ref('')
     const saving = ref(false)
+    const showNoticeDialog = ref(false)
+    const noticeContent = ref('')
+    const realtime = useRealtimeWatch()
+
+    // 记录已展示过的 notice 更新时间，避免重复弹窗
+    let lastShownNoticeTime: number = 0
 
     const displayName = computed(() => {
         const m = store.member
@@ -102,8 +110,54 @@ export function useHome() {
             return
         }
         const now = Date.now()
-        if (now - getRecentLoadTime() < 30 * 1000) return
+        if (now - getRecentLoadTime() < 30 * 1000) {
+            startRealtimeWatch()
+            return
+        }
         await checkFreshness()
+        startRealtimeWatch()
+    }
+
+    function startRealtimeWatch() {
+        // 监听今日订单变化
+        realtime.watchTodayOrders((snapshot: any) => {
+            if (snapshot.type === 'init') return // 初始化数据忽略，已有 loadData
+            // 有变更时重拉数据
+            fetchRecentOrders()
+        })
+        // 监听 notice 通知
+        realtime.watchGroupNotice((snapshot: any) => {
+            if (snapshot.type === 'init') {
+                // 初始化时如果已有 notice，也展示
+                const docs = snapshot.docs
+                if (docs && docs[0] && docs[0].notice) {
+                    const noticeTime = docs[0].noticeUpdatedAt || 0
+                    if (noticeTime > lastShownNoticeTime) {
+                        noticeContent.value = docs[0].notice
+                        showNoticeDialog.value = true
+                        lastShownNoticeTime = noticeTime
+                    }
+                }
+                return
+            }
+            // 变更事件
+            const docChanges = snapshot.docChanges || []
+            for (const change of docChanges) {
+                if (change.dataType === 'update' || change.dataType === 'replace') {
+                    const notice = change.updatedFields?.notice || change.doc?.notice
+                    const noticeTime = change.updatedFields?.noticeUpdatedAt || change.doc?.noticeUpdatedAt || 0
+                    if (notice && noticeTime > lastShownNoticeTime) {
+                        noticeContent.value = notice
+                        showNoticeDialog.value = true
+                        lastShownNoticeTime = noticeTime
+                    }
+                }
+            }
+        })
+    }
+
+    function dismissNotice() {
+        showNoticeDialog.value = false
     }
 
     async function checkFreshness() {
@@ -262,8 +316,11 @@ export function useHome() {
         virtualMembers,
         showLinkDialog,
         selectedVirtualId,
+        showNoticeDialog,
+        noticeContent,
         initApp,
         onShow,
+        onHide: () => realtime.closeAll(),
         refreshData,
         agreePrivacy,
         disagreePrivacy,
@@ -274,5 +331,6 @@ export function useHome() {
         openLinkDialog,
         linkVirtualMember,
         selectVirtual,
+        dismissNotice,
     }
 }

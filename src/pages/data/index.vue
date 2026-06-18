@@ -18,6 +18,17 @@
         @load-more-history="loadMoreHistoryPending"
       />
 
+      <view class="notice-section">
+        <view class="notice-header" @tap="openNoticeSendDialog">
+          <text class="notice-title">发送通知</text>
+          <text class="notice-hint">向所有在线成员推送消息</text>
+        </view>
+        <view class="notice-actions">
+          <view class="notice-btn" @tap="openNoticeSendDialog"><text>发送通知</text></view>
+          <view class="notice-btn secondary" @tap="clearNotice"><text>清除通知</text></view>
+        </view>
+      </view>
+
       <ConfirmedList
         :groups="confirmedBySupplier"
         :historyCount="historyConfirmedCount"
@@ -224,13 +235,28 @@
       </view>
     </view>
 
+    <view v-if="showNoticeSendDialog" class="modal-mask" @tap="showNoticeSendDialog = false">
+      <view class="edit-modal" @tap.stop>
+        <text class="modal-title">发送通知</text>
+        <text class="notice-send-hint">通知将实时推送给所有在线成员</text>
+        <view class="form-item">
+          <text class="form-label">内容</text>
+          <input class="form-input" v-model="noticeInput" placeholder="如：已停止接单，电话联系" />
+        </view>
+        <view class="modal-actions">
+          <view class="modal-btn cancel" @tap="showNoticeSendDialog = false"><text>取消</text></view>
+          <view :class="['modal-btn confirm', sendingNotice ? 'disabled' : '']" @tap="sendNotice"><text>{{ sendingNotice ? '发送中...' : '发送' }}</text></view>
+        </view>
+      </view>
+    </view>
+
     <CustomTabBar current="pages/data/index" />
   </view>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { onShow, onHide } from '@dcloudio/uni-app'
 import { useStore } from '../../services/store'
 import { useAuth } from '../../hooks/useAuth'
 import { useDataManage } from '../../hooks/useDataManage'
@@ -285,6 +311,9 @@ const {
   loadingHistoryConfirmed,
   historyPendingHasMore,
   historyConfirmedHasMore,
+  showNoticeSendDialog,
+  noticeInput,
+  sendingNotice,
   loadData,
   toggleSelect,
   toggleSelectAll,
@@ -317,6 +346,11 @@ const {
   toggleHistoryConfirmed,
   loadMoreHistoryPending,
   loadMoreHistoryConfirmed,
+  startRealtimeWatch,
+  stopRealtimeWatch,
+  openNoticeSendDialog,
+  sendNotice,
+  clearNotice,
 } = useDataManage()
 
 const members = computed(() => store.members || [])
@@ -361,6 +395,11 @@ onShow(() => {
   }
   loadData()
   loadMenuList()
+  startRealtimeWatch()
+})
+
+onHide(() => {
+  stopRealtimeWatch()
 })
 </script>
 
@@ -569,5 +608,50 @@ onShow(() => {
   font-size: 26rpx;
   color: #333;
   margin-bottom: 4rpx;
+}
+.notice-section {
+  margin: 16rpx 24rpx;
+  background: #fff;
+  border-radius: 16rpx;
+  padding: 24rpx;
+}
+.notice-header {
+  margin-bottom: 16rpx;
+}
+.notice-title {
+  display: block;
+  font-size: 28rpx;
+  font-weight: bold;
+  color: #333;
+}
+.notice-hint {
+  display: block;
+  font-size: 24rpx;
+  color: #999;
+  margin-top: 4rpx;
+}
+.notice-actions {
+  display: flex;
+  gap: 16rpx;
+}
+.notice-btn {
+  flex: 1;
+  text-align: center;
+  padding: 16rpx 0;
+  border-radius: 12rpx;
+  font-size: 28rpx;
+  background: #1976d2;
+  color: #fff;
+}
+.notice-btn.secondary {
+  background: #f5f5f5;
+  color: #666;
+}
+.notice-send-hint {
+  display: block;
+  font-size: 24rpx;
+  color: #999;
+  margin-bottom: 20rpx;
+  text-align: center;
 }
 </style>

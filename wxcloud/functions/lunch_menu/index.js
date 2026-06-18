@@ -67,6 +67,8 @@ exports.main = async (event, context) => {
         toggleVisible,
         batchToggleVisibleBySupplier,
         parseXlsx,
+        setNotice,
+        clearNotice,
     }
 
     const fn = handlers[action]
@@ -580,4 +582,40 @@ async function parseXlsx(event) {
     )
 
     return { code: 0, data: { rows } }
+}
+
+async function setNotice(event, openid) {
+    const { content } = event
+    if (!content || !content.trim()) return { code: 400, msg: '通知内容不能为空' }
+
+    const member = await getMemberByOpenid(openid)
+    if (!checkRole(member, ROLE.CREATOR, ROLE.ADMIN)) {
+        return { code: 403, msg: '无权限' }
+    }
+
+    const now = db.serverDate()
+    await db.collection(COL.GROUPS).doc(GROUP_ID).update({
+        data: {
+            notice: content.trim(),
+            noticeUpdatedAt: now,
+        }
+    })
+
+    return { code: 0, data: { notice: content.trim() } }
+}
+
+async function clearNotice(event, openid) {
+    const member = await getMemberByOpenid(openid)
+    if (!checkRole(member, ROLE.CREATOR, ROLE.ADMIN)) {
+        return { code: 403, msg: '无权限' }
+    }
+
+    await db.collection(COL.GROUPS).doc(GROUP_ID).update({
+        data: {
+            notice: '',
+            noticeUpdatedAt: db.serverDate(),
+        }
+    })
+
+    return { code: 0 }
 }

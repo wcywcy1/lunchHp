@@ -1,8 +1,10 @@
 import { ref, computed } from 'vue'
+import { onShow, onHide } from '@dcloudio/uni-app'
 import { useStore, saveSession, setCache, setRecentLoadTime } from '../services/store'
 import { menuAction, orderAction, backupAction } from '../services/repositories/baseRepository'
 import { ORDER_STATUS, ROLE } from '../constants/orderStatus'
 import { CACHE_KEYS } from '../constants/cacheConfig'
+import { useRealtimeWatch } from './useRealtimeWatch'
 
 export function useDataManage() {
     const MAX_BATCH_COUNT = 2000
@@ -67,6 +69,12 @@ export function useDataManage() {
     const selectedBackup = ref<any>(null)
     const backingUp = ref(false)
     const saving = ref(false)
+    const realtime = useRealtimeWatch()
+
+    // 通知相关
+    const showNoticeSendDialog = ref(false)
+    const noticeInput = ref('')
+    const sendingNotice = ref(false)
 
     const historyPendingCount = ref(0)
     const historyConfirmedCount = ref(0)
@@ -1174,6 +1182,54 @@ export function useDataManage() {
         }
     }
 
+    function startRealtimeWatch() {
+        realtime.watchTodayOrders((snapshot: any) => {
+            if (snapshot.type === 'init') return
+            loadData()
+        })
+    }
+
+    function stopRealtimeWatch() {
+        realtime.closeAll()
+    }
+
+    function openNoticeSendDialog() {
+        noticeInput.value = ''
+        showNoticeSendDialog.value = true
+    }
+
+    async function sendNotice() {
+        const content = noticeInput.value.trim()
+        if (!content) {
+            uni.showToast({ title: '请输入通知内容', icon: 'none' })
+            return
+        }
+        sendingNotice.value = true
+        try {
+            const res = await menuAction('setNotice', { content })
+            if (res.result.code === 0) {
+                uni.showToast({ title: '通知已发送', icon: 'success' })
+                showNoticeSendDialog.value = false
+                noticeInput.value = ''
+            } else {
+                throw new Error(res.result.msg || '发送失败')
+            }
+        } catch (e: any) {
+            uni.showToast({ title: e.message || '发送失败', icon: 'none' })
+        } finally {
+            sendingNotice.value = false
+        }
+    }
+
+    async function clearNotice() {
+        try {
+            await menuAction('clearNotice')
+            uni.showToast({ title: '通知已清除', icon: 'success' })
+        } catch (e: any) {
+            uni.showToast({ title: e.message || '操作失败', icon: 'none' })
+        }
+    }
+
     return {
         loading,
         pendingOrders,
@@ -1213,6 +1269,9 @@ export function useDataManage() {
         loadingHistoryConfirmed,
         historyPendingHasMore,
         historyConfirmedHasMore,
+        showNoticeSendDialog,
+        noticeInput,
+        sendingNotice,
         loadData,
         toggleSelect,
         toggleSelectAll,
@@ -1245,5 +1304,10 @@ export function useDataManage() {
         toggleHistoryConfirmed,
         loadMoreHistoryPending,
         loadMoreHistoryConfirmed,
+        startRealtimeWatch,
+        stopRealtimeWatch,
+        openNoticeSendDialog,
+        sendNotice,
+        clearNotice,
     }
 }

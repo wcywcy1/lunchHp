@@ -90,11 +90,15 @@ onMounted(() => {
 
 onShow(() => {
   if (!loading.value && Date.now() - getStatsLoadTime() > 30 * 1000) {
-    loadStats(true)
+    loadStats()
   }
 })
 
 onPullDownRefresh(() => {
+  if (loading.value) {
+    uni.stopPullDownRefresh()
+    return
+  }
   refreshStats().finally(() => uni.stopPullDownRefresh())
 })
 </script>
