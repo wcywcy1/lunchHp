@@ -509,10 +509,18 @@ export function useDataManage() {
             const cloudPath = `xlsx_import/${Date.now()}_${Math.random().toString(36).substr(2, 6)}.xlsx`
             const uploadRes = await wx.cloud.uploadFile({ cloudPath, filePath })
             uni.showLoading({ title: '导入中...' })
-            const res = await orderAction('importFromXlsx', { fileID: uploadRes.fileID, mode, importType })
-            if (res.result.code === 0) {
-                const data = res.result.data
-                const parts = [`导入${data.count}条`]
+            let res: any
+            try {
+                res = await orderAction('importFromXlsx', { fileID: uploadRes.fileID, mode, importType })
+            } catch (callErr: any) {
+                const errMsg = callErr?.errMsg || callErr?.message || String(callErr)
+                throw new Error(`云函数调用失败: ${errMsg}`)
+            }
+            const result = res?.result
+            if (!result) throw new Error('云函数未返回结果')
+            if (result.code === 0) {
+                const data = result.data || {}
+                const parts = [`导入${data.count || 0}条`]
                 if (data.skipped > 0) parts.push(`跳过${data.skipped}条`)
                 if (data.errors > 0) parts.push(`${data.errors}条失败`)
                 uni.showToast({ title: parts.join('，'), icon: data.count > 0 ? 'success' : 'none' })
@@ -536,10 +544,11 @@ export function useDataManage() {
                     } catch {}
                 }
             } else {
-                throw new Error(res.result.msg || '导入失败')
+                throw new Error(result.msg || '导入失败')
             }
-        } finally {
+        } catch (e: any) {
             uni.hideLoading()
+            uni.showToast({ title: e.message || '导入失败', icon: 'none', duration: 3000 })
         }
     }
 
@@ -578,7 +587,7 @@ export function useDataManage() {
 
     function mapHeader(header: string[], fields: string[]): Record<string, number> {
         const result: Record<string, number> = {}
-        const lowerHeader = header.map(h => h.trim().toLowerCase())
+        const lowerHeader = header.map(h => (h ?? '').trim().toLowerCase())
         for (const field of fields) {
             const aliases = HEADER_ALIASES[field] || [field]
             const lowerAliases = aliases.map(a => a.toLowerCase())
@@ -771,8 +780,9 @@ export function useDataManage() {
         let totalInserted = 0
         let totalErrors = 0
         let totalSkipped = 0
-        for (const batch of batches) {
-            const res = await orderAction('importOrders', { orders: batch, mode })
+        for (let i = 0; i < batches.length; i++) {
+            const batchMode = i === 0 ? mode : 'append'
+            const res = await orderAction('importOrders', { orders: batches[i], mode: batchMode })
             if (res.result.code === 0) {
                 totalInserted += res.result.data.count
                 totalErrors += res.result.data.errors || 0
@@ -831,8 +841,9 @@ export function useDataManage() {
         if (!mode) return
         const batches = splitBatches(items)
         let totalInserted = 0
-        for (const batch of batches) {
-            const res = await menuAction('importMenuItems', { items: batch, mode })
+        for (let i = 0; i < batches.length; i++) {
+            const batchMode = i === 0 ? mode : 'append'
+            const res = await menuAction('importMenuItems', { items: batches[i], mode: batchMode })
             if (res.result.code === 0) totalInserted += res.result.data.count
             else throw new Error(res.result.msg || '导入失败')
         }
@@ -890,8 +901,9 @@ export function useDataManage() {
         if (!mode) return
         const batches = splitBatches(members)
         let totalInserted = 0
-        for (const batch of batches) {
-            const res = await menuAction('importMembers', { members: batch, mode })
+        for (let i = 0; i < batches.length; i++) {
+            const batchMode = i === 0 ? mode : 'append'
+            const res = await menuAction('importMembers', { members: batches[i], mode: batchMode })
             if (res.result.code === 0) totalInserted += res.result.data.count
             else throw new Error(res.result.msg || '导入失败')
         }

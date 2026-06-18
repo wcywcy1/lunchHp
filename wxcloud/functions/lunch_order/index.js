@@ -568,6 +568,8 @@ async function doRebuildMonthStats(targetYearMonth) {
         m.bySupplier[order.supplier].count += 1
     }
 
+    const now = db.serverDate()
+    const toInsert = []
     for (const [ym, m] of Object.entries(monthMap)) {
         const orderByMember = Object.values(m.byMember)
         const orderBySupplier = Object.values(m.bySupplier)
@@ -581,7 +583,7 @@ async function doRebuildMonthStats(targetYearMonth) {
             orderBySupplierMap[item.supplier || '未定义'] = Math.round(item.amount * 100) / 100
         }
 
-        const doc = {
+        toInsert.push({
             groupId: GROUP_ID,
             year: m.year,
             month: m.month,
@@ -591,18 +593,15 @@ async function doRebuildMonthStats(targetYearMonth) {
             orderBySupplier,
             orderByMemberMap,
             orderBySupplierMap,
-            updatedAt: db.serverDate(),
-        }
+            createdAt: now,
+            updatedAt: now,
+        })
+    }
 
-        const existing = await db.collection(COL.MONTHLY_STATS)
-            .where({ groupId: GROUP_ID, year: m.year, month: m.month })
-            .get()
-
-        if (existing.data.length > 0) {
-            await db.collection(COL.MONTHLY_STATS).doc(existing.data[0]._id).update({ data: doc })
-        } else {
-            doc.createdAt = db.serverDate()
-            await db.collection(COL.MONTHLY_STATS).add({ data: doc })
+    if (toInsert.length > 0) {
+        const BATCH_SIZE = 100
+        for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
+            await db.collection(COL.MONTHLY_STATS).add({ data: toInsert.slice(i, i + BATCH_SIZE) })
         }
     }
 
@@ -723,11 +722,12 @@ async function importOrders(event, openid) {
 
     const now = db.serverDate()
     const toInsert = []
-    const results = []
+    let errorCount = 0
+    let skippedCount = 0
 
     for (const o of orders) {
         if (!o.date || !o.memberName || !o.menuName) {
-            results.push({ error: 'missing required fields', order: o })
+            errorCount++
             continue
         }
 
@@ -736,16 +736,16 @@ async function importOrders(event, openid) {
         const menuItem = menuMap[menuKey] || menuMap[o.menuName]
 
         if (!member) {
-            results.push({ error: `成员"${o.memberName}"不存在`, order: o })
+            errorCount++
             continue
         }
         if (!menuItem) {
-            results.push({ error: `菜品"${o.menuName}"不存在`, order: o })
+            errorCount++
             continue
         }
 
         if (lastDaySet && lastDaySet.has(`${member._id}|${menuItem._id}`)) {
-            results.push({ skipped: true, date: o.date, menuName: o.menuName, reason: 'duplicate on last day' })
+            skippedCount++
             continue
         }
 
@@ -769,36 +769,13 @@ async function importOrders(event, openid) {
     if (toInsert.length > 0) {
         const BATCH_SIZE = 100
         for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
-            const chunk = toInsert.slice(i, i + BATCH_SIZE)
-            try {
-                const addResults = await db.collection(COL.ORDERS).add({ data: chunk })
-                if (Array.isArray(addResults.data)) {
-                    addResults.data.forEach((r, idx) => {
-                        results.push({ _id: r._id, date: chunk[idx].date, menuName: chunk[idx].menuName })
-                    })
-                } else if (addResults._id) {
-                    results.push({ _id: addResults._id, date: chunk[0].date, menuName: chunk[0].menuName })
-                } else {
-                    chunk.forEach(item => {
-                        results.push({ _id: 'batch_inserted', date: item.date, menuName: item.menuName })
-                    })
-                }
-            } catch (addErr) {
-                chunk.forEach(item => {
-                    results.push({ error: `插入失败: ${addErr.message || addErr}`, order: item })
-                })
-            }
+            await db.collection(COL.ORDERS).add({ data: toInsert.slice(i, i + BATCH_SIZE) })
         }
-    }
-
-    const successCount = results.filter(r => r._id).length
-    const errorCount = results.filter(r => r.error).length
-    const skippedCount = results.filter(r => r.skipped).length
-    if (successCount > 0) {
         await _resetDataTimestamp()
         await _updateOrdersTimestamp()
     }
-    return { code: 0, data: { results, count: successCount, errors: errorCount, skipped: skippedCount } }
+
+    return { code: 0, data: { count: toInsert.length, errors: errorCount, skipped: skippedCount } }
 }
 
 async function downloadConfirmed(event, openid) {
@@ -1024,7 +1001,7 @@ const HEADER_ALIASES = {
 
 function _mapHeader(header, fields) {
     const result = {}
-    const lowerHeader = header.map(h => h.trim().toLowerCase())
+    const lowerHeader = header.map(h => (h || '').trim().toLowerCase())
     for (const field of fields) {
         const aliases = HEADER_ALIASES[field] || [field]
         const lowerAliases = aliases.map(a => a.toLowerCase())
