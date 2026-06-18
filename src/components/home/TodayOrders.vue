@@ -89,7 +89,7 @@ defineProps<{
   border-bottom: none;
 }
 .order-name {
-  width: 120rpx;
+  flex: 4;
   font-size: 28rpx;
   color: #333;
   flex-shrink: 0;
@@ -98,7 +98,7 @@ defineProps<{
   white-space: nowrap;
 }
 .order-menu {
-  flex: 1;
+  flex: 6;
   font-size: 28rpx;
   color: #666;
   overflow: hidden;
