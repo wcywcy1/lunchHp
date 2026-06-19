@@ -31,6 +31,13 @@
         @batch-confirm="batchConfirm"
         @toggle-history="toggleHistoryPending"
         @load-more-history="loadMoreHistoryPending"
+        @cancel="cancelOrder"
+      />
+
+      <CancelRequestList
+        :requests="pendingCancelRequests"
+        @approve="approveCancelRequest"
+        @reject="rejectCancelRequest"
       />
 
       <ConfirmedList
@@ -43,6 +50,7 @@
         @download="showDownloadDialog = true"
         @toggle-history="toggleHistoryConfirmed"
         @load-more-history="loadMoreHistoryConfirmed"
+        @cancel="cancelOrder"
       />
 
       <MemberList
@@ -266,6 +274,7 @@ import { useAuth } from '../../hooks/useAuth'
 import { useDataManage } from '../../hooks/useDataManage'
 import PendingList from '../../components/data/PendingList.vue'
 import ConfirmedList from '../../components/data/ConfirmedList.vue'
+import CancelRequestList from '../../components/data/CancelRequestList.vue'
 import MemberList from '../../components/data/MemberList.vue'
 import MenuManage from '../../components/data/MenuManage.vue'
 import ImportExport from '../../components/data/ImportExport.vue'
@@ -323,6 +332,11 @@ const {
   toggleSelect,
   toggleSelectAll,
   batchConfirm,
+  cancelOrder,
+  pendingCancelRequests,
+  loadPendingCancelRequests,
+  approveCancelRequest,
+  rejectCancelRequest,
   downloadConfirmed,
   openNameEdit,
   saveMemberName,
@@ -409,6 +423,7 @@ onShow(() => {
     return
   }
   loadData()
+  loadPendingCancelRequests()
   loadMenuList()
   startRealtimeWatch()
 })

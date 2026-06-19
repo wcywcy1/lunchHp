@@ -56,6 +56,20 @@ function formatTimestamp(d) {
     return `${y}${m}${day}_${h}${min}${sec}`
 }
 
+// CSV 字段转义（RFC 4180）：含逗号/引号/换行时用双引号包裹
+function csvEscape(field) {
+    if (field === null || field === undefined) return ''
+    const s = String(field)
+    if (/[",\r\n]/.test(s)) {
+        return '"' + s.replace(/"/g, '""') + '"'
+    }
+    return s
+}
+
+function buildCsvLine(fields) {
+    return fields.map(csvEscape).join(',')
+}
+
 async function doBackup(type, remark) {
     const [orders, menu, members] = await Promise.all([
         fetchAll(db.collection(COL.ORDERS), { groupId: GROUP_ID }),
@@ -232,9 +246,9 @@ async function exportAllOrders(event, openid) {
     const statusMap = { pending: '待确认', confirmed: '已确认', cancelled: '已取消' }
     const header = '日期,菜品,姓名,金额,备注,状态,供应商'
     const rows = allOrders.map(o =>
-        `${o.date},${o.menuName},${o.memberName},${o.price},${o.note || ''},${statusMap[o.status] || o.status},${o.supplier || ''}`
+        buildCsvLine([o.date, o.menuName, o.memberName, o.price, o.note || '', statusMap[o.status] || o.status, o.supplier || ''])
     )
-    const csv = '\uFEFF' + header + '\n' + rows.join('\n')
+    const csv = '\uFEFF' + header + '\r\n' + rows.join('\r\n')
 
     const ts = formatTimestamp(new Date())
     const cloudPath = `lunch/exports/all_orders_${ts}.csv`

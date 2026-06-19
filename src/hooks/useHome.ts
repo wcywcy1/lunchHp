@@ -4,7 +4,6 @@ import { useStore, setStore, getCache, setCache, saveSession, getRecentLoadTime,
 import { menuAction, orderAction } from '../services/repositories/baseRepository'
 import { waitForInit } from '../services/appInit'
 import { CACHE_KEYS, CACHE_TTL } from '../constants/cacheConfig'
-import { ORDER_STATUS } from '../constants/orderStatus'
 import { useRealtimeWatch } from './useRealtimeWatch'
 
 function getToday() {
@@ -44,6 +43,8 @@ export function useHome() {
         return m ? (m.name || m.nickName || '未命名') : ''
     })
 
+    const currentMemberId = computed(() => store.member?._id || '')
+
     const todayDate = computed(() => {
         const d = new Date()
         return `${d.getFullYear()}年${String(d.getMonth() + 1).padStart(2, '0')}月${String(d.getDate()).padStart(2, '0')}日`
@@ -52,7 +53,7 @@ export function useHome() {
     const todayOrders = computed(() => {
         const today = getToday()
         return (store.recentOrders || [])
-            .filter((o: any) => o.date === today && o.status !== ORDER_STATUS.CANCELLED)
+            .filter((o: any) => o.date === today)
     })
 
     const todayAmount = computed(() =>
@@ -249,6 +250,40 @@ export function useHome() {
         }
     }
 
+    // 普通成员取消自己的待确认订单（直接取消）
+    async function cancelMyOrder(orderId: string) {
+        const { confirm } = await uni.showModal({ title: '确认取消', content: '取消后订单将变为已取消状态，确定？' })
+        if (!confirm) return
+        try {
+            const res = await orderAction('cancelMyOrder', { orderId })
+            if (res.result.code === 0) {
+                uni.showToast({ title: '已取消', icon: 'success' })
+                await fetchRecentOrders()
+            } else {
+                throw new Error(res.result.msg || '取消失败')
+            }
+        } catch (e: any) {
+            uni.showToast({ title: e.message || '取消失败', icon: 'none' })
+        }
+    }
+
+    // 普通成员对已确认订单申请取消
+    async function requestCancelOrder(orderId: string) {
+        const { confirm } = await uni.showModal({ title: '申请取消', content: '将向管理员发送取消申请，确定？' })
+        if (!confirm) return
+        try {
+            const res = await orderAction('requestCancelOrder', { orderId })
+            if (res.result.code === 0) {
+                uni.showToast({ title: '申请已发送', icon: 'success' })
+                await fetchRecentOrders()
+            } else {
+                throw new Error(res.result.msg || '申请失败')
+            }
+        } catch (e: any) {
+            uni.showToast({ title: e.message || '申请失败', icon: 'none' })
+        }
+    }
+
     async function agreePrivacy() {
         if (!store.member) return
         try {
@@ -336,6 +371,7 @@ export function useHome() {
     return {
         loading,
         displayName,
+        currentMemberId,
         todayDate,
         monthTotal,
         todayAmount,
@@ -353,6 +389,8 @@ export function useHome() {
         onShow,
         onHide: () => realtime.closeAll(),
         refreshData,
+        cancelMyOrder,
+        requestCancelOrder,
         agreePrivacy,
         disagreePrivacy,
         saveName,

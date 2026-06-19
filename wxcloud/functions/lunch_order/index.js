@@ -51,6 +51,20 @@ async function fetchAll(collection, where) {
     return all
 }
 
+// CSV 字段转义（RFC 4180）：含逗号/引号/换行时用双引号包裹
+function csvEscape(field) {
+    if (field === null || field === undefined) return ''
+    const s = String(field)
+    if (/[",\r\n]/.test(s)) {
+        return '"' + s.replace(/"/g, '""') + '"'
+    }
+    return s
+}
+
+function buildCsvLine(fields) {
+    return fields.map(csvEscape).join(',')
+}
+
 exports.main = async (event, context) => {
     const { OPENID } = cloud.getWXContext()
     const { action } = event
@@ -63,6 +77,10 @@ exports.main = async (event, context) => {
         submitOrder,
         batchConfirm,
         cancelOrder,
+        cancelMyOrder,
+        requestCancelOrder,
+        getPendingCancelRequests,
+        rejectCancelRequest,
         updateOrder,
         getConfirmedBySupplier,
         getMonthlyStats,
@@ -88,6 +106,7 @@ exports.main = async (event, context) => {
 }
 
 async function getInitData(event, openid) {
+    await _autoCancelExpiredPending()
     const today = getToday()
     const yearMonth = today.substring(0, 7)
 
@@ -151,6 +170,7 @@ async function getInitData(event, openid) {
 }
 
 async function getRecentOrders(event, openid) {
+    await _autoCancelExpiredPending()
     const { limit: reqLimit = 100 } = event
     const today = getToday()
 
@@ -237,6 +257,34 @@ async function _resetDataTimestamp() {
     }
 }
 
+// 自动取消过期待确认订单（date < today && status === pending）
+async function _autoCancelExpiredPending() {
+    const today = getToday()
+    const expired = await fetchAll(db.collection(COL.ORDERS), {
+        groupId: GROUP_ID,
+        date: _.lt(today),
+        status: STATUS.PENDING,
+    })
+    if (expired.length === 0) return { cancelled: 0 }
+
+    const now = db.serverDate()
+    const BATCH_SIZE = 100
+    for (let i = 0; i < expired.length; i += BATCH_SIZE) {
+        const chunk = expired.slice(i, i + BATCH_SIZE)
+        await db.collection(COL.ORDERS)
+            .where({ _id: _.in(chunk.map(o => o._id)) })
+            .update({ data: { status: STATUS.CANCELLED, updatedAt: now } })
+    }
+
+    // 重建受影响月份的统计
+    const months = new Set(expired.map(o => o.date.substring(0, 7)))
+    for (const ym of months) {
+        try { await doRebuildMonthStats(ym) } catch (e) { console.error('rebuild month stats error:', e) }
+    }
+    await _updateOrdersTimestamp()
+    return { cancelled: expired.length }
+}
+
 async function submitOrder(event, openid) {
     const { date, memberId, memberName, menuId, menuName, supplier, price, note } = event
     if (!date || !memberId || !menuId) return { code: 400, msg: 'missing required fields' }
@@ -320,11 +368,82 @@ async function cancelOrder(event, openid) {
     if (!order) return { code: 404, msg: 'order not found' }
 
     await db.collection(COL.ORDERS).doc(orderId).update({
-        data: { status: STATUS.CANCELLED, updatedAt: db.serverDate() },
+        data: { status: STATUS.CANCELLED, cancelRequested: false, updatedAt: db.serverDate() },
     })
 
     await doRebuildMonthStats(order.date.substring(0, 7))
     await _updateDataTimestamp()
+    await _updateOrdersTimestamp()
+    return { code: 0 }
+}
+
+// 普通成员对已确认订单申请取消
+async function requestCancelOrder(event, openid) {
+    const { orderId } = event
+    if (!orderId) return { code: 400, msg: 'missing orderId' }
+
+    const caller = await getMemberByOpenid(openid)
+    if (!caller) return { code: 403, msg: 'member only' }
+
+    const order = (await db.collection(COL.ORDERS).doc(orderId).get()).data
+    if (!order) return { code: 404, msg: 'order not found' }
+    if (order.memberId !== caller._id) return { code: 403, msg: '只能申请取消自己的订单' }
+    if (order.status !== STATUS.CONFIRMED) return { code: 400, msg: '只能对已确认订单申请取消' }
+    if (order.cancelRequested) return { code: 409, msg: '已申请取消，请等待管理员处理' }
+
+    await db.collection(COL.ORDERS).doc(orderId).update({
+        data: { cancelRequested: true, updatedAt: db.serverDate() },
+    })
+    await _updateOrdersTimestamp()
+    return { code: 0 }
+}
+
+// 普通成员取消自己的待确认订单（直接取消）
+async function cancelMyOrder(event, openid) {
+    const { orderId } = event
+    if (!orderId) return { code: 400, msg: 'missing orderId' }
+
+    const caller = await getMemberByOpenid(openid)
+    if (!caller) return { code: 403, msg: 'member only' }
+
+    const order = (await db.collection(COL.ORDERS).doc(orderId).get()).data
+    if (!order) return { code: 404, msg: 'order not found' }
+    if (order.memberId !== caller._id) return { code: 403, msg: '只能取消自己的订单' }
+    if (order.status !== STATUS.PENDING) return { code: 400, msg: '只能取消待确认订单' }
+
+    await db.collection(COL.ORDERS).doc(orderId).update({
+        data: { status: STATUS.CANCELLED, updatedAt: db.serverDate() },
+    })
+    await _updateOrdersTimestamp()
+    return { code: 0 }
+}
+
+// 管理员查询待处理的取消申请
+async function getPendingCancelRequests(event, openid) {
+    const caller = await getMemberByOpenid(openid)
+    if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
+
+    const { data } = await db.collection(COL.ORDERS)
+        .where({ groupId: GROUP_ID, status: STATUS.CONFIRMED, cancelRequested: true })
+        .orderBy('updatedAt', 'asc')
+        .get()
+    return { code: 0, data }
+}
+
+// 管理员拒绝取消申请
+async function rejectCancelRequest(event, openid) {
+    const { orderId } = event
+    if (!orderId) return { code: 400, msg: 'missing orderId' }
+
+    const caller = await getMemberByOpenid(openid)
+    if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
+
+    const order = (await db.collection(COL.ORDERS).doc(orderId).get()).data
+    if (!order) return { code: 404, msg: 'order not found' }
+
+    await db.collection(COL.ORDERS).doc(orderId).update({
+        data: { cancelRequested: false, updatedAt: db.serverDate() },
+    })
     await _updateOrdersTimestamp()
     return { code: 0 }
 }
@@ -676,9 +795,9 @@ async function exportOrders(event, openid) {
     const statusMap = { [STATUS.PENDING]: '待确认', [STATUS.CONFIRMED]: '已确认', [STATUS.CANCELLED]: '已取消' }
     const header = '日期,菜品,姓名,金额,备注,状态,供应商'
     const rows = allOrders.map(o =>
-        `${o.date},${o.menuName},${o.memberName},${o.price},${o.note || ''},${statusMap[o.status] || o.status},${o.supplier}`
+        buildCsvLine([o.date, o.menuName, o.memberName, o.price, o.note || '', statusMap[o.status] || o.status, o.supplier])
     )
-    const csv = '\uFEFF' + header + '\n' + rows.join('\n')
+    const csv = '\uFEFF' + header + '\r\n' + rows.join('\r\n')
 
     const ts = Date.now()
     const cloudPath = `lunch/exports/orders_${ts}.csv`
@@ -844,10 +963,10 @@ async function downloadConfirmed(event, openid) {
 
     if (supplier) {
         const header = '姓名,餐品,金额,备注'
-        const rows = orders.map(o => `${o.memberName},${o.menuName},${o.price},${o.note || ''}`)
+        const rows = orders.map(o => buildCsvLine([o.memberName, o.menuName, o.price, o.note || '']))
         const total = orders.reduce((s, o) => s + o.price, 0)
-        rows.push(`合计,,${Math.round(total * 100) / 100},`)
-        csv = '\uFEFF' + header + '\n' + rows.join('\n')
+        rows.push(buildCsvLine(['合计', '', Math.round(total * 100) / 100, '']))
+        csv = '\uFEFF' + header + '\r\n' + rows.join('\r\n')
         fileName = `确认单_${supplier}_${date}.csv`
     } else {
         const bySupplier = {}
@@ -861,14 +980,14 @@ async function downloadConfirmed(event, openid) {
         let grandTotal = 0
         for (const [sup, supOrders] of Object.entries(bySupplier)) {
             for (const o of supOrders) {
-                rows.push(`${sup},${o.memberName},${o.menuName},${o.price},${o.note || ''}`)
+                rows.push(buildCsvLine([sup, o.memberName, o.menuName, o.price, o.note || '']))
             }
             const subTotal = supOrders.reduce((s, o) => s + o.price, 0)
-            rows.push(`${sup},小计,,${Math.round(subTotal * 100) / 100},`)
+            rows.push(buildCsvLine([sup, '小计', '', Math.round(subTotal * 100) / 100, '']))
             grandTotal += subTotal
         }
-        rows.push(`全部,合计,,${Math.round(grandTotal * 100) / 100},`)
-        csv = '\uFEFF' + header + '\n' + rows.join('\n')
+        rows.push(buildCsvLine(['全部', '合计', '', Math.round(grandTotal * 100) / 100, '']))
+        csv = '\uFEFF' + header + '\r\n' + rows.join('\r\n')
         fileName = `确认单_全部_${date}.csv`
     }
 
@@ -906,7 +1025,7 @@ async function downloadMonthlyData(event, openid) {
     }
     const suppliers = [...supplierSet].sort()
 
-    const header = ['月份', '总金额', '订单数', ...suppliers].join(',')
+    const header = ['月份', '总金额', '订单数', ...suppliers].map(csvEscape).join(',')
     const rows = stats.map(s => {
         const ym = `${s.year}-${String(s.month).padStart(2, '0')}`
         const supMap = {}
@@ -914,10 +1033,10 @@ async function downloadMonthlyData(event, openid) {
             supMap[sup.supplier] = sup.amount
         }
         const supValues = suppliers.map(sup => Math.round((supMap[sup] || 0) * 100) / 100)
-        return [ym, Math.round(s.totalAmount * 100) / 100, s.count, ...supValues].join(',')
+        return buildCsvLine([ym, Math.round(s.totalAmount * 100) / 100, s.count, ...supValues])
     })
 
-    const csv = '\uFEFF' + header + '\n' + rows.join('\n')
+    const csv = '\uFEFF' + header + '\r\n' + rows.join('\r\n')
     const ts = Date.now()
     const yearSuffix = year || 'all'
     const cloudPath = `lunch/exports/monthly_${yearSuffix}_${ts}.csv`

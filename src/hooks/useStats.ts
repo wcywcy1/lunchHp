@@ -2,6 +2,7 @@ import { ref, computed, ComputedRef, Ref } from 'vue'
 import { useStore, getCache, setCache } from '../services/store'
 import { orderAction } from '../services/repositories/baseRepository'
 import { CACHE_KEYS, CACHE_TTL } from '../constants/cacheConfig'
+import { buildCsvLine, writeCsvWithBom } from '../utils/csv'
 
 interface MonthlyStat {
     _id: string
@@ -334,12 +335,12 @@ export function useStats(): StatsReturn {
             } else {
                 const csvLines = ['月份,总金额,订单数']
                 filteredStats.value.forEach(s => {
-                    csvLines.push(`${s.year}-${String(s.month).padStart(2, '0')},${s.totalAmount},${s.orderCount}`)
+                    csvLines.push(buildCsvLine([`${s.year}-${String(s.month).padStart(2, '0')}`, s.totalAmount, s.orderCount]))
                 })
                 const fs = wx.getFileSystemManager()
                 const fileName = 'monthly_stats.csv'
                 const path = `${wx.env.USER_DATA_PATH}/${fileName}`
-                fs.writeFileSync(path, csvLines.join('\n'), 'utf8')
+                writeCsvWithBom(fs, path, csvLines.join('\r\n'))
                 uni.showModal({
                     title: '导出成功',
                     content: '是否分享到微信？',

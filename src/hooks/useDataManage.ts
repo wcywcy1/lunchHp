@@ -5,6 +5,7 @@ import { menuAction, orderAction, backupAction } from '../services/repositories/
 import { ORDER_STATUS, ROLE } from '../constants/orderStatus'
 import { CACHE_KEYS } from '../constants/cacheConfig'
 import { useRealtimeWatch } from './useRealtimeWatch'
+import { buildCsvLine, writeCsvWithBom } from '../utils/csv'
 
 export function useDataManage() {
     const MAX_BATCH_COUNT = 2000
@@ -27,24 +28,6 @@ export function useDataManage() {
         }
         if (batch.length > 0) batches.push(batch)
         return batches
-    }
-
-    function writeCsvWithBom(fs: any, path: string, content: string) {
-        const bytes: number[] = [0xEF, 0xBB, 0xBF]
-        for (let i = 0; i < content.length; i++) {
-            let code = content.charCodeAt(i)
-            if (code >= 0x10000) {
-                code -= 0x10000
-                bytes.push(0xF0 | (code >> 18), 0x80 | ((code >> 12) & 0x3F), 0x80 | ((code >> 6) & 0x3F), 0x80 | (code & 0x3F))
-            } else if (code >= 0x800) {
-                bytes.push(0xE0 | (code >> 12), 0x80 | ((code >> 6) & 0x3F), 0x80 | (code & 0x3F))
-            } else if (code >= 0x80) {
-                bytes.push(0xC0 | (code >> 6), 0x80 | (code & 0x3F))
-            } else {
-                bytes.push(code)
-            }
-        }
-        fs.writeFileSync(path, new Uint8Array(bytes).buffer as ArrayBuffer)
     }
 
     const store = useStore()
@@ -165,6 +148,70 @@ export function useDataManage() {
             uni.showToast({ title: e.message || '确认失败', icon: 'none' })
         } finally {
             confirming.value = false
+        }
+    }
+
+    async function cancelOrder(orderId: string) {
+        const { confirm } = await uni.showModal({ title: '确认取消', content: '取消后订单将变为已取消状态，确定？' })
+        if (!confirm) return
+        try {
+            const res = await orderAction('cancelOrder', { orderId })
+            if (res.result.code === 0) {
+                uni.showToast({ title: '已取消', icon: 'success' })
+                await loadData()
+                await loadPendingCancelRequests()
+            } else {
+                throw new Error(res.result.msg || '取消失败')
+            }
+        } catch (e: any) {
+            uni.showToast({ title: e.message || '取消失败', icon: 'none' })
+        }
+    }
+
+    // 取消申请相关
+    const pendingCancelRequests = ref<any[]>([])
+
+    async function loadPendingCancelRequests() {
+        try {
+            const res = await orderAction('getPendingCancelRequests')
+            if (res.result.code === 0) {
+                pendingCancelRequests.value = res.result.data || []
+            }
+        } catch (e) {
+            console.error('loadPendingCancelRequests error:', e)
+        }
+    }
+
+    async function approveCancelRequest(orderId: string) {
+        const { confirm } = await uni.showModal({ title: '同意取消', content: '确认同意该取消申请？' })
+        if (!confirm) return
+        try {
+            const res = await orderAction('cancelOrder', { orderId })
+            if (res.result.code === 0) {
+                uni.showToast({ title: '已同意取消', icon: 'success' })
+                await loadData()
+                await loadPendingCancelRequests()
+            } else {
+                throw new Error(res.result.msg || '操作失败')
+            }
+        } catch (e: any) {
+            uni.showToast({ title: e.message || '操作失败', icon: 'none' })
+        }
+    }
+
+    async function rejectCancelRequest(orderId: string) {
+        const { confirm } = await uni.showModal({ title: '拒绝取消', content: '确认拒绝该取消申请？' })
+        if (!confirm) return
+        try {
+            const res = await orderAction('rejectCancelRequest', { orderId })
+            if (res.result.code === 0) {
+                uni.showToast({ title: '已拒绝', icon: 'success' })
+                await loadPendingCancelRequests()
+            } else {
+                throw new Error(res.result.msg || '操作失败')
+            }
+        } catch (e: any) {
+            uni.showToast({ title: e.message || '操作失败', icon: 'none' })
         }
     }
 
@@ -336,13 +383,13 @@ export function useDataManage() {
                 for (const group of confirmedBySupplier.value) {
                     const lines = ['姓名,餐品,金额,备注']
                     group.orders.forEach((o: any) => {
-                        lines.push(`${o.memberName},${o.menuName},${o.price},${o.note || ''}`)
+                        lines.push(buildCsvLine([o.memberName, o.menuName, o.price, o.note || '']))
                     })
-                    lines.push(`合计,,${group.subtotal},`)
+                    lines.push(buildCsvLine(['合计', '', group.subtotal, '']))
                     const fs = wx.getFileSystemManager()
                     const fileName = `确认单_${group.supplier}_${getDateStr()}.csv`
                     const path = `${wx.env.USER_DATA_PATH}/${fileName}`
-                    writeCsvWithBom(fs, path, lines.join('\n'))
+                    writeCsvWithBom(fs, path, lines.join('\r\n'))
                     const shareRes = await shareLocalFile(path, fileName)
                     uni.showToast({ title: shareRes.success ? '分享成功' : (shareRes.cancelled ? '已取消' : '分享失败'), icon: shareRes.success ? 'success' : 'none' })
                 }
@@ -350,16 +397,16 @@ export function useDataManage() {
                 const lines = ['供应商,姓名,餐品,金额,备注']
                 confirmedBySupplier.value.forEach(group => {
                     group.orders.forEach((o: any) => {
-                        lines.push(`${group.supplier},${o.memberName},${o.menuName},${o.price},${o.note || ''}`)
+                        lines.push(buildCsvLine([group.supplier, o.memberName, o.menuName, o.price, o.note || '']))
                     })
-                    lines.push(`${group.supplier},小计,,${group.subtotal},`)
+                    lines.push(buildCsvLine([group.supplier, '小计', '', group.subtotal, '']))
                 })
                 const total = confirmedOrders.value.reduce((s: number, o: any) => s + (o.price || 0), 0)
-                lines.push(`全部,合计,,${total},`)
+                lines.push(buildCsvLine(['全部', '合计', '', total, '']))
                 const fs = wx.getFileSystemManager()
                 const fileName = `确认单_全部_${getDateStr()}.csv`
                 const path = `${wx.env.USER_DATA_PATH}/${fileName}`
-                writeCsvWithBom(fs, path, lines.join('\n'))
+                writeCsvWithBom(fs, path, lines.join('\r\n'))
                 const shareRes = await shareLocalFile(path, fileName)
                 uni.showToast({ title: shareRes.success ? '分享成功' : (shareRes.cancelled ? '已取消' : '分享失败'), icon: shareRes.success ? 'success' : 'none' })
             }
@@ -661,12 +708,12 @@ export function useDataManage() {
             const statusMap: Record<string, string> = { pending: '待确认', confirmed: '已确认', cancelled: '已取消' }
             const lines = ['日期,菜品,姓名,金额,备注,状态,供应商']
             allOrders.forEach(o => {
-                lines.push(`${o.date},${o.menuName},${o.memberName},${o.price},${o.note || ''},${statusMap[o.status] || o.status},${o.supplier || ''}`)
+                lines.push(buildCsvLine([o.date, o.menuName, o.memberName, o.price, o.note || '', statusMap[o.status] || o.status, o.supplier || '']))
             })
             const fs = wx.getFileSystemManager()
             const fileName = `export_orders_${getDateStr()}.csv`
             const path = `${wx.env.USER_DATA_PATH}/${fileName}`
-            writeCsvWithBom(fs, path, lines.join('\n'))
+            writeCsvWithBom(fs, path, lines.join('\r\n'))
             const shareRes = await shareLocalFile(path, fileName)
             if (shareRes.success) {
                 uni.showToast({ title: allOrders.length === 0 ? '模板已分享' : '分享成功', icon: 'success' })
@@ -685,12 +732,12 @@ export function useDataManage() {
                 const menuList = res.result.data || []
                 const lines = ['供应商,菜品名,价格,可见']
                 menuList.forEach((m: any) => {
-                    lines.push(`${m.supplier},${m.name},${m.price},${m.visible !== false ? '是' : '否'}`)
+                    lines.push(buildCsvLine([m.supplier, m.name, m.price, m.visible !== false ? '是' : '否']))
                 })
                 const fs = wx.getFileSystemManager()
                 const fileName = `export_menu_${getDateStr()}.csv`
                 const path = `${wx.env.USER_DATA_PATH}/${fileName}`
-                writeCsvWithBom(fs, path, lines.join('\n'))
+                writeCsvWithBom(fs, path, lines.join('\r\n'))
                 const shareRes = await shareLocalFile(path, fileName)
                 if (shareRes.success) {
                     uni.showToast({ title: menuList.length === 0 ? '模板已分享' : '分享成功', icon: 'success' })
@@ -710,12 +757,12 @@ export function useDataManage() {
                 const memberList = res.result.data || []
                 const lines = ['姓名,昵称,角色,虚拟用户']
                 memberList.forEach((m: any) => {
-                    lines.push(`${m.name || ''},${m.nickName || ''},${m.role || 'member'},${m.isVirtual ? '是' : '否'}`)
+                    lines.push(buildCsvLine([m.name || '', m.nickName || '', m.role || 'member', m.isVirtual ? '是' : '否']))
                 })
                 const fs = wx.getFileSystemManager()
                 const fileName = `export_members_${getDateStr()}.csv`
                 const path = `${wx.env.USER_DATA_PATH}/${fileName}`
-                writeCsvWithBom(fs, path, lines.join('\n'))
+                writeCsvWithBom(fs, path, lines.join('\r\n'))
                 const shareRes = await shareLocalFile(path, fileName)
                 if (shareRes.success) {
                     uni.showToast({ title: memberList.length === 0 ? '模板已分享' : '分享成功', icon: 'success' })
@@ -1306,6 +1353,11 @@ export function useDataManage() {
         toggleSelect,
         toggleSelectAll,
         batchConfirm,
+        cancelOrder,
+        pendingCancelRequests,
+        loadPendingCancelRequests,
+        approveCancelRequest,
+        rejectCancelRequest,
         downloadConfirmed,
         openNameEdit,
         saveMemberName,

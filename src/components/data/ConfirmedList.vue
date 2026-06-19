@@ -10,6 +10,7 @@
         <text class="order-name">{{ order.memberName }}</text>
         <text class="order-menu">{{ order.menuName }}</text>
         <text class="order-price">¥{{ order.price }}</text>
+        <view class="order-action" @tap="$emit('cancel', order._id)"><text>取消</text></view>
       </view>
       <view class="subtotal">
         <text class="subtotal-text">小计：¥{{ group.subtotal }}</text>
@@ -58,6 +59,7 @@ defineEmits<{
   (e: 'download'): void
   (e: 'toggle-history'): void
   (e: 'load-more-history'): void
+  (e: 'cancel', id: string): void
 }>()
 
 const historyGroups = computed(() => {
@@ -125,7 +127,7 @@ const historyGroups = computed(() => {
   white-space: nowrap;
 }
 .order-menu {
-  flex: 6;
+  flex: 5;
   font-size: 28rpx;
   color: #666;
   overflow: hidden;
@@ -138,6 +140,14 @@ const historyGroups = computed(() => {
   font-size: 28rpx;
   color: #e65100;
   flex-shrink: 0;
+}
+.order-action {
+  width: 80rpx;
+  text-align: center;
+  font-size: 24rpx;
+  color: #d32f2f;
+  flex-shrink: 0;
+  margin-left: 12rpx;
 }
 .subtotal {
   padding: 12rpx 20rpx;

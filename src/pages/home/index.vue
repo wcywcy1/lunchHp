@@ -11,7 +11,13 @@
       :todayAmount="todayAmount"
     />
 
-    <TodayOrders :orders="todayOrders" :notice="showNoticeBanner ? noticeContent : ''" />
+    <TodayOrders
+      :orders="todayOrders"
+      :notice="showNoticeBanner ? noticeContent : ''"
+      :currentMemberId="currentMemberId"
+      @cancel-mine="cancelMyOrder"
+      @request-cancel="requestCancelOrder"
+    />
 
     <NameEditDialog
       :show="showNameDialog"
@@ -79,6 +85,7 @@ const {
   monthTotal,
   todayAmount,
   todayOrders,
+  currentMemberId,
   showPrivacyDialog,
   showNameDialog,
   showWelcomeDialog,
@@ -91,6 +98,8 @@ const {
   onShow: onHomeShow,
   onHide: onHomeHide,
   refreshData,
+  cancelMyOrder,
+  requestCancelOrder,
   agreePrivacy,
   disagreePrivacy,
   saveName,

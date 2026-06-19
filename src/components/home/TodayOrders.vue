@@ -11,26 +11,94 @@
     <view v-if="orders.length === 0" class="empty-tip">
       <text>暂无点单</text>
     </view>
-    <view
-      v-for="order in orders"
-      :key="order._id"
-      class="order-item"
-    >
-      <text class="order-name">{{ order.memberName }}</text>
-      <text class="order-menu">{{ order.menuName }}</text>
-      <text class="order-price">¥{{ order.price }}</text>
-      <text :class="['order-status', order.status === 'confirmed' ? 'confirmed' : 'pending']">
-        {{ order.status === 'confirmed' ? '✅' : '⏳' }}
-      </text>
-    </view>
+    <template v-else>
+      <view v-if="confirmedOrders.length > 0" class="order-group">
+        <view class="group-header">
+          <text class="group-title confirmed">已确认 ({{ confirmedOrders.length }})</text>
+        </view>
+        <view
+          v-for="order in confirmedOrders"
+          :key="order._id"
+          class="order-item"
+        >
+          <text class="order-name">{{ order.memberName }}</text>
+          <text class="order-menu">{{ order.menuName }}</text>
+          <text class="order-price">¥{{ order.price }}</text>
+          <view v-if="isMine(order) && !order.cancelRequested" class="order-action" @tap="$emit('request-cancel', order._id)">
+            <text>申请取消</text>
+          </view>
+          <view v-else-if="isMine(order) && order.cancelRequested" class="order-action pending-tag">
+            <text>申请中</text>
+          </view>
+          <text v-else class="order-status confirmed">✅</text>
+        </view>
+      </view>
+
+      <view v-if="pendingOrders.length > 0" class="order-group">
+        <view class="group-header">
+          <text class="group-title pending">待确认 ({{ pendingOrders.length }})</text>
+        </view>
+        <view
+          v-for="order in pendingOrders"
+          :key="order._id"
+          class="order-item"
+        >
+          <text class="order-name">{{ order.memberName }}</text>
+          <text class="order-menu">{{ order.menuName }}</text>
+          <text class="order-price">¥{{ order.price }}</text>
+          <view v-if="isMine(order)" class="order-action" @tap="$emit('cancel-mine', order._id)">
+            <text>取消</text>
+          </view>
+          <text v-else class="order-status pending">⏳</text>
+        </view>
+      </view>
+
+      <view v-if="cancelledOrders.length > 0" class="order-group">
+        <view class="group-header">
+          <text class="group-title cancelled">已取消 ({{ cancelledOrders.length }})</text>
+        </view>
+        <view
+          v-for="order in cancelledOrders"
+          :key="order._id"
+          class="order-item cancelled-item"
+        >
+          <text class="order-name">{{ order.memberName }}</text>
+          <text class="order-menu">{{ order.menuName }}</text>
+          <text class="order-price">¥{{ order.price }}</text>
+          <text class="order-status cancelled">❌</text>
+        </view>
+      </view>
+    </template>
   </view>
 </template>
 
 <script setup lang="ts">
-defineProps<{
+import { computed } from 'vue'
+
+const props = defineProps<{
   orders: any[]
   notice?: string
+  currentMemberId?: string
 }>()
+
+defineEmits<{
+  (e: 'cancel-mine', id: string): void
+  (e: 'request-cancel', id: string): void
+}>()
+
+const confirmedOrders = computed(() =>
+  props.orders.filter(o => o.status === 'confirmed')
+)
+const pendingOrders = computed(() =>
+  props.orders.filter(o => o.status === 'pending')
+)
+const cancelledOrders = computed(() =>
+  props.orders.filter(o => o.status === 'cancelled')
+)
+
+function isMine(order: any) {
+  return props.currentMemberId && order.memberId === props.currentMemberId
+}
 </script>
 
 <style scoped>
@@ -79,6 +147,30 @@ defineProps<{
   color: #ccc;
   font-size: 28rpx;
 }
+.order-group {
+  border-top: 1rpx solid #eee;
+  padding-top: 8rpx;
+}
+.order-group:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+.group-header {
+  padding: 8rpx 0;
+}
+.group-title {
+  font-size: 24rpx;
+  font-weight: bold;
+}
+.group-title.confirmed {
+  color: #388e3c;
+}
+.group-title.pending {
+  color: #f57c00;
+}
+.group-title.cancelled {
+  color: #999;
+}
 .order-item {
   display: flex;
   align-items: center;
@@ -87,6 +179,17 @@ defineProps<{
 }
 .order-item:last-child {
   border-bottom: none;
+}
+.cancelled-item {
+  opacity: 0.6;
+}
+.cancelled-item .order-name,
+.cancelled-item .order-menu {
+  text-decoration: line-through;
+  color: #999;
+}
+.cancelled-item .order-price {
+  color: #999;
 }
 .order-name {
   flex: 4;
@@ -98,7 +201,7 @@ defineProps<{
   white-space: nowrap;
 }
 .order-menu {
-  flex: 6;
+  flex: 5;
   font-size: 28rpx;
   color: #666;
   overflow: hidden;
@@ -123,5 +226,23 @@ defineProps<{
 }
 .order-status.confirmed {
   color: #388e3c;
+}
+.order-status.cancelled {
+  color: #999;
+}
+.order-action {
+  width: 120rpx;
+  text-align: center;
+  font-size: 24rpx;
+  color: #d32f2f;
+  flex-shrink: 0;
+  margin-left: 12rpx;
+  padding: 6rpx 0;
+  border: 1rpx solid #d32f2f;
+  border-radius: 8rpx;
+}
+.order-action.pending-tag {
+  color: #999;
+  border-color: #ccc;
 }
 </style>
