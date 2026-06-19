@@ -128,11 +128,7 @@ export function useHome() {
         }
         // 每次都拉取最新通知（轻量，只读一个文档）
         await fetchNotice()
-        const now = Date.now()
-        if (now - getRecentLoadTime() < 30 * 1000) {
-            startRealtimeWatch()
-            return
-        }
+        // 总是检查订单时间戳，确保从其他页面切回时能拿到最新数据
         await checkFreshness()
         startRealtimeWatch()
     }

@@ -24,11 +24,14 @@
           <text class="order-name">{{ order.memberName }}</text>
           <text class="order-menu">{{ order.menuName }}</text>
           <text class="order-price">¥{{ order.price }}</text>
-          <view v-if="isMine(order) && !order.cancelRequested" class="order-action" @tap="$emit('request-cancel', order._id)">
-            <text>申请取消</text>
-          </view>
-          <view v-else-if="isMine(order) && order.cancelRequested" class="order-action pending-tag">
+          <view v-if="isMine(order) && order.cancelRequested" class="order-action pending-tag">
             <text>申请中</text>
+          </view>
+          <view v-else-if="isMine(order) && order.cancelRejected" class="order-action pending-tag" @tap="onRejectedTap">
+            <text>拒绝取消</text>
+          </view>
+          <view v-else-if="isMine(order)" class="order-action" @tap="$emit('request-cancel', order._id)">
+            <text>申请取消</text>
           </view>
           <text v-else class="order-status confirmed">✅</text>
         </view>
@@ -98,6 +101,10 @@ const cancelledOrders = computed(() =>
 
 function isMine(order: any) {
   return props.currentMemberId && order.memberId === props.currentMemberId
+}
+
+function onRejectedTap() {
+  uni.showToast({ title: '申请已拒绝，请联系管理员', icon: 'none' })
 }
 </script>
 

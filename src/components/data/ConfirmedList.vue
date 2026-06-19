@@ -2,7 +2,7 @@
   <view class="confirmed-list">
     <view class="section-header">
       <view
-        v-if="allConfirmedOrders.length > 0"
+        v-if="orders.length > 0"
         :class="['checkbox', isAllSelected ? 'checked' : '']"
         @tap="$emit('toggle-all')"
       >
@@ -10,32 +10,30 @@
       </view>
       <text class="section-title">已确认订单</text>
     </view>
-    <view v-if="groups.length === 0" class="empty-tip">
+    <view v-if="orders.length === 0" class="empty-tip">
       <text>暂无已确认订单</text>
     </view>
-    <view v-for="group in groups" :key="group.supplier || '__undefined__'" class="supplier-group">
-      <text class="supplier-title">{{ group.supplier || '未定义' }}</text>
-      <view v-for="order in group.orders" :key="order._id" class="order-item">
-        <view
-          :class="['checkbox', selectedIds.includes(order._id) ? 'checked' : '']"
-          @tap="$emit('toggle', order._id)"
-        >
-          <text v-if="selectedIds.includes(order._id)" class="check-mark">✓</text>
-        </view>
-        <text class="order-name">{{ order.memberName }}</text>
-        <text class="order-menu">{{ order.menuName }}</text>
-        <text class="order-price">¥{{ order.price }}</text>
+    <view v-for="order in orders" :key="order._id" class="order-item">
+      <view
+        :class="['checkbox', selectedIds.includes(order._id) ? 'checked' : '']"
+        @tap="$emit('toggle', order._id)"
+      >
+        <text v-if="selectedIds.includes(order._id)" class="check-mark">✓</text>
       </view>
-      <view class="subtotal">
-        <text class="subtotal-text">小计：¥{{ group.subtotal }}</text>
-      </view>
+      <text class="order-name">{{ order.memberName }}</text>
+      <text class="order-menu">{{ order.menuName }}</text>
+      <text class="order-price">¥{{ order.price }}</text>
     </view>
-    <view v-if="groups.length > 0" class="batch-actions">
+    <view v-if="orders.length > 0" class="total-bar">
+      <text class="total-label">总计</text>
+      <text class="total-amount">¥{{ totalAmount }}</text>
+    </view>
+    <view v-if="orders.length > 0" class="batch-actions">
       <view class="download-btn" @tap="$emit('download')">
         <text>下载确认单</text>
       </view>
-      <view :class="['cancel-btn', cancelling ? 'disabled' : '']" @tap="$emit('batch-cancel')">
-        <text>{{ cancelling ? '取消中...' : '批量取消' }}</text>
+      <view :class="['cancel-btn', cancelling ? 'disabled' : (selectedIds.length === 0 ? 'disabled' : '')]" @tap="$emit('batch-cancel')">
+        <text>{{ cancelling ? '取消中...' : (selectedIds.length > 1 ? '批量取消' : '取消') }}</text>
       </view>
     </view>
 
@@ -66,7 +64,7 @@
 import { computed } from 'vue'
 
 const props = defineProps<{
-  groups: { supplier: string; orders: any[]; subtotal: number }[]
+  orders: any[]
   selectedIds: string[]
   isAllSelected: boolean
   cancelling: boolean
@@ -86,8 +84,8 @@ defineEmits<{
   (e: 'batch-cancel'): void
 }>()
 
-const allConfirmedOrders = computed(() =>
-  props.groups.flatMap(g => g.orders)
+const totalAmount = computed(() =>
+  props.orders.reduce((sum: number, o: any) => sum + (o.price || 0), 0)
 )
 
 const historyGroups = computed(() => {
@@ -125,24 +123,10 @@ const historyGroups = computed(() => {
   color: #ccc;
   font-size: 28rpx;
 }
-.supplier-group {
-  margin-bottom: 20rpx;
-  border: 1rpx solid #f0f0f0;
-  border-radius: 12rpx;
-  overflow: hidden;
-}
-.supplier-title {
-  display: block;
-  padding: 16rpx 20rpx;
-  background: #f5f5f5;
-  font-size: 28rpx;
-  font-weight: bold;
-  color: #333;
-}
 .order-item {
   display: flex;
   align-items: center;
-  padding: 16rpx 20rpx;
+  padding: 20rpx 0;
   border-bottom: 1rpx solid #f0f0f0;
 }
 .order-item:last-of-type {
@@ -191,14 +175,22 @@ const historyGroups = computed(() => {
   color: #e65100;
   flex-shrink: 0;
 }
-.subtotal {
-  padding: 12rpx 20rpx;
-  background: #fafafa;
+.total-bar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12rpx;
+  padding: 16rpx 0;
+  margin-top: 8rpx;
   border-top: 1rpx solid #f0f0f0;
 }
-.subtotal-text {
+.total-label {
   font-size: 26rpx;
-  color: #1976d2;
+  color: #666;
+}
+.total-amount {
+  font-size: 30rpx;
+  color: #e65100;
   font-weight: bold;
 }
 .batch-actions {

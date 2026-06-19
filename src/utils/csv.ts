@@ -142,19 +142,13 @@ export function shareOrSaveFile(filePath: string, fileName: string): Promise<Sha
                         if (err?.errMsg?.indexOf('cancel') > -1) {
                             resolve({ success: false, message: '已取消', cancelled: true })
                         } else {
-                            // saveFileToDisk 不可用时回退到 openDocument
-                            wxAny.openDocument({
-                                filePath,
-                                fileType: 'csv',
-                                showMenu: true,
-                                success: () => resolve({ success: true, message: '已打开', cancelled: false }),
-                                fail: () => resolve({ success: false, message: '保存失败', cancelled: false }),
-                            })
+                            // saveFileToDisk 可用但调用失败，直接返回错误，避免回退导致二次弹窗
+                            resolve({ success: false, message: '保存失败', cancelled: false })
                         }
                     },
                 })
             } else {
-                // saveFileToDisk 不存在，回退到 openDocument
+                // saveFileToDisk 不存在（老版本 PC 微信），回退到 openDocument
                 wxAny.openDocument({
                     filePath,
                     fileType: 'csv',

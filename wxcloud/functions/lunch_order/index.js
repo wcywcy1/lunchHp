@@ -368,7 +368,7 @@ async function cancelOrder(event, openid) {
     if (!order) return { code: 404, msg: 'order not found' }
 
     await db.collection(COL.ORDERS).doc(orderId).update({
-        data: { status: STATUS.CANCELLED, cancelRequested: false, updatedAt: db.serverDate() },
+        data: { status: STATUS.CANCELLED, cancelRequested: false, cancelRejected: false, updatedAt: db.serverDate() },
     })
 
     await doRebuildMonthStats(order.date.substring(0, 7))
@@ -392,7 +392,7 @@ async function requestCancelOrder(event, openid) {
     if (order.cancelRequested) return { code: 409, msg: '已申请取消，请等待管理员处理' }
 
     await db.collection(COL.ORDERS).doc(orderId).update({
-        data: { cancelRequested: true, updatedAt: db.serverDate() },
+        data: { cancelRequested: true, cancelRejected: false, updatedAt: db.serverDate() },
     })
     await _updateOrdersTimestamp()
     return { code: 0 }
@@ -442,7 +442,7 @@ async function rejectCancelRequest(event, openid) {
     if (!order) return { code: 404, msg: 'order not found' }
 
     await db.collection(COL.ORDERS).doc(orderId).update({
-        data: { cancelRequested: false, updatedAt: db.serverDate() },
+        data: { cancelRequested: false, cancelRejected: true, updatedAt: db.serverDate() },
     })
     await _updateOrdersTimestamp()
     return { code: 0 }

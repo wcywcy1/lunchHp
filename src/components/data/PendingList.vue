@@ -25,11 +25,11 @@
       <text class="order-price">¥{{ order.price }}</text>
     </view>
     <view v-if="orders.length > 0" class="batch-actions">
-      <view :class="['confirm-btn', confirming ? 'disabled' : '']" @tap="$emit('batch-confirm')">
-        <text>{{ confirming ? '确认中...' : '批量确认' }}</text>
+      <view :class="['confirm-btn', confirming ? 'disabled' : (selectedIds.length === 0 ? 'disabled' : '')]" @tap="$emit('batch-confirm')">
+        <text>{{ confirming ? '确认中...' : (selectedIds.length > 1 ? '批量确认' : '确认') }}</text>
       </view>
-      <view :class="['cancel-btn', cancelling ? 'disabled' : '']" @tap="$emit('batch-cancel')">
-        <text>{{ cancelling ? '取消中...' : '批量取消' }}</text>
+      <view :class="['cancel-btn', cancelling ? 'disabled' : (selectedIds.length === 0 ? 'disabled' : '')]" @tap="$emit('batch-cancel')">
+        <text>{{ cancelling ? '取消中...' : (selectedIds.length > 1 ? '批量取消' : '取消') }}</text>
       </view>
     </view>
 

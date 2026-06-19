@@ -138,8 +138,7 @@ export function useDataManage() {
     const cancelling = ref(false)
 
     const isAllConfirmedSelected = computed(() => {
-        const allOrders = confirmedBySupplier.value.flatMap(g => g.orders)
-        return allOrders.length > 0 && allOrders.every(o => confirmedSelectedIds.value.includes(o._id))
+        return confirmedOrders.value.length > 0 && confirmedOrders.value.every(o => confirmedSelectedIds.value.includes(o._id))
     })
 
     function toggleConfirmedSelect(id: string) {
@@ -155,24 +154,21 @@ export function useDataManage() {
         if (isAllConfirmedSelected.value) {
             confirmedSelectedIds.value = []
         } else {
-            const allOrders = confirmedBySupplier.value.flatMap(g => g.orders)
-            confirmedSelectedIds.value = allOrders.map(o => o._id)
+            confirmedSelectedIds.value = confirmedOrders.value.map(o => o._id)
         }
     }
 
     async function batchCancelConfirmed() {
-        if (confirmedSelectedIds.value.length === 0) {
-            uni.showToast({ title: '请选择订单', icon: 'none' })
-            return
-        }
-        const { confirm } = await uni.showModal({ title: '批量取消', content: `确认取消选中的 ${confirmedSelectedIds.value.length} 条已确认订单？` })
+        if (confirmedSelectedIds.value.length === 0) return
+        const ids = [...confirmedSelectedIds.value]
+        const { confirm } = await uni.showModal({ title: '取消订单', content: `确认取消 ${ids.length} 条已确认订单？` })
         if (!confirm) return
         cancelling.value = true
         try {
-            for (const orderId of confirmedSelectedIds.value) {
+            for (const orderId of ids) {
                 await orderAction('cancelOrder', { orderId })
             }
-            uni.showToast({ title: '批量取消成功', icon: 'success' })
+            uni.showToast({ title: '取消成功', icon: 'success' })
             confirmedSelectedIds.value = []
             await loadData()
             await loadPendingCancelRequests()
@@ -184,18 +180,16 @@ export function useDataManage() {
     }
 
     async function batchCancelPending() {
-        if (selectedIds.value.length === 0) {
-            uni.showToast({ title: '请选择订单', icon: 'none' })
-            return
-        }
-        const { confirm } = await uni.showModal({ title: '批量取消', content: `确认取消选中的 ${selectedIds.value.length} 条待确认订单？` })
+        if (selectedIds.value.length === 0) return
+        const ids = [...selectedIds.value]
+        const { confirm } = await uni.showModal({ title: '取消订单', content: `确认取消 ${ids.length} 条待确认订单？` })
         if (!confirm) return
         cancelling.value = true
         try {
-            for (const orderId of selectedIds.value) {
+            for (const orderId of ids) {
                 await orderAction('cancelOrder', { orderId })
             }
-            uni.showToast({ title: '批量取消成功', icon: 'success' })
+            uni.showToast({ title: '取消成功', icon: 'success' })
             selectedIds.value = []
             await loadData()
             await loadPendingCancelRequests()
@@ -207,13 +201,11 @@ export function useDataManage() {
     }
 
     async function batchConfirm() {
-        if (selectedIds.value.length === 0) {
-            uni.showToast({ title: '请选择订单', icon: 'none' })
-            return
-        }
+        if (selectedIds.value.length === 0) return
+        const ids = [...selectedIds.value]
         confirming.value = true
         try {
-            const res = await orderAction('batchConfirm', { orderIds: selectedIds.value, date: getDateStr() })
+            const res = await orderAction('batchConfirm', { orderIds: ids, date: getDateStr() })
             if (res.result.code === 0) {
                 uni.showToast({ title: '确认成功', icon: 'success' })
                 selectedIds.value = []

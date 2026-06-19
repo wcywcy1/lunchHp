@@ -42,7 +42,7 @@
       />
 
       <ConfirmedList
-        :groups="confirmedBySupplier"
+        :orders="confirmedOrders"
         :selectedIds="confirmedSelectedIds"
         :isAllSelected="isAllConfirmedSelected"
         :cancelling="cancelling"
