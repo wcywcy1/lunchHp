@@ -11,8 +11,8 @@
           <text class="notice-current-text">{{ currentNotice }}</text>
         </view>
         <view class="notice-actions">
-          <view class="notice-btn" @tap="openNoticeSendDialog"><text>发送通知</text></view>
-          <view class="notice-btn secondary" @tap="clearNotice"><text>清除通知</text></view>
+          <view class="notice-btn" :class="{ secondary: currentNotice }" @tap="openNoticeSendDialog"><text>发送通知</text></view>
+          <view class="notice-btn" :class="{ secondary: !currentNotice }" @tap="clearNotice"><text>清除通知</text></view>
         </view>
       </view>
 

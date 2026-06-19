@@ -2,7 +2,7 @@ import { ref, computed, ComputedRef, Ref } from 'vue'
 import { useStore, getCache, setCache } from '../services/store'
 import { orderAction } from '../services/repositories/baseRepository'
 import { CACHE_KEYS, CACHE_TTL } from '../constants/cacheConfig'
-import { buildCsvLine, writeCsvWithBom } from '../utils/csv'
+import { buildCsvLine, writeCsvWithBom, shareOrSaveFile, isPcPlatform } from '../utils/csv'
 
 interface MonthlyStat {
     _id: string
@@ -281,6 +281,41 @@ export function useStats(): StatsReturn {
         }
     }
 
+    function shareStatsFile(filePath: string, fileName: string): Promise<void> {
+        return new Promise((resolve) => {
+            const fs = wx.getFileSystemManager()
+            const cleanup = () => { try { fs.unlinkSync(filePath) } catch {} }
+            // PC 端：直接保存到磁盘
+            if (isPcPlatform()) {
+                shareOrSaveFile(filePath, fileName).then(res => {
+                    cleanup()
+                    uni.showToast({ title: res.message, icon: res.success ? 'success' : 'none' })
+                    resolve()
+                })
+                return
+            }
+            // 移动端：弹窗确认后分享
+            uni.showModal({
+                title: '导出成功',
+                content: '是否分享到微信？',
+                confirmText: '分享',
+                cancelText: '取消',
+                success: (modalRes) => {
+                    if (!modalRes.confirm) {
+                        cleanup()
+                        resolve()
+                        return
+                    }
+                    shareOrSaveFile(filePath, fileName).then(res => {
+                        cleanup()
+                        uni.showToast({ title: res.message, icon: res.success ? 'success' : 'none' })
+                        resolve()
+                    })
+                },
+            })
+        })
+    }
+
     async function downloadMonthlyData() {
         if (filteredStats.value.length === 0) {
             uni.showToast({ title: '暂无数据', icon: 'none' })
@@ -293,82 +328,25 @@ export function useStats(): StatsReturn {
             if (f.months.length > 0) params.months = f.months
 
             const res = await orderAction('downloadMonthlyData', params)
+            const fileName = 'monthly_stats.csv'
             if (res.result.code === 0 && res.result.data.fileID) {
                 const { fileID } = res.result.data
-                await wx.cloud.downloadFile({
-                    fileID,
-                    success: (downloadRes: any) => {
-                        const fs = wx.getFileSystemManager()
-                        const fileName = 'monthly_stats.csv'
-                        const localPath = `${wx.env.USER_DATA_PATH}/${fileName}`
-                        fs.saveFileSync(downloadRes.tempFilePath, localPath)
-                        uni.showModal({
-                            title: '下载成功',
-                            content: '是否分享到微信？',
-                            confirmText: '分享',
-                            cancelText: '取消',
-                            success: (modalRes) => {
-                                if (!modalRes.confirm) {
-                                    try { fs.unlinkSync(localPath) } catch {}
-                                    return
-                                }
-                                wx.shareFileMessage({
-                                    filePath: localPath,
-                                    fileName,
-                                    success: () => {
-                                        try { fs.unlinkSync(localPath) } catch {}
-                                        uni.showToast({ title: '分享成功', icon: 'success' })
-                                    },
-                                    fail: (err: any) => {
-                                        try { fs.unlinkSync(localPath) } catch {}
-                                        if (err?.errMsg?.indexOf('cancel') > -1) {
-                                            uni.showToast({ title: '已取消', icon: 'none' })
-                                        } else {
-                                            uni.showToast({ title: '分享失败', icon: 'none' })
-                                        }
-                                    },
-                                })
-                            },
-                        })
-                    },
+                const downloadRes: any = await new Promise((resolve, reject) => {
+                    wx.cloud.downloadFile({ fileID, success: resolve, fail: reject })
                 })
+                const fs = wx.getFileSystemManager()
+                const localPath = `${wx.env.USER_DATA_PATH}/${fileName}`
+                fs.saveFileSync(downloadRes.tempFilePath, localPath)
+                await shareStatsFile(localPath, fileName)
             } else {
                 const csvLines = ['月份,总金额,订单数']
                 filteredStats.value.forEach(s => {
                     csvLines.push(buildCsvLine([`${s.year}-${String(s.month).padStart(2, '0')}`, s.totalAmount, s.orderCount]))
                 })
                 const fs = wx.getFileSystemManager()
-                const fileName = 'monthly_stats.csv'
                 const path = `${wx.env.USER_DATA_PATH}/${fileName}`
                 writeCsvWithBom(fs, path, csvLines.join('\r\n'))
-                uni.showModal({
-                    title: '导出成功',
-                    content: '是否分享到微信？',
-                    confirmText: '分享',
-                    cancelText: '取消',
-                    success: (modalRes) => {
-                        if (!modalRes.confirm) {
-                            try { fs.unlinkSync(path) } catch {}
-                            return
-                        }
-                        wx.shareFileMessage({
-                            filePath: path,
-                            fileName,
-                            success: () => {
-                                try { fs.unlinkSync(path) } catch {}
-                                uni.showToast({ title: '分享成功', icon: 'success' })
-                            },
-                            fail: (err: any) => {
-                                try { fs.unlinkSync(path) } catch {}
-                                if (err?.errMsg?.indexOf('cancel') > -1) {
-                                    uni.showToast({ title: '已取消', icon: 'none' })
-                                } else {
-                                    uni.showToast({ title: '分享失败', icon: 'none' })
-                                }
-                            },
-                        })
-                    },
-                })
+                await shareStatsFile(path, fileName)
             }
         } catch (e: any) {
             uni.showToast({ title: e.message || '下载失败', icon: 'none' })

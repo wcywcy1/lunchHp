@@ -5,7 +5,7 @@ import { menuAction, orderAction, backupAction } from '../services/repositories/
 import { ORDER_STATUS, ROLE } from '../constants/orderStatus'
 import { CACHE_KEYS } from '../constants/cacheConfig'
 import { useRealtimeWatch } from './useRealtimeWatch'
-import { buildCsvLine, writeCsvWithBom } from '../utils/csv'
+import { buildCsvLine, writeCsvWithBom, shareOrSaveFile, isPcPlatform, chooseFile } from '../utils/csv'
 
 export function useDataManage() {
     const MAX_BATCH_COUNT = 2000
@@ -102,6 +102,11 @@ export function useDataManage() {
                 const todayOrders = orders.filter((o: any) => o.date === today)
                 pendingOrders.value = todayOrders.filter((o: any) => o.status === ORDER_STATUS.PENDING)
                 confirmedOrders.value = todayOrders.filter((o: any) => o.status === ORDER_STATUS.CONFIRMED)
+            }
+            // 同步当前通知（登录/刷新后从服务端拉取，避免本地状态丢失）
+            const tsRes = await menuAction('getDataTimestamps')
+            if (tsRes.result.code === 0) {
+                currentNotice.value = tsRes.result.data.notice || ''
             }
             await loadHistoryCount()
         } catch (e) {
@@ -300,6 +305,15 @@ export function useDataManage() {
 
     function shareLocalFile(filePath: string, fileName: string): Promise<{ success: boolean; message: string; cancelled?: boolean }> {
         return new Promise((resolve) => {
+            // PC 端：直接保存到磁盘，无需弹窗确认
+            if (isPcPlatform()) {
+                shareOrSaveFile(filePath, fileName).then(res => {
+                    try { wx.getFileSystemManager().unlinkSync(filePath) } catch {}
+                    resolve(res)
+                })
+                return
+            }
+            // 移动端：弹窗确认后分享到微信
             uni.showModal({
                 title: '导出成功',
                 content: '是否分享到微信？',
@@ -311,21 +325,9 @@ export function useDataManage() {
                         resolve({ success: false, message: '已取消', cancelled: true })
                         return
                     }
-                    wx.shareFileMessage({
-                        filePath,
-                        fileName,
-                        success: () => {
-                            try { wx.getFileSystemManager().unlinkSync(filePath) } catch {}
-                            resolve({ success: true, message: '分享成功', cancelled: false })
-                        },
-                        fail: (err: any) => {
-                            try { wx.getFileSystemManager().unlinkSync(filePath) } catch {}
-                            if (err?.errMsg?.indexOf('cancel') > -1) {
-                                resolve({ success: false, message: '分享已取消', cancelled: true })
-                            } else {
-                                resolve({ success: false, message: '分享失败', cancelled: false })
-                            }
-                        },
+                    shareOrSaveFile(filePath, fileName).then(res => {
+                        try { wx.getFileSystemManager().unlinkSync(filePath) } catch {}
+                        resolve(res)
                     })
                 },
             })
@@ -338,6 +340,16 @@ export function useDataManage() {
                 fileID,
                 success: (downloadRes: any) => {
                     const name = fileName || 'export_file.csv'
+                    const filePath = downloadRes.tempFilePath
+                    // PC 端：直接保存到磁盘
+                    if (isPcPlatform()) {
+                        shareOrSaveFile(filePath, name).then(res => {
+                            if (res.success || res.cancelled) resolve()
+                            else reject(new Error(res.message))
+                        })
+                        return
+                    }
+                    // 移动端：弹窗确认后分享
                     uni.showModal({
                         title: '下载成功',
                         content: '是否分享到微信？',
@@ -348,17 +360,9 @@ export function useDataManage() {
                                 resolve()
                                 return
                             }
-                            wx.shareFileMessage({
-                                filePath: downloadRes.tempFilePath,
-                                fileName: name,
-                                success: () => resolve(),
-                                fail: (err: any) => {
-                                    if (err?.errMsg?.indexOf('cancel') > -1) {
-                                        resolve()
-                                    } else {
-                                        reject(new Error('分享失败'))
-                                    }
-                                },
+                            shareOrSaveFile(filePath, name).then(res => {
+                                if (res.success || res.cancelled) resolve()
+                                else reject(new Error(res.message))
                             })
                         },
                     })
@@ -775,34 +779,34 @@ export function useDataManage() {
         }
     }
 
-    function importData(type: 'orders' | 'menu' | 'members') {
-        wx.chooseMessageFile({
-            count: 1,
-            type: 'file',
-            extension: ['csv', 'xlsx'],
-            success: async (chooseRes: any) => {
-                const filePath = chooseRes.tempFiles[0].path
-                const ext = filePath.split('.').pop()?.toLowerCase()
-                if (ext !== 'csv' && ext !== 'xlsx') {
-                    uni.showToast({ title: '只支持csv和xlsx格式', icon: 'none' })
-                    return
-                }
-                importing.value = true
-                try {
-                    if (type === 'orders') {
-                        await doImportOrders(filePath, ext)
-                    } else if (type === 'menu') {
-                        await doImportMenu(filePath, ext)
-                    } else {
-                        await doImportMembers(filePath, ext)
-                    }
-                } catch (e: any) {
-                    uni.showToast({ title: e.message || '导入失败', icon: 'none' })
-                } finally {
-                    importing.value = false
-                }
-            },
-        })
+    async function importData(type: 'orders' | 'menu' | 'members') {
+        const chooseRes = await chooseFile(['csv', 'xlsx'])
+        if (!chooseRes.success || !chooseRes.filePath) {
+            if (!chooseRes.cancelled) {
+                uni.showToast({ title: chooseRes.message, icon: 'none' })
+            }
+            return
+        }
+        const filePath = chooseRes.filePath
+        const ext = filePath.split('.').pop()?.toLowerCase()
+        if (ext !== 'csv' && ext !== 'xlsx') {
+            uni.showToast({ title: '只支持csv和xlsx格式', icon: 'none' })
+            return
+        }
+        importing.value = true
+        try {
+            if (type === 'orders') {
+                await doImportOrders(filePath, ext)
+            } else if (type === 'menu') {
+                await doImportMenu(filePath, ext)
+            } else {
+                await doImportMembers(filePath, ext)
+            }
+        } catch (e: any) {
+            uni.showToast({ title: e.message || '导入失败', icon: 'none' })
+        } finally {
+            importing.value = false
+        }
     }
 
     function showSkippedDetails(details: any[]) {

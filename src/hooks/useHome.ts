@@ -284,6 +284,73 @@ export function useHome() {
         }
     }
 
+    // 编辑自己的待确认订单
+    const showEditDialog = ref(false)
+    const editingOrder = ref<any>(null)
+    const editForm = ref({
+        menuId: '',
+        menuName: '',
+        supplier: '',
+        price: 0,
+        note: '',
+    })
+
+    function openEditOrder(order: any) {
+        editingOrder.value = order
+        editForm.value = {
+            menuId: order.menuId || '',
+            menuName: order.menuName || '',
+            supplier: order.supplier || '',
+            price: order.price || 0,
+            note: order.note || '',
+        }
+        showEditDialog.value = true
+    }
+
+    function onEditMenuChange(e: any) {
+        const idx = e.detail.value
+        const item = store.menu[idx]
+        if (item) {
+            editForm.value.menuId = item._id
+            editForm.value.menuName = item.name
+            editForm.value.supplier = item.supplier || ''
+            editForm.value.price = item.price || 0
+        }
+    }
+
+    async function saveMyOrder() {
+        if (!editingOrder.value) return
+        if (!editForm.value.menuName) {
+            uni.showToast({ title: '请选择菜品', icon: 'none' })
+            return
+        }
+        try {
+            const res = await orderAction('updateMyOrder', {
+                orderId: editingOrder.value._id,
+                menuId: editForm.value.menuId,
+                menuName: editForm.value.menuName,
+                supplier: editForm.value.supplier,
+                price: editForm.value.price,
+                note: editForm.value.note,
+            })
+            if (res.result.code === 0) {
+                uni.showToast({ title: '已保存', icon: 'success' })
+                showEditDialog.value = false
+                editingOrder.value = null
+                await fetchRecentOrders()
+            } else {
+                throw new Error(res.result.msg || '保存失败')
+            }
+        } catch (e: any) {
+            uni.showToast({ title: e.message || '保存失败', icon: 'none' })
+        }
+    }
+
+    function closeEditDialog() {
+        showEditDialog.value = false
+        editingOrder.value = null
+    }
+
     async function agreePrivacy() {
         if (!store.member) return
         try {
@@ -391,6 +458,13 @@ export function useHome() {
         refreshData,
         cancelMyOrder,
         requestCancelOrder,
+        showEditDialog,
+        editingOrder,
+        editForm,
+        openEditOrder,
+        onEditMenuChange,
+        saveMyOrder,
+        closeEditDialog,
         agreePrivacy,
         disagreePrivacy,
         saveName,
