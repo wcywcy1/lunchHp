@@ -12,24 +12,19 @@
         </view>
       </view>
     </scroll-view>
-    <view v-if="selectedSupplier" class="filter-row">
-      <view class="filter-item">
-        <text class="filter-label">餐品</text>
-        <picker :range="menuNameDisplayOptions" :value="menuNameIndex" @change="onMenuNamePick">
-          <view class="filter-picker">
-            <text :class="['picker-text', selectedMenuName ? 'active' : '']">
-              {{ selectedMenuName || '全部' }}
-            </text>
-            <text class="picker-arrow">▼</text>
-          </view>
-        </picker>
-      </view>
-    </view>
-    <view v-if="keyword" class="keyword-row">
-      <text class="keyword-label">语音筛选</text>
-      <view class="keyword-tag">
-        <text class="keyword-text">{{ keyword }}</text>
-        <text class="keyword-close" @tap="$emit('clear-keyword')">×</text>
+    <view class="search-row">
+      <view class="search-box">
+        <text class="search-icon">🔍</text>
+        <input
+          class="search-input"
+          type="text"
+          :value="keyword"
+          placeholder="搜索餐品 / 语音输入"
+          placeholder-class="search-placeholder"
+          @input="onSearchInput"
+          @confirm="onSearchConfirm"
+        />
+        <text v-if="keyword" class="search-clear" @tap="$emit('clear-keyword')">×</text>
       </view>
     </view>
   </view>
@@ -50,6 +45,7 @@ const emit = defineEmits<{
   (e: 'supplier-change', val: string): void
   (e: 'menu-name-change', val: string): void
   (e: 'clear-keyword'): void
+  (e: 'keyword-change', val: string): void
 }>()
 
 const menuNameDisplayOptions = computed(() =>
@@ -66,6 +62,14 @@ function onSupplierTap(val: string) {
 function onMenuNamePick(e: any) {
   const idx = e.detail.value
   emit('menu-name-change', props.menuNameOptions[idx] || '')
+}
+
+function onSearchInput(e: any) {
+  emit('keyword-change', e.detail.value)
+}
+
+function onSearchConfirm(e: any) {
+  emit('keyword-change', e.detail.value)
 }
 </script>
 
@@ -103,72 +107,36 @@ function onMenuNamePick(e: any) {
   color: #fff;
   font-weight: bold;
 }
-.filter-row {
-  display: flex;
+.search-row {
   margin-top: 12rpx;
 }
-.keyword-row {
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-  margin-top: 12rpx;
-}
-.keyword-label {
-  font-size: 24rpx;
-  color: #1976d2;
-  white-space: nowrap;
-}
-.keyword-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 8rpx;
-  padding: 6rpx 16rpx;
-  background: #e3f2fd;
-  border-radius: 20rpx;
-}
-.keyword-text {
-  font-size: 26rpx;
-  color: #1976d2;
-}
-.keyword-close {
-  font-size: 28rpx;
-  color: #1976d2;
-  padding-left: 4rpx;
-}
-.filter-item {
-  flex: 1;
+.search-box {
   display: flex;
   align-items: center;
   gap: 8rpx;
-}
-.filter-label {
-  font-size: 24rpx;
-  color: #666;
-  white-space: nowrap;
-}
-.filter-picker {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   padding: 8rpx 16rpx;
   background: #f5f5f5;
   border-radius: 8rpx;
-  min-width: 0;
 }
-.picker-text {
+.search-icon {
   font-size: 24rpx;
   color: #999;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  flex-shrink: 0;
 }
-.picker-text.active {
+.search-input {
+  flex: 1;
+  font-size: 26rpx;
   color: #333;
+  min-width: 0;
 }
-.picker-arrow {
-  font-size: 20rpx;
+.search-placeholder {
+  color: #bbb;
+  font-size: 26rpx;
+}
+.search-clear {
+  font-size: 32rpx;
   color: #999;
+  padding-left: 8rpx;
   flex-shrink: 0;
 }
 </style>

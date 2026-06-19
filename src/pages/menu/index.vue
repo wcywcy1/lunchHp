@@ -9,6 +9,7 @@
       @supplier-change="onSupplierChange"
       @menu-name-change="onMenuNameChange"
       @clear-keyword="setKeyword('')"
+      @keyword-change="updateKeyword"
     />
 
     <scroll-view scroll-y class="menu-scroll">
@@ -72,6 +73,7 @@ const {
   onSupplierChange,
   onMenuNameChange,
   setKeyword,
+  updateKeyword,
 } = useMenuFilter(menuList)
 
 const displayVisibleItems = computed(() =>
@@ -97,7 +99,13 @@ const {
 } = useOrder()
 
 const { state: voiceState, toggle: onVoiceToggle } = useVoiceSearch({
-  onStop: (text, keywords) => {
+  onStop: async (text, keywords) => {
+    // menuList 为空时等待加载完成，避免语音结果匹配为空
+    if (menuList.value.length === 0) {
+      uni.showLoading({ title: '加载菜单中...', mask: true })
+      await loadMenu()
+      uni.hideLoading()
+    }
     // 优先：用菜单名反向匹配语音文本（菜名出现在文本中）
     const matchedNames = menuList.value
       .filter((i: any) => i.visible !== false && i.name && text.includes(i.name))
@@ -107,6 +115,8 @@ const { state: voiceState, toggle: onVoiceToggle } = useVoiceSearch({
     } else if (keywords.length > 0) {
       // 回退：用提取的关键词做模糊匹配
       setKeyword(keywords[0])
+    } else {
+      uni.showToast({ title: '未匹配到菜品', icon: 'none' })
     }
   },
   onError: (msg) => {
@@ -137,6 +147,6 @@ onShow(() => {
 .menu-scroll {
   flex: 1;
   overflow: hidden;
-  padding-bottom: 420rpx;
+  padding-bottom: 460rpx;
 }
 </style>

@@ -19,6 +19,7 @@ interface MenuFilterReturn {
     onSupplierChange: (val: string) => void
     onMenuNameChange: (val: string) => void
     setKeyword: (val: string) => void
+    updateKeyword: (val: string) => void
     resetFilter: () => void
 }
 
@@ -30,7 +31,7 @@ export function useMenuFilter(menuList: Ref<MenuItem[]>): MenuFilterReturn {
     const supplierOptions = computed(() => {
         const set = new Set<string>()
         menuList.value.forEach((item: MenuItem) => {
-            if (item.visible !== false) set.add(item.supplier)
+            if (item.visible !== false && item.supplier) set.add(item.supplier)
         })
         return ['', ...Array.from(set).sort()]
     })
@@ -40,7 +41,9 @@ export function useMenuFilter(menuList: Ref<MenuItem[]>): MenuFilterReturn {
             ? menuList.value.filter((i: MenuItem) => i.visible !== false && i.supplier === selectedSupplier.value)
             : menuList.value.filter((i: MenuItem) => i.visible !== false)
         const set = new Set<string>()
-        list.forEach((item: MenuItem) => set.add(item.name))
+        list.forEach((item: MenuItem) => {
+            if (item.name) set.add(item.name)
+        })
         return ['', ...Array.from(set).sort()]
     })
 
@@ -80,10 +83,14 @@ export function useMenuFilter(menuList: Ref<MenuItem[]>): MenuFilterReturn {
     function setKeyword(val: string) {
         keyword.value = val
         if (val) {
-            // 关键词筛选时清除供应商/餐品精确选择
+            // 语音识别填入关键词时清除供应商/餐品精确选择
             selectedSupplier.value = ''
             selectedMenuName.value = ''
         }
+    }
+
+    function updateKeyword(val: string) {
+        keyword.value = val
     }
 
     function resetFilter() {
@@ -102,6 +109,7 @@ export function useMenuFilter(menuList: Ref<MenuItem[]>): MenuFilterReturn {
         onSupplierChange,
         onMenuNameChange,
         setKeyword,
+        updateKeyword,
         resetFilter,
     }
 }
