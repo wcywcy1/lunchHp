@@ -44,11 +44,19 @@ export function useVoiceSearch(options: VoiceSearchOptions = {}) {
     let recordTempFilePath = ''
     let recorderReady = true
     let pendingStop = false
+    let startTimeout: any = null
 
     function getRecorderManager(): any {
         if (!recorderManager) {
             // #ifdef MP-WEIXIN
             recorderManager = uni.getRecorderManager()
+            recorderManager.onStart(() => {
+                // 录音确认开始，清除启动超时安全网
+                if (startTimeout) {
+                    clearTimeout(startTimeout)
+                    startTimeout = null
+                }
+            })
             recorderManager.onStop((res: any) => {
                 recordTempFilePath = res.tempFilePath
                 recorderReady = true
@@ -70,6 +78,10 @@ export function useVoiceSearch(options: VoiceSearchOptions = {}) {
 
     // 统一重置所有录音状态（替代destroy销毁方法，小程序不支持destroy）
     function resetAllStatus() {
+        if (startTimeout) {
+            clearTimeout(startTimeout)
+            startTimeout = null
+        }
         state.value = 'idle'
         recorderReady = true
         pendingStop = false
@@ -114,6 +126,14 @@ export function useVoiceSearch(options: VoiceSearchOptions = {}) {
             encodeBitRate: 96000,
             duration: 30000,
         })
+
+        // 安全网：2秒内未触发onStart则复位，防止卡在recording
+        startTimeout = setTimeout(() => {
+            if (state.value === 'recording') {
+                resetAllStatus()
+                options.onError?.('录音启动失败，请重试')
+            }
+        }, 2000)
     }
 
     function stop() {
