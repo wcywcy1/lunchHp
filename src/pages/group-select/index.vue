@@ -232,20 +232,20 @@ async function switchToGroup(targetGroupId: string) {
   text-align: center;
   margin-bottom: 40rpx;
   padding-top: 30rpx;
+}
 
-  .title {
-    display: block;
-    font-size: 40rpx;
-    font-weight: 600;
-    color: #1976d2;
-    margin-bottom: 12rpx;
-  }
+.header .title {
+  display: block;
+  font-size: 40rpx;
+  font-weight: 600;
+  color: #1976d2;
+  margin-bottom: 12rpx;
+}
 
-  .subtitle {
-    display: block;
-    font-size: 26rpx;
-    color: #888;
-  }
+.header .subtitle {
+  display: block;
+  font-size: 26rpx;
+  color: #888;
 }
 
 .section {
@@ -273,42 +273,42 @@ async function switchToGroup(targetGroupId: string) {
   background: #f9f9f9;
   margin-bottom: 12rpx;
   border: 2rpx solid transparent;
+}
 
-  &.active {
-    background: #e3f2fd;
-    border-color: #1976d2;
-  }
+.group-card.active {
+  background: #e3f2fd;
+  border-color: #1976d2;
+}
 
-  .group-info {
-    display: flex;
-    flex-direction: column;
-  }
+.group-card .group-info {
+  display: flex;
+  flex-direction: column;
+}
 
-  .group-name {
-    font-size: 30rpx;
-    color: #222;
-    font-weight: 500;
-    margin-bottom: 6rpx;
-  }
+.group-card .group-name {
+  font-size: 30rpx;
+  color: #222;
+  font-weight: 500;
+  margin-bottom: 6rpx;
+}
 
-  .group-role {
-    font-size: 22rpx;
-    color: #888;
-  }
+.group-card .group-role {
+  font-size: 22rpx;
+  color: #888;
+}
 
-  .badge-current {
-    font-size: 22rpx;
-    color: #1976d2;
-    background: #fff;
-    padding: 4rpx 16rpx;
-    border-radius: 20rpx;
-    border: 2rpx solid #1976d2;
-  }
+.group-card .badge-current {
+  font-size: 22rpx;
+  color: #1976d2;
+  background: #fff;
+  padding: 4rpx 16rpx;
+  border-radius: 20rpx;
+  border: 2rpx solid #1976d2;
+}
 
-  .enter-arrow {
-    font-size: 26rpx;
-    color: #1976d2;
-  }
+.group-card .enter-arrow {
+  font-size: 26rpx;
+  color: #1976d2;
 }
 
 .input-row {
@@ -335,10 +335,10 @@ async function switchToGroup(targetGroupId: string) {
   line-height: 76rpx;
   border-radius: 10rpx;
   border: none;
+}
 
-  &[disabled] {
-    background: #bbb;
-  }
+.btn-primary[disabled] {
+  background: #bbb;
 }
 
 .hint {
@@ -362,14 +362,14 @@ async function switchToGroup(targetGroupId: string) {
   border: 2rpx dashed #1976d2;
   border-radius: 10rpx;
   color: #1976d2;
+}
 
-  .scan-icon {
-    font-size: 32rpx;
-  }
+.scan-btn .scan-icon {
+  font-size: 32rpx;
+}
 
-  .scan-text {
-    font-size: 26rpx;
-  }
+.scan-btn .scan-text {
+  font-size: 26rpx;
 }
 
 .loading-mask {

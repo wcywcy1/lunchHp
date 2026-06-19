@@ -163,15 +163,15 @@ function close() {
   text-align: center;
   border-radius: 10rpx;
   font-size: 28rpx;
+}
 
-  &.cancel {
-    background: #f5f5f5;
-    color: #666;
-  }
+.modal-btn.cancel {
+  background: #f5f5f5;
+  color: #666;
+}
 
-  &.confirm {
-    background: #1976d2;
-    color: #fff;
-  }
+.modal-btn.confirm {
+  background: #1976d2;
+  color: #fff;
 }
 </style>

@@ -810,13 +810,11 @@ onHide(() => {
   line-height: 1.5;
 }
 
-.group-invite {
-  .invite-tip {
-    display: block;
-    font-size: 24rpx;
-    color: #666;
-    margin-bottom: 20rpx;
-    line-height: 1.5;
-  }
+.group-invite .invite-tip {
+  display: block;
+  font-size: 24rpx;
+  color: #666;
+  margin-bottom: 20rpx;
+  line-height: 1.5;
 }
 </style>
