@@ -10,6 +10,7 @@ const COL = {
     GROUPS: 'lunch_groups',
     MEMBERS: 'lunch_members',
     MENU: 'lunch_menu',
+    ORDERS: 'lunch_orders',
     USER_STATS: 'lunch_user_menu_stats',
 }
 const ROLE = { CREATOR: 'creator', ADMIN: 'admin', MEMBER: 'member' }
@@ -462,6 +463,33 @@ async function getMenuList(event, openid) {
         .where({ groupId: GROUP_ID })
         .orderBy('sortNo', 'asc')
         .get()
+    // 合并大众点餐统计（orderCount/lastOrderedAt）
+    // 从 ORDERS 实时聚合，覆盖历史导入数据未维护 menu 字段的情况
+    // 用 fetchAll 手动聚合，避免 aggregate 默认 limit 20 的限制
+    try {
+        const orders = await fetchAll(db.collection(COL.ORDERS), {
+            groupId: GROUP_ID, status: _.neq('cancelled')
+        })
+        const publicMap = {}
+        orders.forEach(o => {
+            if (!o.menuId) return
+            if (!publicMap[o.menuId]) publicMap[o.menuId] = { orderCount: 0, lastOrderedAt: 0 }
+            publicMap[o.menuId].orderCount++
+            const t = o.createdAt ? new Date(o.createdAt).getTime() : 0
+            if (t > publicMap[o.menuId].lastOrderedAt) {
+                publicMap[o.menuId].lastOrderedAt = t
+            }
+        })
+        data.forEach(item => {
+            const p = publicMap[item._id]
+            if (p) {
+                item.orderCount = p.orderCount
+                item.lastOrderedAt = p.lastOrderedAt ? new Date(p.lastOrderedAt) : null
+            }
+        })
+    } catch (e) {
+        console.error('merge public stats error:', e)
+    }
     // 合并当前用户的个人点餐统计，用于"最近点过"个人化排序
     const caller = await getMemberByOpenid(openid).catch(() => null)
     if (caller && caller._id && caller._id !== 'recovered') {

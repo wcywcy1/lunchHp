@@ -40,27 +40,40 @@ export function useMenuFilter(
         return item.lastOrderedAt ? new Date(item.lastOrderedAt as any).getTime() : 0
     }
 
-    // "常点"：个人点餐记录，按最近→频率排序，Top 8
+    // "常点"：个人常点优先，不足 9 个用大众常点补齐
+    // 只按最近点餐时间排序（LRU），不看频率，这样新菜点一次就能进常点
     // 帮他人点餐时 statsOverride 为被帮人的统计，否则用 menu 自带的当前用户统计
     // 用 ref+watch 替代 computed，规避小程序端 computed 依赖 computed 的响应式失效
     const recentItems = ref<MenuItem[]>([])
     function computeRecent() {
         const override = statsOverride?.value
-        const getCount = (i: MenuItem) =>
-            override && override[i._id] ? Number(override[i._id].count) || 0 : Number(i.userCount) || 0
-        const getTime = (i: MenuItem) => {
+        const visible = menuList.value.filter((i: MenuItem) => i.visible !== false)
+        const userTime = (i: MenuItem) => {
             const s = override && override[i._id]
             const t = s ? s.lastAt : i.userLastAt
             return t ? new Date(t as any).getTime() : 0
         }
-        recentItems.value = menuList.value
-            .filter((i: MenuItem) => i.visible !== false && getCount(i) > 0)
+        const userCount = (i: MenuItem) =>
+            override && override[i._id] ? Number(override[i._id].count) || 0 : Number(i.userCount) || 0
+        // 个人常点：userCount>0，按最近点餐时间降序
+        const personal = visible
+            .filter((i: MenuItem) => userCount(i) > 0)
+            .sort((a, b) => userTime(b) - userTime(a))
+        // 大众常点：被点过的菜（orderCount>0），按最近点餐时间降序
+        const publicTop = visible
+            .filter((i: MenuItem) => userCount(i) === 0 && (Number(i.orderCount) || 0) > 0)
             .sort((a, b) => {
-                const ta = getTime(a), tb = getTime(b)
-                if (ta !== tb) return tb - ta
-                return getCount(b) - getCount(a)
+                const ta = a.lastOrderedAt ? new Date(a.lastOrderedAt as any).getTime() : 0
+                const tb = b.lastOrderedAt ? new Date(b.lastOrderedAt as any).getTime() : 0
+                return tb - ta
             })
-            .slice(0, 8)
+        // 个人常点在前，不足 9 个用大众常点补齐；个人常点逐步取代大众常点
+        const result = [...personal]
+        for (const item of publicTop) {
+            if (result.length >= 9) break
+            result.push(item)
+        }
+        recentItems.value = result.slice(0, 9)
     }
 
     // tab 顺序：全部 → 常点 → 各供应商（按大众最近点餐时间排序）
@@ -81,7 +94,7 @@ export function useMenuFilter(
     }
 
     // menuList 或 statsOverride 变化时重算
-    // 首次有常点记录时默认切到"常点"tab
+    // 首次计算后默认切到"常点"tab（个人常点+大众常点补齐，总有数据）
     let firstComputed = false
     watch([menuList, () => statsOverride?.value], () => {
         computeSuppliers()
@@ -106,7 +119,7 @@ export function useMenuFilter(
     })
 
     const filteredList = computed(() => {
-        // "常点"tab：直接返回个人 Top 8，不分组
+        // "常点"tab：直接返回个人 Top 9，不分组
         if (selectedSupplier.value === RECENT_TAB) {
             return recentItems.value
         }
