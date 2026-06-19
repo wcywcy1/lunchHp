@@ -44,6 +44,8 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { onShow, onPullDownRefresh } from '@dcloudio/uni-app'
+import { useStore } from '../../services/store'
+import { useAuth } from '../../hooks/useAuth'
 import StatsSummary from '../../components/stats/StatsSummary.vue'
 import StatsBarChart from '../../components/stats/StatsBarChart.vue'
 import StatsPieChart from '../../components/stats/StatsPieChart.vue'
@@ -51,6 +53,9 @@ import StatsDetail from '../../components/stats/StatsDetail.vue'
 import StatsFilter from '../../components/stats/StatsFilter.vue'
 import CustomTabBar from '../../components/CustomTabBar/CustomTabBar.vue'
 import { useStats } from '../../hooks/useStats'
+
+const store = useStore()
+const { isAdmin } = useAuth()
 
 const {
   loading,
@@ -89,6 +94,11 @@ onMounted(() => {
 })
 
 onShow(() => {
+  if (!store.role) return
+  if (!isAdmin.value) {
+    uni.switchTab({ url: '/pages/home/index' })
+    return
+  }
   if (!loading.value && Date.now() - getStatsLoadTime() > 30 * 1000) {
     loadStats()
   }

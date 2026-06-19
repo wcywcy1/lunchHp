@@ -15,7 +15,6 @@
         @tap="onSelect(item._id)"
       >
         <text class="col-name">{{ item.name }}</text>
-        <text class="col-price">¥{{ item.price }}</text>
       </view>
     </view>
   </view>
@@ -99,12 +98,6 @@ function onSelect(menuId: string) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.col-price {
-  flex-shrink: 0;
-  margin-left: 16rpx;
-  color: #e65100;
-  font-size: 28rpx;
 }
 .empty-tip {
   padding: 60rpx 0;

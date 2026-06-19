@@ -35,7 +35,7 @@ const visibleTabs = computed(() => {
   if (role === ROLE.CREATOR || role === ROLE.ADMIN) {
     return allTabs
   }
-  return allTabs.filter(t => t.text !== '管理')
+  return allTabs.filter(t => t.text !== '管理' && t.text !== '统计')
 })
 
 function switchTab(pagePath: string) {
