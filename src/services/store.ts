@@ -1,5 +1,13 @@
 import { reactive } from 'vue'
 import { CACHE_KEYS, getTTL } from '../constants/cacheConfig'
+import { GROUP_ID, ACTIVE_GROUP_ID_KEY } from '../constants/appConfig'
+
+interface JoinedGroup {
+    groupId: string
+    groupName: string
+    role: string
+    joinedAt: any
+}
 
 interface StoreState {
     member: any
@@ -13,6 +21,7 @@ interface StoreState {
     menuTimestamp: any
     membersTimestamp: any
     initialized: boolean
+    joinedGroups: JoinedGroup[]
 }
 
 const store = reactive<StoreState>({
@@ -27,6 +36,7 @@ const store = reactive<StoreState>({
     menuTimestamp: null,
     membersTimestamp: null,
     initialized: false,
+    joinedGroups: [],
 })
 
 let _recentLoadTime = 0
@@ -51,6 +61,7 @@ export function resetStore() {
     store.menuTimestamp = null
     store.membersTimestamp = null
     store.initialized = false
+    store.joinedGroups = []
     _recentLoadTime = 0
 }
 
@@ -94,6 +105,27 @@ export function restoreSession(): boolean {
 
 export function saveSession(data: { groupId: string; role: string; member: any }) {
     setCache(CACHE_KEYS.SESSION, data)
+}
+
+// 当前激活组ID：优先 localStorage，回退默认 GROUP_ID
+export function getActiveGroupId(): string {
+    try {
+        const id = uni.getStorageSync(ACTIVE_GROUP_ID_KEY)
+        if (id) return id
+    } catch {}
+    return GROUP_ID
+}
+
+export function setActiveGroupId(groupId: string) {
+    uni.setStorageSync(ACTIVE_GROUP_ID_KEY, groupId)
+    setStore({ groupId })
+}
+
+// 清空所有本地缓存（切换组时调用）
+export function clearAllCache() {
+    Object.values(CACHE_KEYS).forEach(key => {
+        try { uni.removeStorageSync(key) } catch {}
+    })
 }
 
 export function restoreFromCache() {

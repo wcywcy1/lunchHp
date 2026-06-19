@@ -5,6 +5,7 @@ import { menuAction, orderAction } from '../services/repositories/baseRepository
 import { waitForInit } from '../services/appInit'
 import { CACHE_KEYS, CACHE_TTL } from '../constants/cacheConfig'
 import { useRealtimeWatch } from './useRealtimeWatch'
+import { APP_MODE } from '../constants/appConfig'
 
 function getToday() {
     const d = new Date()
@@ -118,6 +119,11 @@ export function useHome() {
     }
 
     async function onShow() {
+        // 通用模式：若无 session（未选组），跳转到选组页
+        if (APP_MODE === 'general' && !uni.getStorageSync('lunch_session')) {
+            uni.reLaunch({ url: '/pages/group-select/index' })
+            return
+        }
         if (!store.member) {
             await initApp()
             return

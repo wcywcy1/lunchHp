@@ -25,6 +25,13 @@
       "style": {
         "navigationBarTitleText": "管理"
       }
+    },
+    {
+      "path": "pages/group-select/index",
+      "style": {
+        "navigationBarTitleText": "选择组织",
+        "navigationStyle": "default"
+      }
     }
   ],
   "globalStyle": {

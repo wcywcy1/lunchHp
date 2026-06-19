@@ -6,7 +6,7 @@ const $ = db.command.aggregate
 let XLSX = null
 try { XLSX = require('xlsx') } catch (e) { }
 
-const GROUP_ID = 'lunch_hp'
+let GROUP_ID = 'lunch_hp' // 默认值，main 入口会被 event.groupId 覆盖
 const COL = {
     ORDERS: 'lunch_orders',
     MENU: 'lunch_menu',
@@ -68,6 +68,8 @@ function buildCsvLine(fields) {
 exports.main = async (event, context) => {
     const { OPENID } = cloud.getWXContext()
     const { action } = event
+    // 从前端传入 groupId，回退默认值，实现多组织切换
+    GROUP_ID = event.groupId || 'lunch_hp'
 
     const handlers = {
         getInitData,

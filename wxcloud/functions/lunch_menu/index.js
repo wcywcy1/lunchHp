@@ -5,7 +5,7 @@ const _ = db.command
 let XLSX = null
 try { XLSX = require('xlsx') } catch (e) { }
 
-const GROUP_ID = 'lunch_hp'
+let GROUP_ID = 'lunch_hp' // 默认值，main 入口会被 event.groupId 覆盖
 const COL = {
     GROUPS: 'lunch_groups',
     MEMBERS: 'lunch_members',
@@ -45,6 +45,8 @@ async function fetchAll(collection, where) {
 exports.main = async (event, context) => {
     const { OPENID } = cloud.getWXContext()
     const { action } = event
+    // 从前端传入 groupId，回退默认值，实现多组织切换
+    GROUP_ID = event.groupId || 'lunch_hp'
 
     const handlers = {
         initGroup,
@@ -69,6 +71,10 @@ exports.main = async (event, context) => {
         parseXlsx,
         setNotice,
         clearNotice,
+        // 通用模式：选组/创建组
+        createGroup,
+        listJoinedGroups,
+        joinGroupById,
     }
 
     const fn = handlers[action]
@@ -132,6 +138,115 @@ async function initGroup(event, openid) {
     }
     await db.collection(COL.GROUPS).add({ data: group })
     return { code: 0, data: { exists: false, group } }
+}
+
+// 通用模式：创建新组（组名全局唯一，组ID系统生成）
+async function createGroup(event, openid) {
+    await ensureCollections()
+    const { groupName } = event
+    if (!groupName || !groupName.trim()) {
+        return { code: 400, msg: '组名不能为空' }
+    }
+    const name = groupName.trim()
+
+    // 组名全局唯一校验
+    const dupCheck = await db.collection(COL.GROUPS)
+        .where({ name })
+        .get()
+    if (dupCheck.data && dupCheck.data.length > 0) {
+        return { code: 409, msg: `组名「${name}」已存在，请换一个` }
+    }
+
+    // 生成组ID：lunch_ + 时间戳 + 随机后缀
+    const ts = Date.now()
+    const suffix = Math.random().toString(36).substr(2, 4)
+    const newGroupId = `lunch_${ts}_${suffix}`
+
+    const now = db.serverDate()
+    const group = {
+        _id: newGroupId,
+        name,
+        creatorId: openid,
+        qrcode: '',
+        createdAt: now,
+    }
+    await db.collection(COL.GROUPS).add({ data: group })
+
+    // 创建者自动成为该组成员（creator 角色）
+    const member = {
+        groupId: newGroupId,
+        name: '',
+        nickName: '',
+        avatar: '',
+        openid,
+        role: ROLE.CREATOR,
+        isVirtual: false,
+        privacyAgreed: false,
+        joinedAt: now,
+    }
+    const { _id } = await db.collection(COL.MEMBERS).add({ data: member })
+    member._id = _id
+
+    return { code: 0, data: { groupId: newGroupId, groupName: name, member } }
+}
+
+// 通用模式：列出当前用户已加入的所有组
+async function listJoinedGroups(event, openid) {
+    const { data } = await db.collection(COL.MEMBERS)
+        .where({ openid })
+        .get()
+    if (!data || data.length === 0) {
+        return { code: 0, data: [] }
+    }
+    const groupIds = [...new Set(data.map(m => m.groupId))]
+    const groups = []
+    for (const gid of groupIds) {
+        const g = (await db.collection(COL.GROUPS).doc(gid).get().catch(() => ({ data: null }))).data
+        if (g) {
+            const memberRecord = data.find(m => m.groupId === gid)
+            groups.push({
+                groupId: gid,
+                groupName: g.name,
+                role: memberRecord ? memberRecord.role : 'member',
+                joinedAt: memberRecord ? memberRecord.joinedAt : null,
+            })
+        }
+    }
+    return { code: 0, data: groups }
+}
+
+// 通用模式：通过组ID加入组（需组存在且用户未加入）
+async function joinGroupById(event, openid) {
+    const { targetGroupId } = event
+    if (!targetGroupId) return { code: 400, msg: '缺少组ID' }
+
+    const group = (await db.collection(COL.GROUPS).doc(targetGroupId).get().catch(() => ({ data: null }))).data
+    if (!group) return { code: 404, msg: '组不存在，请检查组ID' }
+
+    // 检查是否已加入
+    const existing = await db.collection(COL.MEMBERS)
+        .where({ groupId: targetGroupId, openid })
+        .get()
+    if (existing.data && existing.data.length > 0) {
+        return { code: 0, data: { member: existing.data[0], groupId: targetGroupId, groupName: group.name, alreadyJoined: true } }
+    }
+
+    const now = db.serverDate()
+    const member = {
+        groupId: targetGroupId,
+        name: '',
+        nickName: '',
+        avatar: '',
+        openid,
+        role: ROLE.MEMBER,
+        isVirtual: false,
+        privacyAgreed: false,
+        joinedAt: now,
+    }
+    const { _id } = await db.collection(COL.MEMBERS).add({ data: member })
+    member._id = _id
+
+    return { code: 0, data: { member, groupId: targetGroupId, groupName: group.name, alreadyJoined: false } }
 }
 
 async function joinGroup(event, openid) {

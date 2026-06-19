@@ -1,7 +1,8 @@
 import { ref, computed } from 'vue'
 import { onShow, onHide } from '@dcloudio/uni-app'
-import { useStore, saveSession, setCache, setRecentLoadTime } from '../services/store'
+import { useStore, saveSession, setCache, setRecentLoadTime, resetStore, clearAllCache, setActiveGroupId, getActiveGroupId, setStore } from '../services/store'
 import { menuAction, orderAction, backupAction } from '../services/repositories/baseRepository'
+import { resetInit, startInit } from '../services/appInit'
 import { ORDER_STATUS, ROLE } from '../constants/orderStatus'
 import { CACHE_KEYS } from '../constants/cacheConfig'
 import { useRealtimeWatch } from './useRealtimeWatch'
@@ -1193,6 +1194,61 @@ export function useDataManage() {
         }
     }
 
+    // 组织切换相关
+    const currentGroupId = computed(() => store.groupId || getActiveGroupId())
+    const switchingGroup = ref(false)
+    const targetGroupId = ref('')
+
+    async function switchGroup() {
+        const target = targetGroupId.value.trim()
+        if (!target) {
+            uni.showToast({ title: '请输入目标组ID', icon: 'none' })
+            return
+        }
+        if (target === currentGroupId.value) {
+            uni.showToast({ title: '已是当前组', icon: 'none' })
+            return
+        }
+        const { confirm } = await uni.showModal({
+            title: '切换组织',
+            content: `将切换到组织「${target}」，本地缓存会清空并重新初始化。确定？`,
+        })
+        if (!confirm) return
+        switchingGroup.value = true
+        try {
+            // 1. 停止实时监听
+            realtime.closeAll()
+            // 2. 清空本地缓存和 store
+            clearAllCache()
+            resetStore()
+            // 3. 写入新组ID
+            setActiveGroupId(target)
+            // 4. 重置 init 缓存并重新初始化（initGroup + joinGroup）
+            resetInit()
+            await startInit()
+            const joinRes = await menuAction('joinGroup', { nickName: '', name: '' })
+            if (joinRes.result.code === 0) {
+                const { member } = joinRes.result.data
+                setStore({ member, role: member.role, groupId: target })
+                saveSession({ groupId: target, role: member.role, member })
+            }
+            targetGroupId.value = ''
+            uni.showToast({ title: '已切换组织', icon: 'success' })
+            // 5. 跳回首页重新加载
+            setTimeout(() => {
+                uni.switchTab({ url: '/pages/home/index' })
+            }, 800)
+        } catch (e: any) {
+            uni.showToast({ title: e.message || '切换失败', icon: 'none' })
+        } finally {
+            switchingGroup.value = false
+        }
+    }
+
+    function resetToDefaultGroup() {
+        targetGroupId.value = 'lunch_hp'
+    }
+
     const showMergeDialog = ref(false)
     const mergingMember = ref<any>(null)
 
@@ -1467,5 +1523,10 @@ export function useDataManage() {
         openNoticeSendDialog,
         sendNotice,
         clearNotice,
+        currentGroupId,
+        targetGroupId,
+        switchingGroup,
+        switchGroup,
+        resetToDefaultGroup,
     }
 }

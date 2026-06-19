@@ -3,7 +3,7 @@ cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 const _ = db.command
 
-const GROUP_ID = 'lunch_hp'
+let GROUP_ID = 'lunch_hp' // 默认值，main 入口会被 event.groupId 覆盖
 const COL = {
     ORDERS: 'lunch_orders',
     MENU: 'lunch_menu',
@@ -131,6 +131,8 @@ async function cleanupOldBackups(type, maxKeep) {
 exports.main = async (event, context) => {
     const { OPENID } = cloud.getWXContext()
     const { action } = event
+    // 从前端传入 groupId，回退默认值，实现多组织切换
+    GROUP_ID = event.groupId || 'lunch_hp'
 
     const handlers = {
         backupAuto,

@@ -14,3 +14,8 @@ export function startInit() {
 export function waitForInit() {
     return initPromise || startInit()
 }
+
+// 切换组后重置 init 缓存，使下次 startInit 重新调用 initGroup
+export function resetInit() {
+    initPromise = null
+}
