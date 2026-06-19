@@ -18,6 +18,7 @@
         :hiddenItems="[]"
         :selectedMenuId="selectedMenuId"
         :isAdmin="false"
+        :flat="selectedSupplier === '__recent__'"
         @select="selectMenuItem"
       />
     </scroll-view>
@@ -48,13 +49,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { useStore } from '../../services/store'
 import { useMenu } from '../../hooks/useMenu'
 import { useMenuFilter } from '../../hooks/useMenuFilter'
 import { useOrder } from '../../hooks/useOrder'
 import { useVoiceSearch } from '../../utils/voiceSearch'
+import { orderAction } from '../../services/repositories/baseRepository'
 import MenuFilter from '../../components/menu/MenuFilter.vue'
 import MenuTable from '../../components/menu/MenuTable.vue'
 import OrderBar from '../../components/menu/OrderBar.vue'
@@ -62,6 +64,9 @@ import CustomTabBar from '../../components/CustomTabBar/CustomTabBar.vue'
 
 const store = useStore()
 const { menuList, visibleItems, hiddenItems, loading, loadMenu, checkFreshness } = useMenu()
+
+// 帮他人点餐时，"最近点过"按被帮人的频率排；self 模式用 menu 自带的当前用户统计
+const statsOverride = ref<Record<string, { count: number; lastAt: any }>>({})
 
 const {
   selectedSupplier,
@@ -74,7 +79,7 @@ const {
   onMenuNameChange,
   setKeyword,
   updateKeyword,
-} = useMenuFilter(menuList)
+} = useMenuFilter(menuList, statsOverride)
 
 const displayVisibleItems = computed(() =>
   filteredList.value.filter((i: any) => i.visible !== false)
@@ -97,6 +102,22 @@ const {
   addVirtualAndPick,
   submitOrder,
 } = useOrder()
+
+// 帮他人点餐时拉取被帮人的点餐统计，self 模式清空回退到当前用户统计
+watch([orderFor, orderForMemberId], async () => {
+  if (orderFor.value === 'help' && orderForMemberId.value) {
+    try {
+      const res = await orderAction('getUserMenuStats', { memberId: orderForMemberId.value })
+      if (res.result.code === 0) {
+        statsOverride.value = res.result.data.stats || {}
+        return
+      }
+    } catch (e) {
+      console.error('getUserMenuStats error:', e)
+    }
+  }
+  statsOverride.value = {}
+}, { immediate: true })
 
 const { state: voiceState, toggle: onVoiceToggle } = useVoiceSearch({
   onStop: async (text, keywords) => {

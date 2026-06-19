@@ -52,7 +52,18 @@ export function useOrder(): OrderReturn {
         return (store.menu as MenuItem[]).find((i: MenuItem) => i._id === selectedMenuId.value) || null
     })
 
-    const memberList = computed<MemberItem[]>(() => store.members || [])
+    const memberList = computed<MemberItem[]>(() => {
+        const list = (store.members || []) as MemberItem[]
+        // 最近点过靠前 → 加入时间早的靠前（稳定兜底）
+        return [...list].sort((a, b) => {
+            const ta = a.lastOrderedAt ? new Date(a.lastOrderedAt as any).getTime() : 0
+            const tb = b.lastOrderedAt ? new Date(b.lastOrderedAt as any).getTime() : 0
+            if (ta !== tb) return tb - ta
+            const ja = a.joinedAt ? new Date(a.joinedAt as any).getTime() : 0
+            const jb = b.joinedAt ? new Date(b.joinedAt as any).getTime() : 0
+            return ja - jb
+        })
+    })
 
     const orderForName = computed(() => {
         if (orderFor.value === 'self') {
@@ -160,6 +171,31 @@ export function useOrder(): OrderReturn {
                 }
                 store.recentOrders = [newOrder, ...(store.recentOrders || [])]
                 setCache(CACHE_KEYS.RECENT_ORDERS, store.recentOrders)
+                // 本地更新菜单/成员排序字段，使 LRU+频率排序立即生效
+                const now = Date.now()
+                if (store.menu) {
+                    store.menu = (store.menu as any[]).map((i: any) =>
+                        i._id === item._id
+                            ? {
+                                ...i,
+                                lastOrderedAt: now,
+                                orderCount: (i.orderCount || 0) + 1,
+                                // 个人点餐统计（仅当发起人=当前用户时）
+                                userCount: store.member && store.member._id ? (i.userCount || 0) + 1 : i.userCount,
+                                userLastAt: store.member && store.member._id ? now : i.userLastAt,
+                            }
+                            : i
+                    )
+                    setCache(CACHE_KEYS.MENU, store.menu)
+                }
+                if (store.members) {
+                    store.members = (store.members as any[]).map((m: any) =>
+                        m._id === memberId
+                            ? { ...m, lastOrderedAt: now }
+                            : m
+                    )
+                    setCache(CACHE_KEYS.MEMBERS, store.members)
+                }
                 selectedMenuId.value = ''
                 orderFor.value = 'self'
                 orderForMemberId.value = ''

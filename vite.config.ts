@@ -33,4 +33,11 @@ function copyWxcloudPlugin() {
 
 export default defineConfig({
     plugins: [uni(), copyWxcloudPlugin()],
+    css: {
+        preprocessorOptions: {
+            scss: {
+                silenceDeprecations: ['legacy-js-api'],
+            },
+        },
+    },
 });

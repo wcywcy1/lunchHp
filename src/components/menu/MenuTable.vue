@@ -1,10 +1,27 @@
 <template>
   <view class="menu-table">
-    <view v-if="groups.length === 0" class="empty-tip">
+    <view v-if="groups.length === 0 && !flat" class="empty-tip">
       <text>暂无菜品</text>
     </view>
 
-    <view v-for="group in groups" :key="group.supplier" class="supplier-group">
+    <!-- 常点模式：平铺不分组 -->
+    <view v-if="flat">
+      <view v-if="visibleItems.length === 0" class="empty-tip">
+        <text>暂无常点记录</text>
+      </view>
+      <view
+        v-for="item in visibleItems"
+        :key="item._id"
+        :class="['table-row', selectedMenuId === item._id ? 'selected' : '']"
+        @tap="onSelect(item._id)"
+      >
+        <text class="col-name">{{ item.name }}</text>
+        <text class="col-supplier">{{ item.supplier }}</text>
+      </view>
+    </view>
+
+    <!-- 分组模式：按供应商分组 -->
+    <view v-for="group in groups" v-else :key="group.supplier" class="supplier-group">
       <view class="group-header">
         <text class="group-name">{{ group.supplier }}</text>
       </view>
@@ -28,6 +45,7 @@ const props = defineProps<{
   hiddenItems: any[]
   selectedMenuId: string
   isAdmin: boolean
+  flat?: boolean
 }>()
 
 interface MenuGroup {
@@ -95,9 +113,16 @@ function onSelect(menuId: string) {
 .col-name {
   flex: 1;
   min-width: 0;
+  padding-left: 2em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.col-supplier {
+  font-size: 22rpx;
+  color: #999;
+  flex-shrink: 0;
+  margin-left: 12rpx;
 }
 .empty-tip {
   padding: 60rpx 0;

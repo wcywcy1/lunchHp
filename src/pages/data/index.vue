@@ -73,7 +73,6 @@
         @add="openMenuAdd"
         @edit="openMenuEdit"
         @delete="deleteMenuItem"
-        @move="moveMenuItem"
         @toggle-visible="toggleMenuVisible"
         @toggle-supplier-visible="toggleSupplierVisible"
       />
@@ -91,35 +90,6 @@
         @restore="openBackupDialog"
       />
 
-      <view v-if="isCreator" class="card-section group-switch">
-        <text class="section-title">组织切换</text>
-        <view class="current-group">
-          <text class="current-label">当前组织：</text>
-          <text class="current-value">{{ currentGroupId }}</text>
-        </view>
-        <view class="form-item">
-          <text class="form-label">目标组ID</text>
-          <input class="form-input" v-model="targetGroupId" placeholder="如 lunch_hp 或自定义组ID" />
-        </view>
-        <view class="group-switch-actions">
-          <view class="action-btn secondary" @tap="resetToDefaultGroup"><text>填入默认</text></view>
-          <view :class="['action-btn', 'primary', switchingGroup ? 'disabled' : '']" @tap="switchGroup">
-            <text>{{ switchingGroup ? '切换中...' : '一键切换' }}</text>
-          </view>
-        </view>
-        <text class="switch-tip">切换后本地缓存清空，重新初始化进入目标组织。仅创建者可用。</text>
-      </view>
-
-      <view v-if="isCreator && isGeneralMode" class="card-section group-invite">
-        <text class="section-title">组织邀请</text>
-        <text class="invite-tip">生成当前组织的二维码，成员扫码即可加入</text>
-        <view class="group-switch-actions">
-          <view class="action-btn primary" @tap="showGroupQrcode = true">
-            <text>显示组织二维码</text>
-          </view>
-        </view>
-      </view>
-
       <DangerZone @delete-data="clearAllData" />
     </scroll-view>
 
@@ -130,13 +100,6 @@
       @close="showDownloadDialog = false"
       @update:mode="downloadMode = $event"
       @confirm="downloadConfirmed"
-    />
-
-    <GroupQrcodeDialog
-      :visible="showGroupQrcode"
-      :groupId="currentGroupId"
-      :groupName="''"
-      @close="showGroupQrcode = false"
     />
 
     <view v-if="showNameEditDialog" class="modal-mask" @tap="showNameEditDialog = false">
@@ -323,9 +286,7 @@ import ImportExport from '../../components/data/ImportExport.vue'
 import DataBackup from '../../components/data/DataBackup.vue'
 import DangerZone from '../../components/data/DangerZone.vue'
 import DownloadDialog from '../../components/data/DownloadDialog.vue'
-import GroupQrcodeDialog from '../../components/data/GroupQrcodeDialog.vue'
 import CustomTabBar from '../../components/CustomTabBar/CustomTabBar.vue'
-import { APP_MODE } from '../../constants/appConfig'
 
 const store = useStore()
 const { isAdmin, isCreator } = useAuth()
@@ -400,7 +361,6 @@ const {
   openMenuEdit,
   saveMenuItem,
   deleteMenuItem,
-  moveMenuItem,
   toggleMenuVisible,
   toggleSupplierVisible,
   loadMenuList,
@@ -420,17 +380,9 @@ const {
   openNoticeSendDialog,
   sendNotice,
   clearNotice,
-  currentGroupId,
-  targetGroupId,
-  switchingGroup,
-  switchGroup,
-  resetToDefaultGroup,
 } = useDataManage()
 
 const members = computed(() => store.members || [])
-
-const isGeneralMode = computed(() => APP_MODE === 'general')
-const showGroupQrcode = ref(false)
 
 const nameEditKeyboardHeight = ref(0)
 const menuEditKeyboardHeight = ref(0)
@@ -757,64 +709,5 @@ onHide(() => {
   color: #999;
   margin-bottom: 20rpx;
   text-align: center;
-}
-.group-switch {
-  border: 1rpx solid #e3f2fd;
-}
-.current-group {
-  display: flex;
-  align-items: center;
-  margin-bottom: 20rpx;
-  padding: 12rpx 16rpx;
-  background: #f5f5f5;
-  border-radius: 8rpx;
-}
-.current-group .current-label {
-  font-size: 26rpx;
-  color: #999;
-}
-.current-group .current-value {
-  font-size: 28rpx;
-  color: #1976d2;
-  font-weight: bold;
-}
-.group-switch-actions {
-  display: flex;
-  gap: 16rpx;
-  margin-top: 16rpx;
-}
-.group-switch .action-btn {
-  flex: 1;
-  text-align: center;
-  padding: 20rpx 0;
-  border-radius: 12rpx;
-  font-size: 28rpx;
-}
-.group-switch .action-btn.secondary {
-  background: #f5f5f5;
-  color: #666;
-}
-.group-switch .action-btn.primary {
-  background: #1976d2;
-  color: #fff;
-  font-weight: bold;
-}
-.group-switch .action-btn.disabled {
-  background: #ccc;
-}
-.switch-tip {
-  display: block;
-  font-size: 22rpx;
-  color: #999;
-  margin-top: 16rpx;
-  line-height: 1.5;
-}
-
-.group-invite .invite-tip {
-  display: block;
-  font-size: 24rpx;
-  color: #666;
-  margin-bottom: 20rpx;
-  line-height: 1.5;
 }
 </style>

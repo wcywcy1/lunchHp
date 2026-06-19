@@ -30,8 +30,6 @@
             <text class="menu-price">¥{{ item.price }}</text>
           </view>
           <view class="menu-actions">
-            <text class="action-btn" @tap.stop="$emit('move', item._id, 'up')">↑</text>
-            <text class="action-btn" @tap.stop="$emit('move', item._id, 'down')">↓</text>
             <text class="action-btn edit" @tap.stop="$emit('edit', item)">✏</text>
             <text class="action-btn hide" @tap.stop="$emit('toggle-visible', item._id)">👁</text>
             <text class="action-btn delete" @tap.stop="$emit('delete', item._id)">🗑</text>
@@ -61,8 +59,6 @@
                 <text class="menu-price">¥{{ item.price }}</text>
               </view>
               <view class="menu-actions">
-                <text class="action-btn" @tap.stop="$emit('move', item._id, 'up')">↑</text>
-                <text class="action-btn" @tap.stop="$emit('move', item._id, 'down')">↓</text>
                 <text class="action-btn edit" @tap.stop="$emit('edit', item)">✏</text>
                 <text class="action-btn restore" @tap.stop="$emit('toggle-visible', item._id)">👁</text>
                 <text class="action-btn delete" @tap.stop="$emit('delete', item._id)">🗑</text>
@@ -86,7 +82,6 @@ defineEmits<{
   (e: 'add'): void
   (e: 'edit', item: any): void
   (e: 'delete', menuId: string): void
-  (e: 'move', menuId: string, direction: string): void
   (e: 'toggle-visible', menuId: string): void
   (e: 'toggle-supplier-visible', supplier: string, visible: boolean): void
 }>()

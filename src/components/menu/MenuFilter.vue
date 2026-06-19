@@ -8,7 +8,7 @@
           :class="['tab-item', selectedSupplier === opt ? 'active' : '']"
           @tap="onSupplierTap(opt)"
         >
-          <text class="tab-text">{{ opt || '全部' }}</text>
+          <text class="tab-text">{{ opt === '' ? '全部' : opt === '__recent__' ? '常点' : opt }}</text>
         </view>
       </view>
     </scroll-view>

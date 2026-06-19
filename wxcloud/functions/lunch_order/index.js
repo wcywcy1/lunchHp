@@ -13,6 +13,7 @@ const COL = {
     MEMBERS: 'lunch_members',
     MONTHLY_STATS: 'lunch_monthly_stats',
     GROUPS: 'lunch_groups',
+    USER_STATS: 'lunch_user_menu_stats',
 }
 const ROLE = { CREATOR: 'creator', ADMIN: 'admin', MEMBER: 'member' }
 const STATUS = { PENDING: 'pending', CONFIRMED: 'confirmed', CANCELLED: 'cancelled' }
@@ -95,6 +96,7 @@ exports.main = async (event, context) => {
         getHistoryOrderCount,
         getHistoryOrders,
         importFromXlsx,
+        getUserMenuStats,
     }
 
     const fn = handlers[action]
@@ -155,12 +157,15 @@ async function getInitData(event, openid) {
 
     const groupData = groupResult.data || {}
 
+    // 合并当前用户的个人点餐统计到 menu，用于"最近点过"个人化排序
+    const menuWithUserStats = await _mergeUserStats(menuResult.data, openid)
+
     return {
         code: 0,
         data: {
             monthSummary,
             recentOrders,
-            menu: menuResult.data,
+            menu: menuWithUserStats,
             members: membersResult.data,
             recentTimestamp: groupData.ordersTimestamp || null,
             menuTimestamp: groupData.menuTimestamp || null,
@@ -259,6 +264,56 @@ async function _resetDataTimestamp() {
     }
 }
 
+// 触发菜单与成员的时间戳，前端 checkFreshness 感知后刷新排序
+async function _touchMenuAndMembersTimestamp() {
+    const now = db.serverDate()
+    const existing = await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => null)
+    if (existing && existing.data) {
+        await db.collection(COL.GROUPS).doc(GROUP_ID).update({
+            data: { menuTimestamp: now, membersTimestamp: now },
+        })
+    } else {
+        await db.collection(COL.GROUPS).add({
+            data: { _id: GROUP_ID, menuTimestamp: now, membersTimestamp: now, createdAt: now },
+        })
+    }
+}
+
+// 合并当前用户对每道菜的个人点餐统计（userCount/userLastAt），用于"最近点过"个人化排序
+async function _mergeUserStats(menu, openid) {
+    const caller = await getMemberByOpenid(openid).catch(() => null)
+    if (!caller || !caller._id || caller._id === 'recovered') return menu
+    const { data: stats } = await db.collection(COL.USER_STATS)
+        .where({ groupId: GROUP_ID, memberId: caller._id })
+        .get()
+    const statMap = {}
+    stats.forEach(s => { statMap[s.menuId] = s })
+    menu.forEach(item => {
+        const s = statMap[item._id]
+        if (s) {
+            item.userCount = s.count || 0
+            item.userLastAt = s.lastAt || null
+        }
+    })
+    return menu
+}
+
+// upsert 当前用户对某道菜的个人点餐统计（确定性 _id 避免重复）
+async function _upsertUserStat(memberId, menuId, now) {
+    if (!memberId || memberId === 'recovered') return
+    const statId = `${GROUP_ID}_${memberId}_${menuId}`
+    const existing = await db.collection(COL.USER_STATS).doc(statId).get().catch(() => ({ data: null }))
+    if (existing.data) {
+        await db.collection(COL.USER_STATS).doc(statId).update({
+            data: { count: _.inc(1), lastAt: now }
+        })
+    } else {
+        await db.collection(COL.USER_STATS).doc(statId).set({
+            data: { groupId: GROUP_ID, memberId, menuId, count: 1, lastAt: now }
+        })
+    }
+}
+
 // 自动取消过期待确认订单（date < today && status === pending）
 async function _autoCancelExpiredPending() {
     const today = getToday()
@@ -322,8 +377,26 @@ async function submitOrder(event, openid) {
 
     const { _id } = await db.collection(COL.ORDERS).add({ data: order })
     order._id = _id
+
+    // 更新菜单项/成员的最近点餐时间与次数，用于前端 LRU+频率排序
+    // 同时 upsert 发起人的个人点餐统计（createdBy=我），用于"最近点过"个人化排序
+    // 失败不阻断下单主流程
+    const caller = await getMemberByOpenid(openid).catch(() => null)
+    const callerMemberId = caller && caller._id && caller._id !== 'recovered' ? caller._id : null
+    await Promise.all([
+        db.collection(COL.MENU).doc(menuId).update({
+            data: { lastOrderedAt: now, orderCount: _.inc(1) },
+        }).catch(e => console.error('touch menu sort error:', e)),
+        db.collection(COL.MEMBERS).doc(memberId).update({
+            data: { lastOrderedAt: now },
+        }).catch(e => console.error('touch member sort error:', e)),
+        callerMemberId
+            ? _upsertUserStat(callerMemberId, menuId, now).catch(e => console.error('upsert user stat error:', e))
+            : Promise.resolve(),
+    ])
     await _updateOrdersTimestamp()
     await _updateDataTimestamp()
+    await _touchMenuAndMembersTimestamp()
     return { code: 0, data: order }
 }
 
@@ -1438,4 +1511,22 @@ async function _importMembersFromRows(rows, mode) {
     }
 
     return { code: 0, data: { count: inserted } }
+}
+
+// 查询指定成员的个人点餐统计，用于帮他人点餐时"最近点过"按被帮人频率排序
+async function getUserMenuStats(event, openid) {
+    const { memberId } = event
+    if (!memberId) return { code: 400, msg: 'missing memberId' }
+
+    const caller = await getMemberByOpenid(openid).catch(() => null)
+    if (!caller) return { code: 403, msg: 'member only' }
+
+    const { data: stats } = await db.collection(COL.USER_STATS)
+        .where({ groupId: GROUP_ID, memberId })
+        .get()
+    const map = {}
+    stats.forEach(s => {
+        map[s.menuId] = { count: s.count || 0, lastAt: s.lastAt || null }
+    })
+    return { code: 0, data: { stats: map } }
 }

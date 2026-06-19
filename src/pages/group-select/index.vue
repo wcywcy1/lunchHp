@@ -29,20 +29,15 @@
       <text class="section-title">加入已有组织</text>
       <view class="input-row">
         <input
-          v-model="joinGroupId"
-          placeholder="请输入组织ID"
+          v-model="joinGroupName"
+          placeholder="请输入组织名称"
           class="text-input"
           confirm-type="done"
+          maxlength="20"
         />
         <button class="btn-primary" :disabled="loading" @tap="onJoin">加入</button>
       </view>
-      <view class="scan-row">
-        <view class="scan-btn" @tap="onScanJoin">
-          <text class="scan-icon">▦</text>
-          <text class="scan-text">扫码加入组织</text>
-        </view>
-      </view>
-      <text class="hint">组织ID由组织创建者分享给您，或扫描组织二维码加入</text>
+      <text class="hint">请向组织创建者询问组织名称，输入正确的名称即可加入</text>
     </view>
 
     <!-- 创建新组 -->
@@ -76,7 +71,7 @@ import { resetInit, startInit } from '@/services/appInit'
 const store = useStore()
 const joinedGroups = ref<any[]>([])
 const currentGroupId = ref<string>(store.groupId || '')
-const joinGroupId = ref('')
+const joinGroupName = ref('')
 const newGroupName = ref('')
 const loading = ref(false)
 
@@ -123,52 +118,25 @@ async function enterGroup(g: any) {
 }
 
 async function onJoin() {
-  const id = joinGroupId.value.trim()
-  if (!id) {
-    uni.showToast({ title: '请输入组织ID', icon: 'none' })
+  const name = joinGroupName.value.trim()
+  if (!name) {
+    uni.showToast({ title: '请输入组织名称', icon: 'none' })
     return
   }
-  await doJoin(id)
+  await doJoin(name)
 }
 
-// 扫码加入：二维码内容约定为 lunch_group:<groupId>
-async function onScanJoin() {
-  try {
-    const [err, res] = await new Promise<any>((resolve) => {
-      (wx as any).scanCode({ success: (r: any) => resolve([null, r]), fail: (e: any) => resolve([e, null]) })
-    })
-    if (err || !res) {
-      // 用户取消或失败，不提示
-      return
-    }
-    const raw = (res.result || '').trim()
-    let groupId = ''
-    if (raw.startsWith('lunch_group:')) {
-      groupId = raw.substring('lunch_group:'.length).trim()
-    } else {
-      // 兼容：纯组ID
-      groupId = raw
-    }
-    if (!groupId) {
-      uni.showToast({ title: '二维码内容无效', icon: 'none' })
-      return
-    }
-    await doJoin(groupId)
-  } catch (e: any) {
-    uni.showToast({ title: e.message || '扫码失败', icon: 'none' })
-  }
-}
-
-// 实际加入逻辑（输入和扫码共用）
-async function doJoin(id: string) {
+// 实际加入逻辑：按组织名称查找并加入
+async function doJoin(name: string) {
   loading.value = true
   try {
-    const res = await menuAction('joinGroupById', { targetGroupId: id })
+    const res = await menuAction('joinGroupByName', { groupName: name })
     if (!res || !res.result || res.result.code !== 0) {
       uni.showToast({ title: res?.result?.msg || '加入失败', icon: 'none' })
       return
     }
-    await switchToGroup(id)
+    const groupId = res.result.data.groupId
+    await switchToGroup(groupId)
     uni.showToast({ title: `已加入「${res.result.data.groupName}」`, icon: 'success' })
     setTimeout(() => uni.switchTab({ url: '/pages/home/index' }), 800)
   } catch (e: any) {
@@ -346,30 +314,6 @@ async function switchToGroup(targetGroupId: string) {
   font-size: 22rpx;
   color: #aaa;
   margin-top: 12rpx;
-}
-
-.scan-row {
-  margin-top: 16rpx;
-}
-
-.scan-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12rpx;
-  height: 76rpx;
-  background: #fff;
-  border: 2rpx dashed #1976d2;
-  border-radius: 10rpx;
-  color: #1976d2;
-}
-
-.scan-btn .scan-icon {
-  font-size: 32rpx;
-}
-
-.scan-btn .scan-text {
-  font-size: 26rpx;
 }
 
 .loading-mask {

@@ -10,6 +10,7 @@ const COL = {
     GROUPS: 'lunch_groups',
     MEMBERS: 'lunch_members',
     MENU: 'lunch_menu',
+    USER_STATS: 'lunch_user_menu_stats',
 }
 const ROLE = { CREATOR: 'creator', ADMIN: 'admin', MEMBER: 'member' }
 
@@ -65,7 +66,6 @@ exports.main = async (event, context) => {
         importMenuItems,
         updateMenuItem,
         deleteMenuItem,
-        moveMenuItem,
         toggleVisible,
         batchToggleVisibleBySupplier,
         parseXlsx,
@@ -74,7 +74,7 @@ exports.main = async (event, context) => {
         // 通用模式：选组/创建组
         createGroup,
         listJoinedGroups,
-        joinGroupById,
+        joinGroupByName,
     }
 
     const fn = handlers[action]
@@ -111,7 +111,7 @@ async function getDataTimestamps(event, openid) {
 }
 
 async function ensureCollections() {
-    const required = ['lunch_groups', 'lunch_members', 'lunch_menu', 'lunch_orders', 'lunch_monthly_stats', 'lunch_backups']
+    const required = ['lunch_groups', 'lunch_members', 'lunch_menu', 'lunch_orders', 'lunch_monthly_stats', 'lunch_backups', 'lunch_user_menu_stats']
     for (const name of required) {
         try {
             await db.createCollection(name)
@@ -215,20 +215,27 @@ async function listJoinedGroups(event, openid) {
     return { code: 0, data: groups }
 }
 
-// 通用模式：通过组ID加入组（需组存在且用户未加入）
-async function joinGroupById(event, openid) {
-    const { targetGroupId } = event
-    if (!targetGroupId) return { code: 400, msg: '缺少组ID' }
+// 通用模式：通过组名加入组（组名全局唯一，按名查找后加入）
+async function joinGroupByName(event, openid) {
+    const { groupName } = event
+    if (!groupName || !groupName.trim()) return { code: 400, msg: '请输入组织名称' }
+    const name = groupName.trim()
 
-    const group = (await db.collection(COL.GROUPS).doc(targetGroupId).get().catch(() => ({ data: null }))).data
-    if (!group) return { code: 404, msg: '组不存在，请检查组ID' }
+    // 按组名查找组（组名全局唯一）
+    const found = await db.collection(COL.GROUPS)
+        .where({ name })
+        .get()
+    if (!found.data || found.data.length === 0) {
+        return { code: 404, msg: `组织「${name}」不存在，请检查名称` }
+    }
+    const targetGroupId = found.data[0]._id
 
     // 检查是否已加入
     const existing = await db.collection(COL.MEMBERS)
         .where({ groupId: targetGroupId, openid })
         .get()
     if (existing.data && existing.data.length > 0) {
-        return { code: 0, data: { member: existing.data[0], groupId: targetGroupId, groupName: group.name, alreadyJoined: true } }
+        return { code: 0, data: { member: existing.data[0], groupId: targetGroupId, groupName: name, alreadyJoined: true } }
     }
 
     const now = db.serverDate()
@@ -246,7 +253,7 @@ async function joinGroupById(event, openid) {
     const { _id } = await db.collection(COL.MEMBERS).add({ data: member })
     member._id = _id
 
-    return { code: 0, data: { member, groupId: targetGroupId, groupName: group.name, alreadyJoined: false } }
+    return { code: 0, data: { member, groupId: targetGroupId, groupName: name, alreadyJoined: false } }
 }
 
 async function joinGroup(event, openid) {
@@ -455,6 +462,22 @@ async function getMenuList(event, openid) {
         .where({ groupId: GROUP_ID })
         .orderBy('sortNo', 'asc')
         .get()
+    // 合并当前用户的个人点餐统计，用于"最近点过"个人化排序
+    const caller = await getMemberByOpenid(openid).catch(() => null)
+    if (caller && caller._id && caller._id !== 'recovered') {
+        const { data: stats } = await db.collection(COL.USER_STATS)
+            .where({ groupId: GROUP_ID, memberId: caller._id })
+            .get()
+        const statMap = {}
+        stats.forEach(s => { statMap[s.menuId] = s })
+        data.forEach(item => {
+            const s = statMap[item._id]
+            if (s) {
+                item.userCount = s.count || 0
+                item.userLastAt = s.lastAt || null
+            }
+        })
+    }
     return { code: 0, data }
 }
 
@@ -564,38 +587,6 @@ async function deleteMenuItem(event, openid) {
     return { code: 0 }
 }
 
-async function moveMenuItem(event, openid) {
-    const { menuId, direction } = event
-    if (!menuId || !direction) return { code: 400, msg: 'missing menuId or direction' }
-    if (!['up', 'down'].includes(direction)) return { code: 400, msg: 'direction must be up or down' }
-
-    const caller = await getMemberByOpenid(openid)
-    if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
-
-    const target = (await db.collection(COL.MENU).doc(menuId).get()).data
-    if (!target) return { code: 404, msg: 'menu item not found' }
-
-    const { data: items } = await db.collection(COL.MENU)
-        .where({ groupId: GROUP_ID, visible: target.visible })
-        .orderBy('sortNo', 'asc')
-        .get()
-
-    const idx = items.findIndex(i => i._id === menuId)
-    if (idx === -1) return { code: 404, msg: 'item not found in visible group' }
-
-    if (direction === 'up' && idx === 0) return { code: 0, msg: 'already at top' }
-    if (direction === 'down' && idx === items.length - 1) return { code: 0, msg: 'already at bottom' }
-
-    const swapIdx = direction === 'up' ? idx - 1 : idx + 1
-    const swapItem = items[swapIdx]
-
-    await db.collection(COL.MENU).doc(menuId).update({ data: { sortNo: swapItem.sortNo } })
-    await db.collection(COL.MENU).doc(swapItem._id).update({ data: { sortNo: target.sortNo } })
-
-    await updateGroupTimestamp('menuTimestamp')
-    return { code: 0 }
-}
-
 async function toggleVisible(event, openid) {
     const { menuId } = event
     if (!menuId) return { code: 400, msg: 'missing menuId' }
@@ -606,7 +597,8 @@ async function toggleVisible(event, openid) {
     const target = (await db.collection(COL.MENU).doc(menuId).get()).data
     if (!target) return { code: 404, msg: 'menu item not found' }
 
-    const newVisible = !target.visible
+    // visible 为 undefined（老数据）时视为可见，与前端 visible !== false 判断一致
+    const newVisible = target.visible === false
 
     if (newVisible) {
         const { data: visibleItems } = await db.collection(COL.MENU)

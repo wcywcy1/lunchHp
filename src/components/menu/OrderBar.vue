@@ -2,7 +2,6 @@
   <view class="order-bar">
     <view v-if="selectedMenuItem" class="selected-info">
       <text class="selected-name">{{ selectedMenuItem.name }}</text>
-      <text class="selected-price">¥{{ selectedMenuItem.price }}</text>
     </view>
     <view v-else class="selected-info">
       <text class="no-selection">请选择菜品</text>
@@ -152,11 +151,6 @@ const addModalStyle = computed(() => {
 .selected-name {
   font-size: 28rpx;
   color: #333;
-  font-weight: bold;
-}
-.selected-price {
-  font-size: 28rpx;
-  color: #e65100;
   font-weight: bold;
 }
 .no-selection {

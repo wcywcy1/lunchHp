@@ -1337,18 +1337,12 @@ export function useDataManage() {
         }
     }
 
-    async function moveMenuItem(menuId: string, direction: string) {
-        try {
-            await menuAction('moveMenuItem', { menuId, direction })
-            await loadMenuList()
-        } catch (e: any) {
-            uni.showToast({ title: e.message || '移动失败', icon: 'none' })
-        }
-    }
-
     async function toggleMenuVisible(menuId: string) {
         try {
-            await menuAction('toggleVisible', { menuId })
+            const res = await menuAction('toggleVisible', { menuId })
+            if (res.result.code !== 0) {
+                throw new Error(res.result.msg || '操作失败')
+            }
             await loadMenuList()
             uni.showToast({ title: '已切换', icon: 'success' })
         } catch (e: any) {
@@ -1359,6 +1353,9 @@ export function useDataManage() {
     async function toggleSupplierVisible(supplier: string, visible: boolean) {
         try {
             const res = await menuAction('batchToggleVisibleBySupplier', { supplier, visible })
+            if (res.result.code !== 0) {
+                throw new Error(res.result.msg || '操作失败')
+            }
             await loadMenuList()
             const count = res.result.data?.count || 0
             uni.showToast({ title: visible ? `已上架${count}道菜` : `已下架${count}道菜`, icon: 'success' })
@@ -1503,7 +1500,6 @@ export function useDataManage() {
         openMenuEdit,
         saveMenuItem,
         deleteMenuItem,
-        moveMenuItem,
         toggleMenuVisible,
         toggleSupplierVisible,
         loadMenuList,
