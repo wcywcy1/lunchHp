@@ -540,6 +540,9 @@ export function useDataManage() {
                 uni.showToast({ title: parts.join('，'), icon: data.count > 0 ? 'success' : 'none' })
                 if (importType === 'orders') {
                     await loadData()
+                    if (data.skippedDetails && data.skippedDetails.length > 0) {
+                        showSkippedDetails(data.skippedDetails)
+                    }
                 } else if (importType === 'menu') {
                     try {
                         const menuRes = await menuAction('getMenuList')
@@ -755,6 +758,22 @@ export function useDataManage() {
         })
     }
 
+    function showSkippedDetails(details: any[]) {
+        if (!details || details.length === 0) return
+        const lines = details.slice(0, 10).map(d =>
+            `${d.memberName} - ${d.menuName}（${d.date}，¥${d.price}）`
+        )
+        if (details.length > 10) {
+            lines.push(`...等共${details.length}条`)
+        }
+        uni.showModal({
+            title: `跳过${details.length}条重复`,
+            content: lines.join('\n'),
+            showCancel: false,
+            confirmText: '知道了',
+        })
+    }
+
     async function doImportOrders(filePath: string, ext: string) {
         if (ext === 'xlsx') {
             await doImportXlsx(filePath, 'orders')
@@ -809,6 +828,7 @@ export function useDataManage() {
         let totalInserted = 0
         let totalErrors = 0
         let totalSkipped = 0
+        const allSkippedDetails: any[] = []
         for (let i = 0; i < batches.length; i++) {
             const batchMode = i === 0 ? mode : (mode === 'rewrite' ? 'rewrite_continue' : 'append')
             const isLastBatch = i === batches.length - 1
@@ -817,6 +837,9 @@ export function useDataManage() {
                 totalInserted += res.result.data.count
                 totalErrors += res.result.data.errors || 0
                 totalSkipped += res.result.data.skipped || 0
+                if (res.result.data.skippedDetails) {
+                    allSkippedDetails.push(...res.result.data.skippedDetails)
+                }
             } else {
                 throw new Error(res.result.msg || '导入失败')
             }
@@ -826,6 +849,9 @@ export function useDataManage() {
         if (totalErrors > 0) parts.push(`${totalErrors}条失败`)
         uni.showToast({ title: parts.join('，'), icon: totalInserted > 0 ? 'success' : 'none' })
         await loadData()
+        if (allSkippedDetails.length > 0) {
+            showSkippedDetails(allSkippedDetails)
+        }
     }
 
     async function doImportMenu(filePath: string, ext: string) {

@@ -757,6 +757,7 @@ async function importOrders(event, openid) {
     const toInsert = []
     let errorCount = 0
     let skippedCount = 0
+    const skippedDetails = []
 
     for (const o of orders) {
         if (!o.date || !o.memberName || !o.menuName) {
@@ -779,6 +780,12 @@ async function importOrders(event, openid) {
 
         if (lastDaySet && lastDaySet.has(`${member._id}|${menuItem._id}`)) {
             skippedCount++
+            skippedDetails.push({
+                memberName: o.memberName,
+                menuName: o.menuName,
+                date: o.date,
+                price: Number(o.price) || 0,
+            })
             continue
         }
 
@@ -811,7 +818,7 @@ async function importOrders(event, openid) {
         }
     }
 
-    return { code: 0, data: { count: toInsert.length, errors: errorCount, skipped: skippedCount } }
+    return { code: 0, data: { count: toInsert.length, errors: errorCount, skipped: skippedCount, skippedDetails } }
 }
 
 async function downloadConfirmed(event, openid) {
@@ -1151,6 +1158,7 @@ async function _importOrdersFromRows(rows, mode, openid, isLastBatch = true) {
     const toInsert = []
     let errorCount = 0
     let skippedCount = 0
+    const skippedDetails = []
 
     for (const o of records) {
         const member = memberMap[o.memberName]
@@ -1164,6 +1172,12 @@ async function _importOrdersFromRows(rows, mode, openid, isLastBatch = true) {
 
         if (lastDaySet && lastDaySet.has(`${member._id}|${menuItem._id}`)) {
             skippedCount++
+            skippedDetails.push({
+                memberName: o.memberName,
+                menuName: o.menuName,
+                date: o.date,
+                price: Number(o.price) || 0,
+            })
             continue
         }
 
@@ -1195,7 +1209,7 @@ async function _importOrdersFromRows(rows, mode, openid, isLastBatch = true) {
         }
     }
 
-    return { code: 0, data: { count: toInsert.length, errors: errorCount, skipped: skippedCount } }
+    return { code: 0, data: { count: toInsert.length, errors: errorCount, skipped: skippedCount, skippedDetails } }
 }
 
 async function _importMenuFromRows(rows, mode) {
