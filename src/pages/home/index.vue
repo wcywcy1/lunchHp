@@ -17,7 +17,6 @@
       :currentMemberId="currentMemberId"
       @cancel-mine="cancelMyOrder"
       @request-cancel="requestCancelOrder"
-      @edit-mine="openEditOrder"
     />
 
     <NameEditDialog
@@ -65,41 +64,6 @@
       </view>
     </view>
 
-    <!-- 编辑我的订单弹窗 -->
-    <view v-if="showEditDialog" class="modal-mask" @tap="closeEditDialog">
-      <view class="modal-content edit-modal" @tap.stop>
-        <text class="modal-title">编辑订单</text>
-        <view class="form-item">
-          <text class="form-label">菜品</text>
-          <picker
-            v-if="store.menu && store.menu.length > 0"
-            :range="store.menu"
-            range-key="name"
-            @change="onEditMenuChange"
-          >
-            <view class="picker-value">{{ editForm.menuName || '请选择菜品' }}</view>
-          </picker>
-          <input v-else class="form-input" v-model="editForm.menuName" placeholder="请输入菜品" />
-        </view>
-        <view class="form-item">
-          <text class="form-label">供应商</text>
-          <input class="form-input" v-model="editForm.supplier" placeholder="供应商" />
-        </view>
-        <view class="form-item">
-          <text class="form-label">价格</text>
-          <input class="form-input" type="digit" v-model="editForm.price" placeholder="价格" />
-        </view>
-        <view class="form-item">
-          <text class="form-label">备注</text>
-          <input class="form-input" v-model="editForm.note" placeholder="备注（可选）" />
-        </view>
-        <view class="modal-actions">
-          <view class="modal-btn cancel" @tap="closeEditDialog"><text>取消</text></view>
-          <view class="modal-btn confirm" @tap="saveMyOrder"><text>保存</text></view>
-        </view>
-      </view>
-    </view>
-
     <CustomTabBar current="pages/home/index" />
   </view>
 </template>
@@ -112,10 +76,7 @@ import MonthlyStats from '../../components/home/MonthlyStats.vue'
 import TodayOrders from '../../components/home/TodayOrders.vue'
 import NameEditDialog from '../../components/home/NameEditDialog.vue'
 import CustomTabBar from '../../components/CustomTabBar/CustomTabBar.vue'
-import { useStore } from '../../services/store'
 import { useHome } from '../../hooks/useHome'
-
-const store = useStore()
 
 const {
   loading,
@@ -139,13 +100,6 @@ const {
   refreshData,
   cancelMyOrder,
   requestCancelOrder,
-  showEditDialog,
-  editingOrder,
-  editForm,
-  openEditOrder,
-  onEditMenuChange,
-  saveMyOrder,
-  closeEditDialog,
   agreePrivacy,
   disagreePrivacy,
   saveName,
@@ -258,39 +212,5 @@ onPullDownRefresh(() => {
 .modal-btn.confirm {
   background: #1976d2;
   color: #fff;
-}
-.edit-modal {
-  width: 600rpx;
-}
-.form-item {
-  display: flex;
-  align-items: center;
-  margin-bottom: 20rpx;
-}
-.form-label {
-  width: 120rpx;
-  font-size: 28rpx;
-  color: #333;
-  flex-shrink: 0;
-}
-.form-input {
-  flex: 1;
-  height: 72rpx;
-  padding: 0 16rpx;
-  font-size: 28rpx;
-  border: 1rpx solid #ddd;
-  border-radius: 8rpx;
-  background: #fff;
-}
-.picker-value {
-  flex: 1;
-  height: 72rpx;
-  line-height: 72rpx;
-  padding: 0 16rpx;
-  font-size: 28rpx;
-  border: 1rpx solid #ddd;
-  border-radius: 8rpx;
-  background: #fff;
-  color: #333;
 }
 </style>

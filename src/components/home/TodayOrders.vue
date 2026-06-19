@@ -46,10 +46,9 @@
           <text class="order-name">{{ order.memberName }}</text>
           <text class="order-menu">{{ order.menuName }}</text>
           <text class="order-price">¥{{ order.price }}</text>
-          <template v-if="isMine(order)">
-            <view class="order-action edit-btn" @tap="$emit('edit-mine', order)"><text>编辑</text></view>
-            <view class="order-action" @tap="$emit('cancel-mine', order._id)"><text>取消</text></view>
-          </template>
+          <view v-if="isMine(order)" class="order-action" @tap="$emit('cancel-mine', order._id)">
+            <text>取消</text>
+          </view>
           <text v-else class="order-status pending">⏳</text>
         </view>
       </view>
@@ -85,7 +84,6 @@ const props = defineProps<{
 defineEmits<{
   (e: 'cancel-mine', id: string): void
   (e: 'request-cancel', id: string): void
-  (e: 'edit-mine', order: any): void
 }>()
 
 const confirmedOrders = computed(() =>
@@ -242,10 +240,6 @@ function isMine(order: any) {
   padding: 6rpx 0;
   border: 1rpx solid #d32f2f;
   border-radius: 8rpx;
-}
-.order-action.edit-btn {
-  color: #1976d2;
-  border-color: #1976d2;
 }
 .order-action.pending-tag {
   color: #999;

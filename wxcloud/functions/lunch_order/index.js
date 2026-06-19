@@ -82,7 +82,6 @@ exports.main = async (event, context) => {
         getPendingCancelRequests,
         rejectCancelRequest,
         updateOrder,
-        updateMyOrder,
         getConfirmedBySupplier,
         getMonthlyStats,
         rebuildMonthStats,
@@ -474,31 +473,6 @@ async function updateOrder(event, openid) {
         await doRebuildMonthStats(order.date.substring(0, 7))
         await _updateDataTimestamp()
     }
-    await _updateOrdersTimestamp()
-    return { code: 0 }
-}
-
-// 普通用户编辑自己的待确认订单
-async function updateMyOrder(event, openid) {
-    const { orderId, menuId, menuName, supplier, price, note } = event
-    if (!orderId) return { code: 400, msg: 'missing orderId' }
-
-    const caller = await getMemberByOpenid(openid)
-    if (!caller) return { code: 403, msg: 'member only' }
-
-    const order = (await db.collection(COL.ORDERS).doc(orderId).get()).data
-    if (!order) return { code: 404, msg: 'order not found' }
-    if (order.memberId !== caller._id) return { code: 403, msg: '只能编辑自己的订单' }
-    if (order.status !== STATUS.PENDING) return { code: 400, msg: '只能编辑待确认订单' }
-
-    const update = { updatedAt: db.serverDate() }
-    if (menuId !== undefined) update.menuId = menuId
-    if (menuName !== undefined) update.menuName = menuName
-    if (supplier !== undefined) update.supplier = supplier
-    if (price !== undefined) update.price = Number(price)
-    if (note !== undefined) update.note = note
-
-    await db.collection(COL.ORDERS).doc(orderId).update({ data: update })
     await _updateOrdersTimestamp()
     return { code: 0 }
 }
