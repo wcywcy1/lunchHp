@@ -21,6 +21,7 @@
         :selectedIds="selectedIds"
         :isAllSelected="isAllSelected"
         :confirming="confirming"
+        :cancelling="cancelling"
         :historyCount="historyPendingCount"
         :historyOrders="historyPendingOrders"
         :historyHasMore="historyPendingHasMore"
@@ -29,9 +30,9 @@
         @toggle="toggleSelect"
         @toggle-all="toggleSelectAll"
         @batch-confirm="batchConfirm"
+        @batch-cancel="batchCancelPending"
         @toggle-history="toggleHistoryPending"
         @load-more-history="loadMoreHistoryPending"
-        @cancel="cancelOrder"
       />
 
       <CancelRequestList
@@ -42,15 +43,20 @@
 
       <ConfirmedList
         :groups="confirmedBySupplier"
+        :selectedIds="confirmedSelectedIds"
+        :isAllSelected="isAllConfirmedSelected"
+        :cancelling="cancelling"
         :historyCount="historyConfirmedCount"
         :historyOrders="historyConfirmedOrders"
         :historyHasMore="historyConfirmedHasMore"
         :loadingHistory="loadingHistoryConfirmed"
         :showHistory="showHistoryConfirmed"
         @download="showDownloadDialog = true"
+        @toggle="toggleConfirmedSelect"
+        @toggle-all="toggleSelectAllConfirmed"
+        @batch-cancel="batchCancelConfirmed"
         @toggle-history="toggleHistoryConfirmed"
         @load-more-history="loadMoreHistoryConfirmed"
-        @cancel="cancelOrder"
       />
 
       <MemberList
@@ -293,6 +299,9 @@ const {
   selectedIds,
   isAllSelected,
   confirming,
+  cancelling,
+  confirmedSelectedIds,
+  isAllConfirmedSelected,
   showDownloadDialog,
   downloadMode,
   downloading,
@@ -332,7 +341,10 @@ const {
   toggleSelect,
   toggleSelectAll,
   batchConfirm,
-  cancelOrder,
+  toggleConfirmedSelect,
+  toggleSelectAllConfirmed,
+  batchCancelConfirmed,
+  batchCancelPending,
   pendingCancelRequests,
   loadPendingCancelRequests,
   approveCancelRequest,

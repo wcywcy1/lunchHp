@@ -163,6 +163,9 @@ export function useOrder(): OrderReturn {
                 selectedMenuId.value = ''
                 orderFor.value = 'self'
                 orderForMemberId.value = ''
+                setTimeout(() => {
+                    uni.switchTab({ url: '/pages/home/index' })
+                }, 1000)
             } else if (res.result.code === 409 || (res.result.msg && res.result.msg.includes('已提交'))) {
                 uni.showToast({ title: '已提交，请联系管理员', icon: 'none', duration: 2000 })
             } else {
