@@ -60,11 +60,11 @@ export function useHome() {
             .filter((o: any) => o.date === today)
     })
 
-    const todayAmount = computed(() =>
-        todayOrders.value.reduce((sum: number, o: any) => sum + (o.price || 0), 0)
+    const todayCount = computed(() =>
+        todayOrders.value.filter((o: any) => o.status !== 'cancelled').length
     )
 
-    const monthTotal = computed(() => store.monthSummary?.totalAmount || 0)
+    const monthCount = computed(() => store.monthSummary?.count || 0)
 
     const virtualMembers = computed(() =>
         (store.members || []).filter((m: any) => m.isVirtual === true)
@@ -381,8 +381,8 @@ export function useHome() {
         displayName,
         currentMemberId,
         todayDate,
-        monthTotal,
-        todayAmount,
+        monthCount,
+        todayCount,
         todayOrders,
         showPrivacyDialog,
         showNameDialog,

@@ -2,19 +2,19 @@
   <view class="monthly-stats">
     <view class="stat-card">
       <text class="stat-label">月合计</text>
-      <text class="stat-amount">¥{{ monthTotal }}</text>
+      <text class="stat-amount">{{ monthCount }}</text>
     </view>
     <view class="stat-card">
       <text class="stat-label">今日</text>
-      <text class="stat-amount today">¥{{ todayAmount }}</text>
+      <text class="stat-amount today">{{ todayCount }}</text>
     </view>
   </view>
 </template>
 
 <script setup lang="ts">
 defineProps<{
-  monthTotal: number
-  todayAmount: number
+  monthCount: number
+  todayCount: number
 }>()
 </script>
 

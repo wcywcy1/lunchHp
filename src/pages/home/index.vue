@@ -7,8 +7,8 @@
     />
 
     <MonthlyStats
-      :monthTotal="monthTotal"
-      :todayAmount="todayAmount"
+      :monthCount="monthCount"
+      :todayCount="todayCount"
     />
 
     <TodayOrders
@@ -82,8 +82,8 @@ const {
   loading,
   displayName,
   todayDate,
-  monthTotal,
-  todayAmount,
+  monthCount,
+  todayCount,
   todayOrders,
   currentMemberId,
   showPrivacyDialog,
