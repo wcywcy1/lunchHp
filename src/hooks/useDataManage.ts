@@ -1323,7 +1323,7 @@ export function useDataManage() {
                 await menuAction('addMenuItem', { supplier, name, price: Number(price), photo, visible: true })
             }
             showMenuEditModal.value = false
-            await loadMenuList()
+            await loadMenuList(true)
             uni.showToast({ title: isMenuEdit.value ? '已保存' : '已添加', icon: 'success' })
         } catch (e: any) {
             uni.showToast({ title: e.message || '操作失败', icon: 'none' })
@@ -1337,7 +1337,7 @@ export function useDataManage() {
         if (!confirm) return
         try {
             await menuAction('deleteMenuItem', { menuId })
-            await loadMenuList()
+            await loadMenuList(true)
             uni.showToast({ title: '已删除', icon: 'success' })
         } catch (e: any) {
             uni.showToast({ title: e.message || '删除失败', icon: 'none' })
@@ -1350,7 +1350,7 @@ export function useDataManage() {
             if (res.result.code !== 0) {
                 throw new Error(res.result.msg || '操作失败')
             }
-            await loadMenuList()
+            await loadMenuList(true)
             uni.showToast({ title: '已切换', icon: 'success' })
         } catch (e: any) {
             uni.showToast({ title: e.message || '操作失败', icon: 'none' })
@@ -1363,7 +1363,7 @@ export function useDataManage() {
             if (res.result.code !== 0) {
                 throw new Error(res.result.msg || '操作失败')
             }
-            await loadMenuList()
+            await loadMenuList(true)
             const count = res.result.data?.count || 0
             uni.showToast({ title: visible ? `已上架${count}道菜` : `已下架${count}道菜`, icon: 'success' })
         } catch (e: any) {
@@ -1373,9 +1373,10 @@ export function useDataManage() {
 
     const menuList = ref<any[]>([])
 
-    async function loadMenuList() {
+    async function loadMenuList(forceRefresh = false) {
         // 优先复用 store.menu（home 页已加载），避免重复调用 getMenuList
-        if (store.menu && store.menu.length > 0) {
+        // 写操作（增删改/上下架）后必须 forceRefresh=true 强制拉取最新数据
+        if (!forceRefresh && store.menu && store.menu.length > 0) {
             menuList.value = store.menu
             return
         }
@@ -1384,6 +1385,7 @@ export function useDataManage() {
             if (res.result.code === 0) {
                 menuList.value = res.result.data || []
                 store.menu = menuList.value
+                setCache(CACHE_KEYS.MENU, store.menu)
             }
         } catch (e) {
             console.error('loadMenuList error:', e)
