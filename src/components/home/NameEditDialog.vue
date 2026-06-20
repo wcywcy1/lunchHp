@@ -1,6 +1,6 @@
 <template>
   <view v-if="show" class="modal-mask" @tap="$emit('close')">
-    <view class="edit-modal" :style="modalStyle" @tap.stop>
+    <view class="edit-modal name-edit-modal" :style="modalStyle" @tap.stop>
       <text class="modal-title">修改姓名</text>
       <view class="current-name">
         <text class="current-label">当前：</text>
@@ -54,7 +54,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { watch } from 'vue'
+import { useModalKeyboardAvoid } from '../../hooks/useModalKeyboardAvoid'
 
 const props = defineProps<{
   show: boolean
@@ -76,21 +77,12 @@ const emit = defineEmits<{
   (e: 'update:newName', val: string): void
 }>()
 
-const keyboardHeight = ref(0)
-
-watch(() => props.show, (val) => {
-  if (!val) keyboardHeight.value = 0
+const { modalStyle, onKeyboardHeightChange, reset } = useModalKeyboardAvoid({
+  modalSelector: '.name-edit-modal'
 })
 
-function onKeyboardHeightChange(e: any) {
-  keyboardHeight.value = e.detail.height || 0
-}
-
-const modalStyle = computed(() => {
-  if (keyboardHeight.value > 0) {
-    return { transform: `translateY(-${keyboardHeight.value / 2}px)` }
-  }
-  return {}
+watch(() => props.show, (val) => {
+  if (!val) reset()
 })
 
 function onInput(e: any) {

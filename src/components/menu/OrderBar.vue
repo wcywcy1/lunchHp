@@ -82,7 +82,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, watch } from 'vue'
+import { useModalKeyboardAvoid } from '../../hooks/useModalKeyboardAvoid'
 
 const props = defineProps<{
   selectedMenuItem: any
@@ -108,25 +109,18 @@ const emit = defineEmits<{
   (e: 'add-virtual', name: string): void
 }>()
 
-const keyboardHeight = ref(0)
+const { modalStyle: addModalStyle, onKeyboardHeightChange, reset: resetKb } = useModalKeyboardAvoid({
+  modalSelector: '.add-member-modal',
+  centeredByTransform: true
+})
+
 const localMemberName = ref('')
 
 watch(() => props.showAddMember, (val) => {
   if (!val) {
-    keyboardHeight.value = 0
+    resetKb()
     localMemberName.value = ''
   }
-})
-
-function onKeyboardHeightChange(e: any) {
-  keyboardHeight.value = e.detail.height || 0
-}
-
-const addModalStyle = computed(() => {
-  if (keyboardHeight.value > 0) {
-    return { transform: `translate(-50%, calc(-50% - ${keyboardHeight.value / 2}px))` }
-  }
-  return {}
 })
 </script>
 

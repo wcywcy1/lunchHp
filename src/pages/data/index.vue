@@ -103,7 +103,7 @@
     />
 
     <view v-if="showNameEditDialog" class="modal-mask" @tap="showNameEditDialog = false">
-      <view class="edit-modal" :style="nameEditModalStyle" @tap.stop>
+      <view class="edit-modal name-edit-modal" :style="nameEditModalStyle" @tap.stop>
         <text class="modal-title">修改姓名</text>
         <view class="current-name">
           <text class="current-label">当前：</text>
@@ -137,7 +137,7 @@
     </view>
 
     <view v-if="showMenuEditModal" class="modal-mask" @tap="showMenuEditModal = false">
-      <view class="edit-modal" :style="menuEditModalStyle" @tap.stop>
+      <view class="edit-modal menu-edit-modal" :style="menuEditModalStyle" @tap.stop>
         <text class="modal-title">{{ isMenuEdit ? '编辑菜品' : '添加菜品' }}</text>
         <view class="form-item">
           <text class="form-label">供应商</text>
@@ -253,7 +253,7 @@
     </view>
 
     <view v-if="showNoticeSendDialog" class="modal-mask" @tap="showNoticeSendDialog = false">
-      <view class="edit-modal" :style="noticeSendModalStyle" @tap.stop>
+      <view class="edit-modal notice-send-modal" :style="noticeSendModalStyle" @tap.stop>
         <text class="modal-title">发送通知</text>
         <text class="notice-send-hint">通知将实时推送给所有在线成员，今天0点过期</text>
         <view class="form-item">
@@ -272,11 +272,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, watch } from 'vue'
 import { onShow, onHide } from '@dcloudio/uni-app'
 import { useStore } from '../../services/store'
 import { useAuth } from '../../hooks/useAuth'
 import { useDataManage } from '../../hooks/useDataManage'
+import { useModalKeyboardAvoid } from '../../hooks/useModalKeyboardAvoid'
 import PendingList from '../../components/data/PendingList.vue'
 import ConfirmedList from '../../components/data/ConfirmedList.vue'
 import CancelRequestList from '../../components/data/CancelRequestList.vue'
@@ -387,38 +388,13 @@ const {
 
 const members = computed(() => store.members || [])
 
-const nameEditKeyboardHeight = ref(0)
-const menuEditKeyboardHeight = ref(0)
-const noticeSendKeyboardHeight = ref(0)
+const { modalStyle: nameEditModalStyle, onKeyboardHeightChange: onNameEditKeyboard, reset: resetNameEditKb } = useModalKeyboardAvoid({ modalSelector: '.name-edit-modal' })
+const { modalStyle: menuEditModalStyle, onKeyboardHeightChange: onMenuEditKeyboard, reset: resetMenuEditKb } = useModalKeyboardAvoid({ modalSelector: '.menu-edit-modal' })
+const { modalStyle: noticeSendModalStyle, onKeyboardHeightChange: onNoticeSendKeyboard, reset: resetNoticeKb } = useModalKeyboardAvoid({ modalSelector: '.notice-send-modal' })
 
-function onNameEditKeyboard(e: any) {
-  nameEditKeyboardHeight.value = e.detail.height || 0
-}
-function onMenuEditKeyboard(e: any) {
-  menuEditKeyboardHeight.value = e.detail.height || 0
-}
-function onNoticeSendKeyboard(e: any) {
-  noticeSendKeyboardHeight.value = e.detail.height || 0
-}
-
-const nameEditModalStyle = computed(() => {
-  if (nameEditKeyboardHeight.value > 0) {
-    return { transform: `translateY(-${nameEditKeyboardHeight.value / 2}px)` }
-  }
-  return {}
-})
-const menuEditModalStyle = computed(() => {
-  if (menuEditKeyboardHeight.value > 0) {
-    return { transform: `translateY(-${menuEditKeyboardHeight.value / 2}px)` }
-  }
-  return {}
-})
-const noticeSendModalStyle = computed(() => {
-  if (noticeSendKeyboardHeight.value > 0) {
-    return { transform: `translateY(-${noticeSendKeyboardHeight.value / 2}px)` }
-  }
-  return {}
-})
+watch(showNameEditDialog, (val) => { if (!val) resetNameEditKb() })
+watch(showMenuEditModal, (val) => { if (!val) resetMenuEditKb() })
+watch(showNoticeSendDialog, (val) => { if (!val) resetNoticeKb() })
 
 const autoBackups = computed(() => backupList.value.filter((b: any) => b.type === 'auto'))
 const manualBackups = computed(() => backupList.value.filter((b: any) => b.type === 'manual'))

@@ -69,7 +69,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { watch } from 'vue'
 import { onShow, onHide, onPullDownRefresh } from '@dcloudio/uni-app'
 import HomeHeader from '../../components/home/HomeHeader.vue'
 import MonthlyStats from '../../components/home/MonthlyStats.vue'
@@ -77,6 +77,7 @@ import TodayOrders from '../../components/home/TodayOrders.vue'
 import NameEditDialog from '../../components/home/NameEditDialog.vue'
 import CustomTabBar from '../../components/CustomTabBar/CustomTabBar.vue'
 import { useHome } from '../../hooks/useHome'
+import { useModalKeyboardAvoid } from '../../hooks/useModalKeyboardAvoid'
 
 const {
   loading,
@@ -111,21 +112,12 @@ const {
   selectVirtual,
 } = useHome()
 
-const welcomeKeyboardHeight = ref(0)
-
-watch(() => showWelcomeDialog.value, (val) => {
-  if (!val) welcomeKeyboardHeight.value = 0
+const { modalStyle: welcomeModalStyle, onKeyboardHeightChange: onWelcomeKeyboard, reset: resetWelcomeKb } = useModalKeyboardAvoid({
+  modalSelector: '.welcome-modal'
 })
 
-function onWelcomeKeyboard(e: any) {
-  welcomeKeyboardHeight.value = e.detail.height || 0
-}
-
-const welcomeModalStyle = computed(() => {
-  if (welcomeKeyboardHeight.value > 0) {
-    return { transform: `translateY(-${welcomeKeyboardHeight.value / 2}px)` }
-  }
-  return {}
+watch(() => showWelcomeDialog.value, (val) => {
+  if (!val) resetWelcomeKb()
 })
 
 onShow(() => {
