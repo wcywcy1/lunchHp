@@ -153,26 +153,26 @@ export function useVoiceSearch(options: VoiceSearchOptions = {}) {
 
     async function processVoiceRecord(filePath: string) {
         try {
-            // 1. 上传到云存储
-            const cloudPath = 'voice/' + Date.now() + '_' + Math.random().toString(36).substr(2, 6) + '.mp3'
             // #ifdef MP-WEIXIN
-            const uploadRes: any = await wx.cloud.uploadFile({
-                cloudPath,
-                filePath,
-            })
+            // 1. 读文件转 base64（本地操作，毫秒级）
+            const fs = wx.getFileSystemManager()
+            const audioBase64 = fs.readFileSync(filePath, 'base64') as string
 
-            // 2. 调用云函数识别
+            // 长度校验：base64 不超过 900KB（30s×96kbps≈360KB→base64≈480KB，安全余量）
+            if (audioBase64.length > 900 * 1024) {
+                options.onError?.('录音过长，请缩短后重试')
+                return
+            }
+
+            // 2. 直接 callFunction 传 base64，省掉上传云存储/取URL/删文件三次往返
             const res: any = await wx.cloud.callFunction({
                 name: 'lunch_voice',
                 data: {
                     action: 'speechRecognize',
-                    fileID: uploadRes.fileID,
+                    audioBase64,
                     voiceFormat: 'mp3',
                 },
             })
-
-            // 3. 清理临时文件
-            wx.cloud.deleteFile({ fileList: [uploadRes.fileID] })
 
             const result = res.result || {}
             if (result.success && result.text) {

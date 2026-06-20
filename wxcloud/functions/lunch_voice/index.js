@@ -8,15 +8,15 @@ try { tencentcloud = require('tencentcloud-sdk-nodejs') } catch (e) {}
 
 /**
  * 语音识别：调用腾讯云 ASR SentenceRecognition
- * 入参: { fileID, voiceFormat }
+ * 入参: { audioBase64, voiceFormat }
  * 出参: { success, text, message }
  */
 async function speechRecognize(data) {
   if (!tencentcloud) {
     return { success: false, message: '语音识别SDK未安装' }
   }
-  if (!data.fileID) {
-    return { success: false, message: '缺少音频文件ID' }
+  if (!data.audioBase64) {
+    return { success: false, message: '缺少音频数据' }
   }
 
   try {
@@ -34,19 +34,13 @@ async function speechRecognize(data) {
       return { success: false, message: '语音识别密钥未配置' }
     }
 
-    var fileRes = await cloud.getTempFileURL({ fileList: [data.fileID] })
-    var audioUrl = ''
-    if (fileRes.fileList && fileRes.fileList[0] && fileRes.fileList[0].tempFileURL) {
-      audioUrl = fileRes.fileList[0].tempFileURL
-    }
-    if (!audioUrl) {
-      return { success: false, message: '获取音频文件链接失败' }
-    }
-
+    // SourceType=1 走 base64 直传，省掉 getTempFileURL + 腾讯外网拉音频两次往返
+    var audioBuffer = Buffer.from(data.audioBase64, 'base64')
     var client = new AsrClient(clientConfig)
     var res = await client.SentenceRecognition({
-      SourceType: 0,
-      Url: audioUrl,
+      SourceType: 1,
+      Data: data.audioBase64,
+      Length: audioBuffer.length,
       EngSerViceType: '16k_zh',
       VoiceFormat: data.voiceFormat || 'mp3'
     })
