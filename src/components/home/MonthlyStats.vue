@@ -1,11 +1,11 @@
 <template>
   <view class="monthly-stats">
     <view class="stat-card">
-      <text class="stat-label">月合计</text>
+      <text class="stat-label">月点单数</text>
       <text class="stat-amount">{{ monthCount }}</text>
     </view>
     <view class="stat-card">
-      <text class="stat-label">今日</text>
+      <text class="stat-label">今日点单数</text>
       <text class="stat-amount today">{{ todayCount }}</text>
     </view>
   </view>
