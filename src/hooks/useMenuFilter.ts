@@ -31,7 +31,8 @@ export function useMenuFilter(
     menuList: Ref<MenuItem[]>,
     statsOverride?: Ref<Record<string, { count: number; lastAt: any }>>
 ): MenuFilterReturn {
-    const selectedSupplier = ref('')
+    // 默认显示"常点"tab
+    const selectedSupplier = ref(RECENT_TAB)
     const selectedMenuName = ref('')
     const keyword = ref('')
 
@@ -76,8 +77,8 @@ export function useMenuFilter(
         recentItems.value = result.slice(0, 9)
     }
 
-    // tab 顺序：全部 → 常点 → 各供应商（按大众最近点餐时间排序）
-    const supplierOptions = ref<string[]>(['', RECENT_TAB])
+    // tab 顺序：常点 → 全部 → 各供应商（按大众最近点餐时间排序）
+    const supplierOptions = ref<string[]>([RECENT_TAB, ''])
     function computeSuppliers() {
         const visible = menuList.value.filter((i: MenuItem) => i.visible !== false && i.supplier)
         const latestBySupplier = new Map<string, number>()
@@ -90,22 +91,14 @@ export function useMenuFilter(
         suppliers.sort((a, b) =>
             (latestBySupplier.get(b)! - latestBySupplier.get(a)!) || a.localeCompare(b)
         )
-        supplierOptions.value = ['', RECENT_TAB, ...suppliers]
+        supplierOptions.value = [RECENT_TAB, '', ...suppliers]
     }
 
-    // menuList 或 statsOverride 变化时重算
-    // 首次拿到菜单数据后默认切到"常点"tab（个人常点+大众常点补齐，总有数据）
-    // 注意：menuList 初始可能为空（无缓存），需等数据加载后才标记 firstComputed
-    let firstComputed = false
+    // menuList 或 statsOverride 变化时重算常点列表与供应商列表
+    // 默认 tab 已在初始化时设为"常点"，无需在此切换
     watch([menuList, () => statsOverride?.value], () => {
         computeSuppliers()
         computeRecent()
-        if (!firstComputed && menuList.value.length > 0) {
-            firstComputed = true
-            if (recentItems.value.length > 0) {
-                selectedSupplier.value = RECENT_TAB
-            }
-        }
     }, { immediate: true, deep: false })
 
     const menuNameOptions = computed(() => {
