@@ -126,12 +126,16 @@ function onRejectedTap() {
   margin-right: 16rpx;
 }
 .notice-scroll-wrap {
+  position: relative;
   flex: 1;
   overflow: hidden;
   height: 36rpx;
   line-height: 36rpx;
 }
 .notice-scroll-inner {
+  position: absolute;
+  top: 0;
+  left: 100%;
   display: inline-block;
   white-space: nowrap;
   animation: notice-scroll 8s linear infinite;
@@ -142,8 +146,8 @@ function onRejectedTap() {
   font-weight: 500;
 }
 @keyframes notice-scroll {
-  0% { transform: translateX(100%); }
-  100% { transform: translateX(-100%); }
+  0% { left: 100%; transform: translateX(0); }
+  100% { left: 0; transform: translateX(-100%); }
 }
 .empty-tip {
   padding: 40rpx 0;
