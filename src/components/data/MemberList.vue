@@ -141,13 +141,16 @@ const expanded = ref(false)
 }
 .action-btn {
   font-size: 28rpx;
-  padding: 4rpx 8rpx;
+  padding: 4rpx 12rpx;
+  border-radius: 8rpx;
 }
 .action-btn.edit {
-  color: #1976d2;
+  color: #4CAF50;
+  background-color: rgba(76,175,80,0.1);
 }
 .action-btn.delete {
-  color: #d32f2f;
+  color: #F44336;
+  background-color: rgba(244,67,54,0.1);
 }
 .action-btn.set-admin {
   background: #e3f2fd;

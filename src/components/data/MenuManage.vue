@@ -31,8 +31,8 @@
           </view>
           <view class="menu-actions">
             <text class="action-btn edit" @tap.stop="$emit('edit', item)">✏️</text>
-            <text class="action-btn hide" @tap.stop="$emit('toggle-visible', item._id)">👁</text>
             <text class="action-btn delete" @tap.stop="$emit('delete', item._id)">🗑️</text>
+            <text class="action-btn hide" @tap.stop="$emit('toggle-visible', item._id)">👁</text>
           </view>
         </view>
       </view>
@@ -60,8 +60,8 @@
               </view>
               <view class="menu-actions">
                 <text class="action-btn edit" @tap.stop="$emit('edit', item)">✏️</text>
-                <text class="action-btn restore" @tap.stop="$emit('toggle-visible', item._id)">👁</text>
                 <text class="action-btn delete" @tap.stop="$emit('delete', item._id)">🗑️</text>
+                <text class="action-btn restore" @tap.stop="$emit('toggle-visible', item._id)">👁</text>
               </view>
             </view>
           </view>
@@ -254,11 +254,13 @@ const hiddenSupplierCount = computed(() => hiddenGroups.value.length)
 }
 .action-btn {
   font-size: 26rpx;
-  padding: 4rpx 6rpx;
+  padding: 4rpx 12rpx;
+  border-radius: 8rpx;
   color: #666;
 }
 .action-btn.edit {
-  color: #1976d2;
+  color: #4CAF50;
+  background-color: rgba(76,175,80,0.1);
 }
 .action-btn.hide {
   color: #f57c00;
@@ -267,7 +269,8 @@ const hiddenSupplierCount = computed(() => hiddenGroups.value.length)
   color: #388e3c;
 }
 .action-btn.delete {
-  color: #d32f2f;
+  color: #F44336;
+  background-color: rgba(244,67,54,0.1);
 }
 .hidden-section {
   border-top: 2rpx dashed #ddd;

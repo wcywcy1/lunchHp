@@ -145,7 +145,7 @@ const historyGroups = computed(() => {
   color: #fff;
 }
 .order-name {
-  flex: 4;
+  width: 240rpx;
   font-size: 28rpx;
   color: #333;
   flex-shrink: 0;
@@ -154,7 +154,7 @@ const historyGroups = computed(() => {
   white-space: nowrap;
 }
 .order-menu {
-  flex: 6;
+  flex: 1;
   font-size: 28rpx;
   color: #666;
   overflow: hidden;

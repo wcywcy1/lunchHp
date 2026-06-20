@@ -23,7 +23,6 @@
         >
           <text class="order-name">{{ order.memberName }}</text>
           <text class="order-menu">{{ order.menuName }}</text>
-          <text class="order-price">¥{{ order.price }}</text>
           <view v-if="isMine(order) && order.cancelRequested" class="order-action pending-tag">
             <text>申请中</text>
           </view>
@@ -48,7 +47,6 @@
         >
           <text class="order-name">{{ order.memberName }}</text>
           <text class="order-menu">{{ order.menuName }}</text>
-          <text class="order-price">¥{{ order.price }}</text>
           <view v-if="isMine(order)" class="order-action" @tap="$emit('cancel-mine', order._id)">
             <text>取消</text>
           </view>
@@ -67,7 +65,6 @@
         >
           <text class="order-name">{{ order.memberName }}</text>
           <text class="order-menu">{{ order.menuName }}</text>
-          <text class="order-price">¥{{ order.price }}</text>
           <text class="order-status cancelled">❌</text>
         </view>
       </view>
@@ -195,11 +192,8 @@ function onRejectedTap() {
   text-decoration: line-through;
   color: #999;
 }
-.cancelled-item .order-price {
-  color: #999;
-}
 .order-name {
-  flex: 4;
+  width: 240rpx;
   font-size: 28rpx;
   color: #333;
   flex-shrink: 0;
@@ -208,19 +202,12 @@ function onRejectedTap() {
   white-space: nowrap;
 }
 .order-menu {
-  flex: 5;
+  flex: 1;
   font-size: 28rpx;
   color: #666;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.order-price {
-  width: 100rpx;
-  text-align: right;
-  font-size: 28rpx;
-  color: #e65100;
-  flex-shrink: 0;
 }
 .order-status {
   width: 60rpx;
