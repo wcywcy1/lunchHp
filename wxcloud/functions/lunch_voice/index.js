@@ -35,12 +35,11 @@ async function speechRecognize(data) {
     }
 
     // SourceType=1 走 base64 直传，省掉 getTempFileURL + 腾讯外网拉音频两次往返
-    var audioBuffer = Buffer.from(data.audioBase64, 'base64')
+    // 注：新版 SDK 已废弃 Length 参数，由 SDK 内部根据 base64 自算
     var client = new AsrClient(clientConfig)
     var res = await client.SentenceRecognition({
       SourceType: 1,
       Data: data.audioBase64,
-      Length: audioBuffer.length,
       EngSerViceType: '16k_zh',
       VoiceFormat: data.voiceFormat || 'mp3'
     })
