@@ -94,12 +94,13 @@ export function useMenuFilter(
     }
 
     // menuList 或 statsOverride 变化时重算
-    // 首次计算后默认切到"常点"tab（个人常点+大众常点补齐，总有数据）
+    // 首次拿到菜单数据后默认切到"常点"tab（个人常点+大众常点补齐，总有数据）
+    // 注意：menuList 初始可能为空（无缓存），需等数据加载后才标记 firstComputed
     let firstComputed = false
     watch([menuList, () => statsOverride?.value], () => {
         computeSuppliers()
         computeRecent()
-        if (!firstComputed) {
+        if (!firstComputed && menuList.value.length > 0) {
             firstComputed = true
             if (recentItems.value.length > 0) {
                 selectedSupplier.value = RECENT_TAB

@@ -21,12 +21,12 @@
             v-if="member.role !== 'creator'"
             class="action-btn edit"
             @tap="$emit('edit-name', member)"
-          >✏</text>
+          >✏️</text>
           <text
             v-if="member.role !== 'creator'"
             class="action-btn delete"
             @tap="$emit('delete-member', member)"
-          >🗑</text>
+          >🗑️</text>
           <text
             v-if="isCreator && member.role === 'member'"
             class="action-btn set-admin"
