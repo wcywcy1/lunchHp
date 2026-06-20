@@ -93,7 +93,7 @@ export function setRecentLoadTime(time: number) {
 }
 
 export function restoreSession(): boolean {
-    const session = getCache(CACHE_KEYS.SESSION, true)
+    const session = getCache(CACHE_KEYS.SESSION)
     if (!session) return false
     setStore({
         member: session.member,

@@ -23,7 +23,7 @@ export const CACHE_TTL: Record<string, number> = {
     MONTH_SUMMARY: 5 * MINUTE,
     MONTHLY_STATS: 30 * MINUTE,
     MONTHLY_STATS_TIME: 0,
-    SESSION: Infinity,
+    SESSION: 30 * MINUTE,
 }
 
 const _keyToTTL: Record<string, number> = {}
