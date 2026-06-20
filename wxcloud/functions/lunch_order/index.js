@@ -80,6 +80,7 @@ exports.main = async (event, context) => {
         submitOrder,
         batchConfirm,
         cancelOrder,
+        batchCancelOrders,
         cancelMyOrder,
         requestCancelOrder,
         getPendingCancelRequests,
@@ -280,33 +281,40 @@ async function _touchMenuAndMembersTimestamp() {
     }
 }
 
-// 合并大众点餐统计（orderCount/lastOrderedAt）到 menu
-// 用 aggregate 服务端聚合，避免 fetchAll 拉全量订单导致的性能问题
-// 加 limit 覆盖所有菜品（聚合结果按 menuId 分组，数量 = 不同菜品数）
-async function _mergePublicStats(menu) {
-    try {
-        const { list } = await db.collection(COL.ORDERS)
-            .aggregate()
-            .match({ groupId: GROUP_ID, status: _.neq(STATUS.CANCELLED) })
-            .group({
-                _id: '$menuId',
-                orderCount: $.sum(1),
-                lastOrderedAt: $.max('$createdAt'),
-            })
-            .limit(1000)
-            .end()
-        const publicMap = {}
-        list.forEach(r => { publicMap[r._id] = r })
-        menu.forEach(item => {
-            const p = publicMap[item._id]
-            if (p) {
-                item.orderCount = p.orderCount
-                item.lastOrderedAt = p.lastOrderedAt
-            }
+// 一次性更新 orders/data/menu/members 四个时间戳，替代分散的多次 get+update
+async function _touchAllTimestamps() {
+    const now = db.serverDate()
+    const existing = await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => null)
+    if (existing && existing.data) {
+        await db.collection(COL.GROUPS).doc(GROUP_ID).update({
+            data: {
+                ordersTimestamp: now,
+                dataTimestamp: now,
+                menuTimestamp: now,
+                membersTimestamp: now,
+            },
         })
-    } catch (e) {
-        console.error('merge public stats error:', e)
+    } else {
+        await db.collection(COL.GROUPS).add({
+            data: {
+                _id: GROUP_ID,
+                ordersTimestamp: now,
+                dataTimestamp: now,
+                menuTimestamp: now,
+                membersTimestamp: now,
+                createdAt: now,
+            },
+        })
     }
+}
+
+// 合并大众点餐统计（orderCount/lastOrderedAt）到 menu
+// orderCount/lastOrderedAt 由 submitOrder 时 _.inc(1) 维护到 menu 文档自身，无需 aggregate 全量订单
+async function _mergePublicStats(menu) {
+    menu.forEach(item => {
+        if (item.orderCount === undefined) item.orderCount = 0
+        if (item.lastOrderedAt === undefined) item.lastOrderedAt = null
+    })
 }
 
 // 合并当前用户对每道菜的个人点餐统计（userCount/userLastAt），用于"最近点过"个人化排序
@@ -424,9 +432,7 @@ async function submitOrder(event, openid) {
             ? _upsertUserStat(callerMemberId, menuId, now).catch(e => console.error('upsert user stat error:', e))
             : Promise.resolve(),
     ])
-    await _updateOrdersTimestamp()
-    await _updateDataTimestamp()
-    await _touchMenuAndMembersTimestamp()
+    await _touchAllTimestamps()
     return { code: 0, data: order }
 }
 
@@ -440,24 +446,19 @@ async function batchConfirm(event, openid) {
     if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
 
     const now = db.serverDate()
-    const results = []
-
-    for (const orderId of orderIds) {
-        try {
-            await db.collection(COL.ORDERS).doc(orderId).update({
-                data: { status: STATUS.CONFIRMED, updatedAt: now },
-            })
-            results.push({ orderId, success: true })
-        } catch (e) {
-            results.push({ orderId, success: false, error: e.message })
-        }
+    // 批量更新：用 where + _.in 一次更新，避免循环单条 update
+    const updateRes = await db.collection(COL.ORDERS)
+        .where({ _id: _.in(orderIds), groupId: GROUP_ID })
+        .update({ data: { status: STATUS.CONFIRMED, updatedAt: now } })
+    const results = orderIds.map(id => ({ orderId: id, success: true }))
+    if (updateRes.stats && updateRes.stats.updated !== orderIds.length) {
+        console.warn('batchConfirm partial update:', updateRes.stats.updated, '/', orderIds.length)
     }
 
     if (date) {
         await doRebuildMonthStats(date.substring(0, 7))
     }
-    await _updateDataTimestamp()
-    await _updateOrdersTimestamp()
+    await _touchAllTimestamps()
 
     return { code: 0, data: results }
 }
@@ -477,9 +478,48 @@ async function cancelOrder(event, openid) {
     })
 
     await doRebuildMonthStats(order.date.substring(0, 7))
-    await _updateDataTimestamp()
-    await _updateOrdersTimestamp()
+    await _touchAllTimestamps()
     return { code: 0 }
+}
+
+// 批量取消订单：一次 where update + 仅对涉及月份 rebuild 一次
+async function batchCancelOrders(event, openid) {
+    const { orderIds } = event
+    if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
+        return { code: 400, msg: 'missing orderIds' }
+    }
+
+    const caller = await getMemberByOpenid(openid)
+    if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
+
+    // 1. 一次性查出订单（拿 date 用于按月 rebuild）
+    const { data: orders } = await db.collection(COL.ORDERS)
+        .where({ _id: _.in(orderIds), groupId: GROUP_ID })
+        .get()
+
+    // 2. 批量更新状态
+    const now = db.serverDate()
+    await db.collection(COL.ORDERS)
+        .where({ _id: _.in(orderIds), groupId: GROUP_ID })
+        .update({
+            data: {
+                status: STATUS.CANCELLED,
+                cancelRequested: false,
+                cancelRejected: false,
+                updatedAt: now,
+            },
+        })
+
+    // 3. 仅对涉及的每个月份 rebuild 一次（去重）
+    const yearMonths = [...new Set(orders.map(o => o.date.substring(0, 7)))]
+    for (const ym of yearMonths) {
+        try { await doRebuildMonthStats(ym) } catch (e) { console.error('rebuild month stats error:', e) }
+    }
+
+    // 4. 时间戳只更新一次
+    await _touchAllTimestamps()
+
+    return { code: 0, data: { cancelled: orders.length } }
 }
 
 // 普通成员对已确认订单申请取消
@@ -937,44 +977,70 @@ async function importOrders(event, openid) {
         if (!menuMap[it.name]) menuMap[it.name] = it
     })
 
-    // auto-create missing members and menu items
+    // auto-create missing members and menu items（批量 add，避免循环单条写入）
     const now = db.serverDate()
     const newMembers = {}
     const newMenuItems = {}
 
+    const membersToCreate = []
     for (const o of orders) {
         if (!o.memberName || memberMap[o.memberName] || newMembers[o.memberName]) continue
-        const addRes = await db.collection(COL.MEMBERS).add({ data: {
+        newMembers[o.memberName] = { _id: null, name: o.memberName } // 占位，add 后回填
+        membersToCreate.push({
             groupId: GROUP_ID, name: o.memberName, nickName: '', avatar: '', openid: '',
             role: ROLE.MEMBER, isVirtual: true, privacyAgreed: false, joinedAt: now,
-        }})
-        newMembers[o.memberName] = { _id: addRes._id, name: o.memberName }
+        })
+    }
+    // 批量插入新成员（每批 100 条），回填 _id
+    for (let i = 0; i < membersToCreate.length; i += 100) {
+        const chunk = membersToCreate.slice(i, i + 100)
+        const addRes = await db.collection(COL.MEMBERS).add({ data: chunk })
+        addRes._ids.forEach((id, idx) => {
+            const name = chunk[idx].name
+            newMembers[name]._id = id
+        })
     }
     Object.assign(memberMap, newMembers)
 
+    const menuToCreate = []
     for (const o of orders) {
         if (!o.menuName) continue
         const menuKey = (o.supplier || '') + '|' + o.menuName
         if (menuMap[menuKey] || menuMap[o.menuName] || newMenuItems[menuKey]) continue
-        const addRes = await db.collection(COL.MENU).add({ data: {
-            groupId: GROUP_ID, sortNo: (allMenu.length + Object.keys(newMenuItems).length + 1) * 10,
+        newMenuItems[menuKey] = { _id: null, name: o.menuName, supplier: o.supplier || '' }
+        if (!newMenuItems[o.menuName]) newMenuItems[o.menuName] = newMenuItems[menuKey]
+        menuToCreate.push({
+            groupId: GROUP_ID, sortNo: (allMenu.length + menuToCreate.length + 1) * 10,
             supplier: o.supplier || '', name: o.menuName, price: Number(o.price) || 0,
             photo: '', visible: true, createdAt: now,
-        }})
-        newMenuItems[menuKey] = { _id: addRes._id, name: o.menuName, supplier: o.supplier || '' }
-        if (!newMenuItems[o.menuName]) newMenuItems[o.menuName] = newMenuItems[menuKey]
+        })
+    }
+    for (let i = 0; i < menuToCreate.length; i += 100) {
+        const chunk = menuToCreate.slice(i, i + 100)
+        const addRes = await db.collection(COL.MENU).add({ data: chunk })
+        addRes._ids.forEach((id, idx) => {
+            const item = chunk[idx]
+            const key = (item.supplier || '') + '|' + item.name
+            newMenuItems[key]._id = id
+            if (newMenuItems[item.name]) newMenuItems[item.name]._id = id
+        })
     }
     Object.assign(menuMap, newMenuItems)
 
     let lastDaySet = null
     if (mode === 'append') {
-        const allOrders = await fetchAll(db.collection(COL.ORDERS), { groupId: GROUP_ID })
-        if (allOrders.length > 0) {
-            const lastDate = allOrders.reduce((max, o) => o.date > max ? o.date : max, '')
-            lastDaySet = new Set(
-                allOrders.filter(o => o.date === lastDate)
-                    .map(o => `${o.memberId}|${o.menuId}`)
-            )
+        // 只查最近一天的订单用于去重，避免 fetchAll 全量订单
+        const { list: lastDateAgg } = await db.collection(COL.ORDERS)
+            .aggregate()
+            .match({ groupId: GROUP_ID })
+            .group({ _id: null, lastDate: $.max('$date') })
+            .end()
+        if (lastDateAgg.length > 0) {
+            const lastDate = lastDateAgg[0].lastDate
+            const { data: lastDayOrders } = await db.collection(COL.ORDERS)
+                .where({ groupId: GROUP_ID, date: lastDate })
+                .get()
+            lastDaySet = new Set(lastDayOrders.map(o => `${o.memberId}|${o.menuId}`))
         }
     }
 
@@ -1338,44 +1404,68 @@ async function _importOrdersFromRows(rows, mode, openid, isLastBatch = true) {
         if (!menuMap[it.name]) menuMap[it.name] = it
     })
 
-    // auto-create missing members and menu items
+    // auto-create missing members and menu items（批量 add，避免循环单条写入）
     const now = db.serverDate()
     const newMembers = {}
     const newMenuItems = {}
 
+    const membersToCreate = []
     for (const o of records) {
         if (!o.memberName || memberMap[o.memberName] || newMembers[o.memberName]) continue
-        const addRes = await db.collection(COL.MEMBERS).add({ data: {
+        newMembers[o.memberName] = { _id: null, name: o.memberName }
+        membersToCreate.push({
             groupId: GROUP_ID, name: o.memberName, nickName: '', avatar: '', openid: '',
             role: ROLE.MEMBER, isVirtual: true, privacyAgreed: false, joinedAt: now,
-        }})
-        newMembers[o.memberName] = { _id: addRes._id, name: o.memberName }
+        })
+    }
+    for (let i = 0; i < membersToCreate.length; i += 100) {
+        const chunk = membersToCreate.slice(i, i + 100)
+        const addRes = await db.collection(COL.MEMBERS).add({ data: chunk })
+        addRes._ids.forEach((id, idx) => {
+            newMembers[chunk[idx].name]._id = id
+        })
     }
     Object.assign(memberMap, newMembers)
 
+    const menuToCreate = []
     for (const o of records) {
         if (!o.menuName) continue
         const menuKey = (o.supplier || '') + '|' + o.menuName
         if (menuMap[menuKey] || menuMap[o.menuName] || newMenuItems[menuKey]) continue
-        const addRes = await db.collection(COL.MENU).add({ data: {
-            groupId: GROUP_ID, sortNo: (allMenu.length + Object.keys(newMenuItems).length + 1) * 10,
+        newMenuItems[menuKey] = { _id: null, name: o.menuName, supplier: o.supplier || '' }
+        if (!newMenuItems[o.menuName]) newMenuItems[o.menuName] = newMenuItems[menuKey]
+        menuToCreate.push({
+            groupId: GROUP_ID, sortNo: (allMenu.length + menuToCreate.length + 1) * 10,
             supplier: o.supplier || '', name: o.menuName, price: Number(o.price) || 0,
             photo: '', visible: true, createdAt: now,
-        }})
-        newMenuItems[menuKey] = { _id: addRes._id, name: o.menuName, supplier: o.supplier || '' }
-        if (!newMenuItems[o.menuName]) newMenuItems[o.menuName] = newMenuItems[menuKey]
+        })
+    }
+    for (let i = 0; i < menuToCreate.length; i += 100) {
+        const chunk = menuToCreate.slice(i, i + 100)
+        const addRes = await db.collection(COL.MENU).add({ data: chunk })
+        addRes._ids.forEach((id, idx) => {
+            const item = chunk[idx]
+            const key = (item.supplier || '') + '|' + item.name
+            newMenuItems[key]._id = id
+            if (newMenuItems[item.name]) newMenuItems[item.name]._id = id
+        })
     }
     Object.assign(menuMap, newMenuItems)
 
     let lastDaySet = null
     if (mode === 'append') {
-        const allOrders = await fetchAll(db.collection(COL.ORDERS), { groupId: GROUP_ID })
-        if (allOrders.length > 0) {
-            const lastDate = allOrders.reduce((max, o) => o.date > max ? o.date : max, '')
-            lastDaySet = new Set(
-                allOrders.filter(o => o.date === lastDate)
-                    .map(o => `${o.memberId}|${o.menuId}`)
-            )
+        // 只查最近一天的订单用于去重，避免 fetchAll 全量订单
+        const { list: lastDateAgg } = await db.collection(COL.ORDERS)
+            .aggregate()
+            .match({ groupId: GROUP_ID })
+            .group({ _id: null, lastDate: $.max('$date') })
+            .end()
+        if (lastDateAgg.length > 0) {
+            const lastDate = lastDateAgg[0].lastDate
+            const { data: lastDayOrders } = await db.collection(COL.ORDERS)
+                .where({ groupId: GROUP_ID, date: lastDate })
+                .get()
+            lastDaySet = new Set(lastDayOrders.map(o => `${o.memberId}|${o.menuId}`))
         }
     }
 

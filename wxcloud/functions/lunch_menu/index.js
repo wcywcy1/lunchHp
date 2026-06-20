@@ -112,7 +112,10 @@ async function getDataTimestamps(event, openid) {
     }
 }
 
+// 集合初始化只需执行一次，云函数实例复用时跳过
+let _collectionsEnsured = false
 async function ensureCollections() {
+    if (_collectionsEnsured) return
     const required = ['lunch_groups', 'lunch_members', 'lunch_menu', 'lunch_orders', 'lunch_monthly_stats', 'lunch_backups', 'lunch_user_menu_stats']
     for (const name of required) {
         try {
@@ -123,6 +126,7 @@ async function ensureCollections() {
             }
         }
     }
+    _collectionsEnsured = true
 }
 
 async function initGroup(event, openid) {
@@ -464,31 +468,12 @@ async function getMenuList(event, openid) {
         .where({ groupId: GROUP_ID })
         .orderBy('sortNo', 'asc')
         .get()
-    // 合并大众点餐统计（orderCount/lastOrderedAt）
-    // 用 aggregate 服务端聚合，避免 fetchAll 拉全量订单导致的性能问题
-    try {
-        const { list } = await db.collection(COL.ORDERS)
-            .aggregate()
-            .match({ groupId: GROUP_ID, status: _.neq('cancelled') })
-            .group({
-                _id: '$menuId',
-                orderCount: $.sum(1),
-                lastOrderedAt: $.max('$createdAt'),
-            })
-            .limit(1000)
-            .end()
-        const publicMap = {}
-        list.forEach(r => { publicMap[r._id] = r })
-        data.forEach(item => {
-            const p = publicMap[item._id]
-            if (p) {
-                item.orderCount = p.orderCount
-                item.lastOrderedAt = p.lastOrderedAt
-            }
-        })
-    } catch (e) {
-        console.error('merge public stats error:', e)
-    }
+    // orderCount/lastOrderedAt 由 submitOrder 时 _.inc(1) 维护到 menu 文档自身，
+    // 无需 aggregate 全量订单。给旧数据补默认值。
+    data.forEach(item => {
+        if (item.orderCount === undefined) item.orderCount = 0
+        if (item.lastOrderedAt === undefined) item.lastOrderedAt = null
+    })
     // 合并当前用户的个人点餐统计，用于"最近点过"个人化排序
     const caller = await getMemberByOpenid(openid).catch(() => null)
     if (caller && caller._id && caller._id !== 'recovered') {

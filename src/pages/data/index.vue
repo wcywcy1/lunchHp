@@ -290,6 +290,9 @@ import CustomTabBar from '../../components/CustomTabBar/CustomTabBar.vue'
 
 const store = useStore()
 const { isAdmin, isCreator } = useAuth()
+// data 页 onShow 节流：30 秒内不重复全量加载（realtime watcher 不受影响）
+let lastDataLoadTime = 0
+const DATA_THROTTLE_MS = 30 * 1000
 const {
   loading,
   pendingOrders,
@@ -432,10 +435,15 @@ onShow(() => {
     uni.switchTab({ url: '/pages/home/index' })
     return
   }
+  // realtime watcher 始终开启，保证管理员实时看到新订单
+  startRealtimeWatch()
+  // 节流：30 秒内不重复全量加载
+  const now = Date.now()
+  if (now - lastDataLoadTime < DATA_THROTTLE_MS) return
+  lastDataLoadTime = now
   loadData()
   loadPendingCancelRequests()
   loadMenuList()
-  startRealtimeWatch()
 })
 
 onHide(() => {

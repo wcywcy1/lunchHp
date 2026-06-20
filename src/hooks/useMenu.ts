@@ -89,17 +89,23 @@ export function useMenu(): MenuReturn {
             if (res.result.code !== 0) return
             const { menuTimestamp, membersTimestamp } = res.result.data
 
+            // menu 和 members 刷新无依赖，并行执行
+            const tasks: Promise<void>[] = []
             if (menuTimestamp !== store.menuTimestamp) {
-                await loadMenu(true)
-                store.menuTimestamp = menuTimestamp
-                setCache(CACHE_KEYS.MENU_TIMESTAMP, menuTimestamp)
+                tasks.push((async () => {
+                    await loadMenu(true)
+                    store.menuTimestamp = menuTimestamp
+                    setCache(CACHE_KEYS.MENU_TIMESTAMP, menuTimestamp)
+                })())
             }
-
             if (membersTimestamp !== store.membersTimestamp) {
-                await loadMembers()
-                store.membersTimestamp = membersTimestamp
-                setCache(CACHE_KEYS.MEMBERS_TIMESTAMP, membersTimestamp)
+                tasks.push((async () => {
+                    await loadMembers()
+                    store.membersTimestamp = membersTimestamp
+                    setCache(CACHE_KEYS.MEMBERS_TIMESTAMP, membersTimestamp)
+                })())
             }
+            await Promise.all(tasks)
         } catch (e) {
             console.error('checkFreshness error:', e)
         }

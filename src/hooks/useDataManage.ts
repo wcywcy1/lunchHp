@@ -96,7 +96,12 @@ export function useDataManage() {
     async function loadData() {
         loading.value = true
         try {
-            const res = await orderAction('getRecentOrders')
+            // 三个调用无依赖，并行执行
+            const [res, tsRes] = await Promise.all([
+                orderAction('getRecentOrders'),
+                menuAction('getDataTimestamps'),
+                loadHistoryCount(),
+            ])
             if (res.result.code === 0) {
                 const orders = res.result.data || []
                 const today = getDateStr()
@@ -105,11 +110,9 @@ export function useDataManage() {
                 confirmedOrders.value = todayOrders.filter((o: any) => o.status === ORDER_STATUS.CONFIRMED)
             }
             // 同步当前通知（登录/刷新后从服务端拉取，避免本地状态丢失）
-            const tsRes = await menuAction('getDataTimestamps')
             if (tsRes.result.code === 0) {
                 currentNotice.value = tsRes.result.data.notice || ''
             }
-            await loadHistoryCount()
         } catch (e) {
             console.error('loadData error:', e)
         } finally {
@@ -166,9 +169,7 @@ export function useDataManage() {
         if (!confirm) return
         cancelling.value = true
         try {
-            for (const orderId of ids) {
-                await orderAction('cancelOrder', { orderId })
-            }
+            await orderAction('batchCancelOrders', { orderIds: ids })
             uni.showToast({ title: '取消成功', icon: 'success' })
             confirmedSelectedIds.value = []
             await loadData()
@@ -187,9 +188,7 @@ export function useDataManage() {
         if (!confirm) return
         cancelling.value = true
         try {
-            for (const orderId of ids) {
-                await orderAction('cancelOrder', { orderId })
-            }
+            await orderAction('batchCancelOrders', { orderIds: ids })
             uni.showToast({ title: '取消成功', icon: 'success' })
             selectedIds.value = []
             await loadData()
@@ -1367,6 +1366,11 @@ export function useDataManage() {
     const menuList = ref<any[]>([])
 
     async function loadMenuList() {
+        // 优先复用 store.menu（home 页已加载），避免重复调用 getMenuList
+        if (store.menu && store.menu.length > 0) {
+            menuList.value = store.menu
+            return
+        }
         try {
             const res = await menuAction('getMenuList')
             if (res.result.code === 0) {

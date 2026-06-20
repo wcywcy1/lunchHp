@@ -27,6 +27,9 @@ export function useHome() {
 
     // 记录已展示过的 notice 更新时间，避免重复弹窗
     let lastShownNoticeTime: number = 0
+    // onShow 节流：10 秒内不重复执行 fetchNotice + checkFreshness（realtime watcher 不受影响）
+    let lastFreshnessCheck: number = 0
+    const FRESHNESS_THROTTLE_MS = 10 * 1000
 
     // 判断通知是否是今天的（0点自动过期）
     function isNoticeToday(noticeTime: any): boolean {
@@ -132,11 +135,14 @@ export function useHome() {
             showPrivacyDialog.value = true
             return
         }
-        // 每次都拉取最新通知（轻量，只读一个文档）
-        await fetchNotice()
-        // 总是检查订单时间戳，确保从其他页面切回时能拿到最新数据
-        await checkFreshness()
+        // realtime watcher 始终开启，保证管理员实时看到新订单
         startRealtimeWatch()
+        // 节流：10 秒内不重复执行 fetchNotice + checkFreshness
+        const now = Date.now()
+        if (now - lastFreshnessCheck < FRESHNESS_THROTTLE_MS) return
+        lastFreshnessCheck = now
+        // fetchNotice 与 checkFreshness 无依赖，并行执行
+        await Promise.all([fetchNotice(), checkFreshness()])
     }
 
     async function fetchNotice() {
