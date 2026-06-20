@@ -172,21 +172,21 @@ export function useHome() {
         realtime.watchGroupNotice((snapshot: any) => {
             if (snapshot.type === 'init') {
                 const docs = snapshot.docs
-                if (docs && docs[0] && docs[0].notice) {
-                    const noticeTime = docs[0].noticeUpdatedAt || 0
-                    if (isNoticeToday(noticeTime)) {
-                        noticeContent.value = docs[0].notice
-                    } else {
-                        noticeContent.value = ''
-                    }
+                const d = docs && docs[0]
+                if (d && d.notice && isNoticeToday(d.noticeUpdatedAt)) {
+                    noticeContent.value = d.notice
+                } else {
+                    noticeContent.value = ''
                 }
                 return
             }
             const docChanges = snapshot.docChanges || []
             for (const change of docChanges) {
                 if (change.dataType === 'update' || change.dataType === 'replace') {
-                    const notice = change.updatedFields?.notice || change.doc?.notice
-                    const noticeTime = change.updatedFields?.noticeUpdatedAt || change.doc?.noticeUpdatedAt || 0
+                    const uf = change.updatedFields || {}
+                    const doc = change.doc || {}
+                    const notice = uf.notice !== undefined ? uf.notice : doc.notice
+                    const noticeTime = uf.noticeUpdatedAt !== undefined ? uf.noticeUpdatedAt : doc.noticeUpdatedAt || 0
                     if (notice && isNoticeToday(noticeTime)) {
                         noticeContent.value = notice
                     } else {
