@@ -281,28 +281,27 @@ async function _touchMenuAndMembersTimestamp() {
 }
 
 // 合并大众点餐统计（orderCount/lastOrderedAt）到 menu
-// 从 ORDERS 实时聚合，覆盖历史导入数据未维护 menu 字段的情况
-// 用 fetchAll 手动聚合，避免 aggregate 默认 limit 20 的限制
+// 用 aggregate 服务端聚合，避免 fetchAll 拉全量订单导致的性能问题
+// 加 limit 覆盖所有菜品（聚合结果按 menuId 分组，数量 = 不同菜品数）
 async function _mergePublicStats(menu) {
     try {
-        const orders = await fetchAll(db.collection(COL.ORDERS), {
-            groupId: GROUP_ID, status: _.neq(STATUS.CANCELLED)
-        })
+        const { list } = await db.collection(COL.ORDERS)
+            .aggregate()
+            .match({ groupId: GROUP_ID, status: _.neq(STATUS.CANCELLED) })
+            .group({
+                _id: '$menuId',
+                orderCount: $.sum(1),
+                lastOrderedAt: $.max('$createdAt'),
+            })
+            .limit(1000)
+            .end()
         const publicMap = {}
-        orders.forEach(o => {
-            if (!o.menuId) return
-            if (!publicMap[o.menuId]) publicMap[o.menuId] = { orderCount: 0, lastOrderedAt: 0 }
-            publicMap[o.menuId].orderCount++
-            const t = o.createdAt ? new Date(o.createdAt).getTime() : 0
-            if (t > publicMap[o.menuId].lastOrderedAt) {
-                publicMap[o.menuId].lastOrderedAt = t
-            }
-        })
+        list.forEach(r => { publicMap[r._id] = r })
         menu.forEach(item => {
             const p = publicMap[item._id]
             if (p) {
                 item.orderCount = p.orderCount
-                item.lastOrderedAt = p.lastOrderedAt ? new Date(p.lastOrderedAt) : null
+                item.lastOrderedAt = p.lastOrderedAt
             }
         })
     } catch (e) {

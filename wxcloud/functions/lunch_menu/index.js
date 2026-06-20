@@ -2,6 +2,7 @@ const cloud = require('wx-server-sdk')
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 const _ = db.command
+const $ = db.command.aggregate
 let XLSX = null
 try { XLSX = require('xlsx') } catch (e) { }
 
@@ -464,27 +465,25 @@ async function getMenuList(event, openid) {
         .orderBy('sortNo', 'asc')
         .get()
     // 合并大众点餐统计（orderCount/lastOrderedAt）
-    // 从 ORDERS 实时聚合，覆盖历史导入数据未维护 menu 字段的情况
-    // 用 fetchAll 手动聚合，避免 aggregate 默认 limit 20 的限制
+    // 用 aggregate 服务端聚合，避免 fetchAll 拉全量订单导致的性能问题
     try {
-        const orders = await fetchAll(db.collection(COL.ORDERS), {
-            groupId: GROUP_ID, status: _.neq('cancelled')
-        })
+        const { list } = await db.collection(COL.ORDERS)
+            .aggregate()
+            .match({ groupId: GROUP_ID, status: _.neq('cancelled') })
+            .group({
+                _id: '$menuId',
+                orderCount: $.sum(1),
+                lastOrderedAt: $.max('$createdAt'),
+            })
+            .limit(1000)
+            .end()
         const publicMap = {}
-        orders.forEach(o => {
-            if (!o.menuId) return
-            if (!publicMap[o.menuId]) publicMap[o.menuId] = { orderCount: 0, lastOrderedAt: 0 }
-            publicMap[o.menuId].orderCount++
-            const t = o.createdAt ? new Date(o.createdAt).getTime() : 0
-            if (t > publicMap[o.menuId].lastOrderedAt) {
-                publicMap[o.menuId].lastOrderedAt = t
-            }
-        })
+        list.forEach(r => { publicMap[r._id] = r })
         data.forEach(item => {
             const p = publicMap[item._id]
             if (p) {
                 item.orderCount = p.orderCount
-                item.lastOrderedAt = p.lastOrderedAt ? new Date(p.lastOrderedAt) : null
+                item.lastOrderedAt = p.lastOrderedAt
             }
         })
     } catch (e) {
