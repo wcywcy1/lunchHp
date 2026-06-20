@@ -169,11 +169,15 @@ export function useDataManage() {
         if (!confirm) return
         cancelling.value = true
         try {
-            await orderAction('batchCancelOrders', { orderIds: ids })
-            uni.showToast({ title: '取消成功', icon: 'success' })
-            confirmedSelectedIds.value = []
-            await loadData()
-            await loadPendingCancelRequests()
+            const res = await orderAction('batchCancelOrders', { orderIds: ids })
+            if (res.result.code === 0) {
+                uni.showToast({ title: '取消成功', icon: 'success' })
+                confirmedSelectedIds.value = []
+                await loadData()
+                await loadPendingCancelRequests()
+            } else {
+                throw new Error(res.result.msg || '取消失败')
+            }
         } catch (e: any) {
             uni.showToast({ title: e.message || '取消失败', icon: 'none' })
         } finally {
@@ -188,11 +192,15 @@ export function useDataManage() {
         if (!confirm) return
         cancelling.value = true
         try {
-            await orderAction('batchCancelOrders', { orderIds: ids })
-            uni.showToast({ title: '取消成功', icon: 'success' })
-            selectedIds.value = []
-            await loadData()
-            await loadPendingCancelRequests()
+            const res = await orderAction('batchCancelOrders', { orderIds: ids })
+            if (res.result.code === 0) {
+                uni.showToast({ title: '取消成功', icon: 'success' })
+                selectedIds.value = []
+                await loadData()
+                await loadPendingCancelRequests()
+            } else {
+                throw new Error(res.result.msg || '取消失败')
+            }
         } catch (e: any) {
             uni.showToast({ title: e.message || '取消失败', icon: 'none' })
         } finally {
