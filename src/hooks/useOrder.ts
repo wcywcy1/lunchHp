@@ -30,6 +30,7 @@ interface OrderReturn {
     showMemberPicker: Ref<boolean>
     showAddMember: Ref<boolean>
     memberList: ComputedRef<MemberItem[]>
+    orderJustSucceeded: Ref<boolean>
     selectMenuItem: (menuId: string) => void
     switchToSelf: () => void
     switchToHelp: () => void
@@ -38,6 +39,9 @@ interface OrderReturn {
     submitOrder: () => Promise<void>
     resetOrder: () => void
 }
+
+// 模块级标志位：点餐成功后置 true，供餐单页 onShow 检测并清空筛选
+const orderJustSucceeded = ref(false)
 
 export function useOrder(): OrderReturn {
     const store = useStore()
@@ -158,6 +162,7 @@ export function useOrder(): OrderReturn {
             })
             if (res.result.code === 0) {
                 uni.showToast({ title: '点餐成功', icon: 'success' })
+                orderJustSucceeded.value = true
                 const newOrder = res.result.data?.order || {
                     date,
                     memberId,
@@ -219,6 +224,7 @@ export function useOrder(): OrderReturn {
         showMemberPicker,
         showAddMember,
         memberList,
+        orderJustSucceeded,
         selectMenuItem,
         switchToSelf,
         switchToHelp,

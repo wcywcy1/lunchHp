@@ -80,6 +80,7 @@ const {
   onMenuNameChange,
   setKeyword,
   updateKeyword,
+  resetFilter,
 } = useMenuFilter(menuList, statsOverride)
 
 const displayVisibleItems = computed(() =>
@@ -96,6 +97,7 @@ const {
   showMemberPicker,
   showAddMember,
   memberList,
+  orderJustSucceeded,
   selectMenuItem,
   switchToSelf,
   switchToHelp,
@@ -153,6 +155,11 @@ onMounted(() => {
 })
 
 onShow(() => {
+  // 上次点餐成功后，进入餐单页时清空筛选，回到初始状态（"常点"tab，无关键词）
+  if (orderJustSucceeded.value) {
+    orderJustSucceeded.value = false
+    resetFilter()
+  }
   if (store.member) {
     checkFreshness()
   }

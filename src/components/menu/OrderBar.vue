@@ -127,9 +127,9 @@ function getBarOpacity(index: number): number {
 
 function getBarColor(): string {
   const v = props.voiceVolume || 0
-  // 安静：蓝色；大声：橙色（和录音按钮保持一致的配色）
-  if (v > 0.7) return '#e65100'
-  if (v > 0.35) return '#f57c00'
+  // 安静：蓝色；中等：橙色；大声：深橙（阈值适配放大后的 0-1 范围）
+  if (v > 0.6) return '#e65100'
+  if (v > 0.3) return '#f57c00'
   return '#1976d2'
 }
 
@@ -254,10 +254,11 @@ watch(() => props.showAddMember, (val) => {
   align-items: center;
   justify-content: center;
   gap: 12rpx;
-  height: 80rpx;
+  height: 100rpx;
 }
 .voice-wave-bar {
   width: 12rpx;
+  transition: height 0.1s ease-out, background 0.2s ease-out, opacity 0.1s ease-out;
 }
 .voice-pulse {
   width: 40rpx;

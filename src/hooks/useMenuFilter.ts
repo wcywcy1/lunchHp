@@ -170,7 +170,7 @@ export function useMenuFilter(
     }
 
     function resetFilter() {
-        selectedSupplier.value = ''
+        selectedSupplier.value = RECENT_TAB
         selectedMenuName.value = ''
         keyword.value = ''
     }

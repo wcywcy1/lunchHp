@@ -47,19 +47,37 @@ export function useVoiceSearch(options: VoiceSearchOptions = {}) {
     let pendingStop = false
     let startTimeout: any = null
     let volumeDecayTimer: any = null
+    let volumePulseTimer: any = null
     let recognizeTimeout: any = null  // 识别阶段超时安全网
 
-    // 微信小程序 onVolumeChange 回调返回 res.volume（范围 0-1），无需归一化
+    // 微信小程序 RecorderManager 不提供 onVolumeChange，使用模拟音量动画
     function decayVolume() {
-        // 音量回调间隔约 300-800ms，给一个平滑衰减，否则条会生硬闪烁
         if (volumeDecayTimer) return
         volumeDecayTimer = setInterval(() => {
-            volume.value = Math.max(0, volume.value - 0.08)
+            volume.value = Math.max(0, volume.value - 0.03)
             if (volume.value <= 0) {
                 clearInterval(volumeDecayTimer)
                 volumeDecayTimer = null
             }
-        }, 60)
+        }, 100)
+    }
+
+    // 模拟说话音量脉冲：每 180ms 以 60% 概率跳到 0.3-1.0，配合 decayVolume 形成自然起伏
+    function startVolumeAnimation() {
+        if (volumePulseTimer) return
+        volumePulseTimer = setInterval(() => {
+            if (Math.random() < 0.6) {
+                volume.value = 0.3 + Math.random() * 0.7
+                decayVolume()
+            }
+        }, 180)
+    }
+
+    function stopVolumeAnimation() {
+        if (volumePulseTimer) {
+            clearInterval(volumePulseTimer)
+            volumePulseTimer = null
+        }
     }
 
     function getRecorderManager(): any {
@@ -73,16 +91,10 @@ export function useVoiceSearch(options: VoiceSearchOptions = {}) {
                     clearTimeout(startTimeout)
                     startTimeout = null
                 }
-            })
-            recorderManager.onVolumeChange((res: any) => {
-                // 微信小程序 onVolumeChange 返回 res.volume（0-1），兼容旧版 res.size（0-60）
-                const v = typeof res.volume === 'number'
-                    ? res.volume
-                    : (typeof res.size === 'number' ? res.size / 60 : 0)
-                volume.value = Math.min(1, Math.max(0, v))
-                decayVolume()
+                startVolumeAnimation()
             })
             recorderManager.onStop((res: any) => {
+                stopVolumeAnimation()
                 recordTempFilePath = res.tempFilePath
                 recorderReady = true
                 // 手动停止才执行识别，超时自动停止直接复位
@@ -111,6 +123,7 @@ export function useVoiceSearch(options: VoiceSearchOptions = {}) {
             clearInterval(volumeDecayTimer)
             volumeDecayTimer = null
         }
+        stopVolumeAnimation()
         if (recognizeTimeout) {
             clearTimeout(recognizeTimeout)
             recognizeTimeout = null
