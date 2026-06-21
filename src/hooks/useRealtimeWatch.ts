@@ -1,38 +1,63 @@
 import { GROUP_ID, COLLECTIONS } from '../constants/appConfig'
+import { getTodayString } from '../utils/date'
 
 interface WatcherRef {
     close: () => void
 }
 
-/**
- * 监听云数据库集合的实时变化
- * 调用方负责在 onShow 开启、onHide 关闭
- */
+interface OrderWatchCallbacks {
+    onInit?: () => void
+    onPatch?: (changes: any[]) => void
+    onChange?: (snapshot: any) => void
+    onError?: () => void
+}
+
 export function useRealtimeWatch() {
     let orderWatcher: WatcherRef | null = null
     let groupWatcher: WatcherRef | null = null
+    let orderRetryTimer: any = null
+    let orderRetryCount = 0
 
-    /**
-     * 监听今日订单变化
-     */
-    function watchTodayOrders(onChange: (snapshot: any) => void) {
-        closeOrderWatcher()
+    function watchTodayOrders(callbacks: OrderWatchCallbacks | ((snapshot: any) => void)) {
+        closeOrderWatcherWithRetry()
         const db = wx.cloud.database()
-        const today = getToday()
-        orderWatcher = db.collection(COLLECTIONS.ORDERS)
-            .where({ groupId: GROUP_ID, date: today })
-            .watch({
-                onChange,
-                onError: (err: any) => {
-                    console.error('[watchTodayOrders] error:', err)
-                    orderWatcher = null
-                },
-            })
+        const today = getTodayString()
+
+        const cb = typeof callbacks === 'function'
+            ? { onChange: callbacks }
+            : callbacks
+
+        const startWatcher = () => {
+            orderWatcher = db.collection(COLLECTIONS.ORDERS)
+                .where({ groupId: GROUP_ID, date: today })
+                .watch({
+                    onChange: (snapshot: any) => {
+                        orderRetryCount = 0
+                        if (cb.onInit && snapshot.type === 'init') {
+                            cb.onInit()
+                            return
+                        }
+                        if (cb.onPatch && snapshot.docChanges && snapshot.docChanges.length > 0) {
+                            cb.onPatch(snapshot.docChanges.map((c: any) => ({
+                                queueType: c.queueType || c.dataType || 'update',
+                                doc: c.doc,
+                            })))
+                            return
+                        }
+                        if (cb.onChange) cb.onChange(snapshot)
+                    },
+                    onError: (err: any) => {
+                        console.error('[watchTodayOrders] error:', err)
+                        orderWatcher = null
+                        if (cb.onError) cb.onError()
+                        const delay = Math.min(30000 * Math.pow(2, orderRetryCount++), 300000)
+                        orderRetryTimer = setTimeout(startWatcher, delay)
+                    },
+                })
+        }
+        startWatcher()
     }
 
-    /**
-     * 监听 lunch_groups 文档变化（用于 notice 通知）
-     */
     function watchGroupNotice(onChange: (snapshot: any) => void) {
         closeGroupWatcher()
         const db = wx.cloud.database()
@@ -47,11 +72,20 @@ export function useRealtimeWatch() {
             })
     }
 
-    function closeOrderWatcher() {
+    function closeOrderWatcherWithRetry() {
+        if (orderRetryTimer) {
+            clearTimeout(orderRetryTimer)
+            orderRetryTimer = null
+        }
+        orderRetryCount = 0
         if (orderWatcher) {
             orderWatcher.close()
             orderWatcher = null
         }
+    }
+
+    function closeOrderWatcher() {
+        closeOrderWatcherWithRetry()
     }
 
     function closeGroupWatcher() {
@@ -62,7 +96,7 @@ export function useRealtimeWatch() {
     }
 
     function closeAll() {
-        closeOrderWatcher()
+        closeOrderWatcherWithRetry()
         closeGroupWatcher()
     }
 
@@ -73,9 +107,4 @@ export function useRealtimeWatch() {
         closeGroupWatcher,
         closeAll,
     }
-}
-
-function getToday() {
-    const d = new Date()
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }

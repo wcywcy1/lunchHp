@@ -1,16 +1,12 @@
 import { ref, computed } from 'vue'
 import { onShow, onHide } from '@dcloudio/uni-app'
-import { useStore, setStore, getCache, setCache, saveSession, getRecentLoadTime, setRecentLoadTime } from '../services/store'
+import { useStore, setStore, getCache, setCache, saveSession, getRecentLoadTime, setRecentLoadTime, flushCache } from '../services/store'
 import { menuAction, orderAction } from '../services/repositories/baseRepository'
-import { waitForInit } from '../services/appInit'
+import { waitForInit, isInitRunning } from '../services/appInit'
 import { CACHE_KEYS, CACHE_TTL } from '../constants/cacheConfig'
 import { useRealtimeWatch } from './useRealtimeWatch'
 import { APP_MODE } from '../constants/appConfig'
-
-function getToday() {
-    const d = new Date()
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
+import { getTodayString } from '../utils/date'
 
 export function useHome() {
     const store = useStore()
@@ -25,9 +21,6 @@ export function useHome() {
     const noticeContent = ref('')
     const realtime = useRealtimeWatch()
 
-    // 记录已展示过的 notice 更新时间，避免重复弹窗
-    let lastShownNoticeTime: number = 0
-    // onShow 节流：10 秒内不重复执行 fetchNotice + checkFreshness（realtime watcher 不受影响）
     let lastFreshnessCheck: number = 0
     const FRESHNESS_THROTTLE_MS = 10 * 1000
 
@@ -55,7 +48,7 @@ export function useHome() {
     })
 
     const todayOrders = computed(() => {
-        const today = getToday()
+        const today = getTodayString()
         return (store.recentOrders || [])
             .filter((o: any) => o.date === today)
     })
@@ -74,18 +67,31 @@ export function useHome() {
         loading.value = true
         try {
             await waitForInit()
-            const joinRes = await menuAction('joinGroup', { nickName: '', name: '' })
-            if (joinRes.result.code === 0) {
-                const { member, isNew } = joinRes.result.data
-                setStore({ member, role: member.role, groupId: member.groupId })
-                saveSession({ groupId: member.groupId, role: member.role, member })
-                if (!member.privacyAgreed) {
+            const res = await orderAction('getInitData')
+            if (res.result.code === 0) {
+                const { member, isNew, monthSummary, recentOrders, menu, members,
+                    recentTimestamp, menuTimestamp, membersTimestamp, notice, noticeUpdatedAt } = res.result.data
+                if (member) {
+                    setStore({ member, role: member.role, groupId: member.groupId })
+                    saveSession({ groupId: member.groupId, role: member.role, member })
+                }
+                setStore({ monthSummary, recentOrders, menu, members,
+                    recentTimestamp, menuTimestamp, membersTimestamp, initialized: true })
+                setCache(CACHE_KEYS.RECENT_ORDERS, recentOrders)
+                setCache(CACHE_KEYS.MENU, menu)
+                setCache(CACHE_KEYS.MEMBERS, members)
+                setCache(CACHE_KEYS.RECENT_TIMESTAMP, recentTimestamp)
+                setCache(CACHE_KEYS.MENU_TIMESTAMP, menuTimestamp)
+                setCache(CACHE_KEYS.MEMBERS_TIMESTAMP, membersTimestamp)
+                setCache(CACHE_KEYS.MONTH_SUMMARY, monthSummary)
+                setRecentLoadTime(Date.now())
+                noticeContent.value = notice && isNoticeToday(noticeUpdatedAt) ? notice : ''
+                if (member && !member.privacyAgreed) {
                     showPrivacyDialog.value = true
-                } else if (isNew && !member.name) {
+                } else if (isNew && member && !member.name) {
                     showWelcomeDialog.value = true
                 }
             }
-            await loadInitData()
         } catch (e) {
             console.error('initApp error:', e)
             uni.showToast({ title: '初始化失败，请重试', icon: 'none' })
@@ -109,12 +115,7 @@ export function useHome() {
                 setCache(CACHE_KEYS.MEMBERS_TIMESTAMP, membersTimestamp)
                 setCache(CACHE_KEYS.MONTH_SUMMARY, monthSummary)
                 setRecentLoadTime(Date.now())
-                // 设置通知
-                if (notice && isNoticeToday(noticeUpdatedAt)) {
-                    noticeContent.value = notice
-                } else {
-                    noticeContent.value = ''
-                }
+                noticeContent.value = notice && isNoticeToday(noticeUpdatedAt) ? notice : ''
             }
         } catch (e) {
             console.error('loadInitData error:', e)
@@ -122,11 +123,11 @@ export function useHome() {
     }
 
     async function onShow() {
-        // 通用模式：若无 session（未选组），跳转到选组页
         if (APP_MODE === 'general' && !uni.getStorageSync('lunch_session')) {
             uni.reLaunch({ url: '/pages/group-select/index' })
             return
         }
+        if (isInitRunning() || store.isSwitchingGroup) return
         if (!store.member) {
             await initApp()
             return
@@ -135,49 +136,40 @@ export function useHome() {
             showPrivacyDialog.value = true
             return
         }
-        // realtime watcher 始终开启，保证管理员实时看到新订单
         startRealtimeWatch()
-        // 节流：10 秒内不重复执行 fetchNotice + checkFreshness
         const now = Date.now()
         if (now - lastFreshnessCheck < FRESHNESS_THROTTLE_MS) return
         lastFreshnessCheck = now
-        // fetchNotice 与 checkFreshness 无依赖，并行执行
-        await Promise.all([fetchNotice(), checkFreshness()])
-    }
-
-    async function fetchNotice() {
-        try {
-            const res = await menuAction('getDataTimestamps')
-            if (res.result.code === 0) {
-                const { notice, noticeUpdatedAt } = res.result.data
-                if (notice && isNoticeToday(noticeUpdatedAt)) {
-                    noticeContent.value = notice
-                } else {
-                    noticeContent.value = ''
-                }
-            }
-        } catch (e) {
-            console.error('fetchNotice error:', e)
-        }
+        await checkFreshness()
     }
 
     function startRealtimeWatch() {
-        // 监听今日订单变化
-        realtime.watchTodayOrders((snapshot: any) => {
-            if (snapshot.type === 'init') return // 初始化数据忽略，已有 loadData
-            // 有变更时重拉数据
-            fetchRecentOrders()
+        realtime.watchTodayOrders({
+            onInit: () => {},
+            onPatch: (changes: any[]) => {
+                if (!changes || changes.length === 0) return
+                const orders = [...(store.recentOrders || [])]
+                for (const c of changes) {
+                    const idx = orders.findIndex((o: any) => o._id === c.doc._id)
+                    if (c.queueType === 'add' || c.queueType === 'init') {
+                        if (idx < 0) orders.unshift(c.doc)
+                    } else if (c.queueType === 'update' || c.queueType === 'replace') {
+                        if (idx >= 0) orders[idx] = c.doc
+                    } else if (c.queueType === 'remove') {
+                        if (idx >= 0) orders.splice(idx, 1)
+                    }
+                }
+                setStore({ recentOrders: orders })
+                setCache(CACHE_KEYS.RECENT_ORDERS, orders)
+                refreshMonthSummary()
+            },
+            onError: () => { fetchRecentOrders() }
         })
-        // 监听 notice 通知
         realtime.watchGroupNotice((snapshot: any) => {
             if (snapshot.type === 'init') {
                 const docs = snapshot.docs
                 const d = docs && docs[0]
-                if (d && d.notice && isNoticeToday(d.noticeUpdatedAt)) {
-                    noticeContent.value = d.notice
-                } else {
-                    noticeContent.value = ''
-                }
+                noticeContent.value = d && d.notice && isNoticeToday(d.noticeUpdatedAt) ? d.notice : ''
                 return
             }
             const docChanges = snapshot.docChanges || []
@@ -187,28 +179,50 @@ export function useHome() {
                     const doc = change.doc || {}
                     const notice = uf.notice !== undefined ? uf.notice : doc.notice
                     const noticeTime = uf.noticeUpdatedAt !== undefined ? uf.noticeUpdatedAt : doc.noticeUpdatedAt || 0
-                    if (notice && isNoticeToday(noticeTime)) {
-                        noticeContent.value = notice
-                    } else {
-                        noticeContent.value = ''
-                    }
+                    noticeContent.value = notice && isNoticeToday(noticeTime) ? notice : ''
                 }
             }
         })
     }
 
-    // 是否显示通知（有内容且是今天的）
     const showNoticeBanner = computed(() => noticeContent.value.length > 0)
 
     async function checkFreshness() {
         try {
-            const res = await orderAction('getRecentTimestamp')
+            const res = await orderAction('getAllTimestamps')
             if (res.result.code === 0) {
-                const serverTs = res.result.data.recentTimestamp
-                if (serverTs !== store.recentTimestamp) {
-                    await fetchRecentOrders(serverTs)
+                const { recentTimestamp, menuTimestamp, membersTimestamp, notice, noticeUpdatedAt } = res.result.data
+                if (notice && isNoticeToday(noticeUpdatedAt)) {
+                    noticeContent.value = notice
+                } else {
+                    noticeContent.value = ''
+                }
+                if (recentTimestamp !== store.recentTimestamp) {
+                    await fetchRecentOrders(recentTimestamp)
                 } else {
                     setRecentLoadTime(Date.now())
+                }
+                if (menuTimestamp !== store.menuTimestamp) {
+                    try {
+                        const menuRes = await orderAction('getRecentMenu')
+                        if (menuRes.result.code === 0) {
+                            const menu = menuRes.result.data
+                            setStore({ menu, menuTimestamp })
+                            setCache(CACHE_KEYS.MENU, menu)
+                            setCache(CACHE_KEYS.MENU_TIMESTAMP, menuTimestamp)
+                        }
+                    } catch (e) { console.error('checkFreshness menu error:', e) }
+                }
+                if (membersTimestamp !== store.membersTimestamp) {
+                    try {
+                        const membersRes = await orderAction('getRecentMembers')
+                        if (membersRes.result.code === 0) {
+                            const members = membersRes.result.data
+                            setStore({ members, membersTimestamp })
+                            setCache(CACHE_KEYS.MEMBERS, members)
+                            setCache(CACHE_KEYS.MEMBERS_TIMESTAMP, membersTimestamp)
+                        }
+                    } catch (e) { console.error('checkFreshness members error:', e) }
                 }
             }
         } catch (e) {

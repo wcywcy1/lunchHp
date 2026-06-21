@@ -1,5 +1,5 @@
 import { ref, computed, ComputedRef, Ref } from 'vue'
-import { useStore, getCache, setCache } from '../services/store'
+import { useStore, getCache, setCache, getStatsLoadTime, setStatsLoadTime } from '../services/store'
 import { orderAction } from '../services/repositories/baseRepository'
 import { CACHE_KEYS, CACHE_TTL } from '../constants/cacheConfig'
 import { buildCsvLine, writeCsvWithBom, shareOrSaveFile, isPcPlatform } from '../utils/csv'
@@ -73,8 +73,6 @@ export function useStats(): StatsReturn {
         monthlyStats.value.forEach(s => years.add(s.year))
         return Array.from(years).sort((a, b) => b - a)
     })
-
-    let _statsLoadTime = 0
 
     const memberOptions = computed(() => {
         const names = new Set<string>()
@@ -167,7 +165,7 @@ export function useStats(): StatsReturn {
     async function loadStats(forceRefresh = false) {
         if (!forceRefresh) {
             const now = Date.now()
-            if (now - _statsLoadTime < CACHE_TTL.MONTHLY_STATS) {
+            if (now - getStatsLoadTime() < CACHE_TTL.MONTHLY_STATS) {
                 const cached = getCache(CACHE_KEYS.MONTHLY_STATS)
                 if (cached && cached.length > 0) {
                     monthlyStats.value = cached
@@ -201,7 +199,7 @@ export function useStats(): StatsReturn {
                 }
 
                 const now = Date.now()
-                _statsLoadTime = now
+                setStatsLoadTime(now)
                 setCache(CACHE_KEYS.MONTHLY_STATS_TIME, serverTs || now)
             }
         } catch (e) {
@@ -355,10 +353,6 @@ export function useStats(): StatsReturn {
 
     async function refreshStats() {
         await loadStats(true)
-    }
-
-    function getStatsLoadTime() {
-        return _statsLoadTime
     }
 
     return {

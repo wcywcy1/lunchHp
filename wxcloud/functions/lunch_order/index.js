@@ -76,6 +76,9 @@ exports.main = async (event, context) => {
         getInitData,
         getRecentOrders,
         getRecentTimestamp,
+        getAllTimestamps,
+        getRecentMenu,
+        getRecentMembers,
         getMonthSummary,
         submitOrder,
         batchConfirm,
@@ -144,7 +147,7 @@ async function getInitData(event, openid) {
     ])
 
     const todayCount = todayCountResult.total || 0
-    const limit = Math.max(100, todayCount)
+    const limit = Math.min(Math.max(100, todayCount), 500)
 
     const { data: recentOrders } = await db.collection(COL.ORDERS)
         .where({ groupId: GROUP_ID })
@@ -158,7 +161,46 @@ async function getInitData(event, openid) {
 
     const groupData = groupResult.data || {}
 
-    // 合并大众点餐统计 + 当前用户的个人点餐统计到 menu，用于"最近点过"个人化排序
+    // 内联 joinGroup: 根据 openid 查找或创建成员，返回给前端
+    let currentMember = null
+    let memberRole = ROLE.MEMBER
+    try {
+        const { data: existingMembers } = await db.collection(COL.MEMBERS)
+            .where({ groupId: GROUP_ID, openid })
+            .get()
+        if (existingMembers.length > 0) {
+            currentMember = existingMembers[0]
+            memberRole = currentMember.role || ROLE.MEMBER
+        } else {
+            // 检查是否是组织创建者
+            const creatorMatch = groupData && groupData.creatorId === openid
+            if (creatorMatch) {
+                currentMember = { _id: 'recovered', groupId: GROUP_ID, openid, role: ROLE.CREATOR, name: 'creator' }
+                memberRole = ROLE.CREATOR
+            } else if (openid) {
+                // 新成员: 自动加入（与 joinGroup 行为一致）
+                const now2 = db.serverDate()
+                const newMember = {
+                    groupId: GROUP_ID,
+                    openid,
+                    name: `成员${new Date().getMilliseconds()}`,
+                    nickName: '',
+                    avatar: '',
+                    role: ROLE.MEMBER,
+                    isVirtual: false,
+                    privacyAgreed: false,
+                    joinedAt: now2,
+                }
+                const addRes = await db.collection(COL.MEMBERS).add({ data: newMember })
+                currentMember = { ...newMember, _id: addRes._id }
+                membersResult.data.push(currentMember)
+                await _touchMenuAndMembersTimestamp()
+            }
+        }
+    } catch (e) {
+        console.error('joinGroup inline error:', e)
+    }
+
     await _mergePublicStats(menuResult.data)
     const menuWithUserStats = await _mergeUserStats(menuResult.data, openid)
 
@@ -169,6 +211,9 @@ async function getInitData(event, openid) {
             recentOrders,
             menu: menuWithUserStats,
             members: membersResult.data,
+            member: currentMember,
+            role: memberRole,
+            groupId: GROUP_ID,
             recentTimestamp: groupData.ordersTimestamp || null,
             menuTimestamp: groupData.menuTimestamp || null,
             membersTimestamp: groupData.membersTimestamp || null,
@@ -187,7 +232,7 @@ async function getRecentOrders(event, openid) {
         .where({ groupId: GROUP_ID, date: today })
         .count()
 
-    const actualLimit = Math.max(reqLimit, todayCount)
+    const actualLimit = Math.min(Math.max(reqLimit, todayCount), 500)
 
     const { data } = await db.collection(COL.ORDERS)
         .where({ groupId: GROUP_ID })
@@ -202,6 +247,46 @@ async function getRecentTimestamp(event, openid) {
     const { data } = await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => ({ data: {} }))
     const recentTimestamp = data.ordersTimestamp || null
     return { code: 0, data: { recentTimestamp } }
+}
+
+async function getAllTimestamps(event, openid) {
+    const { data } = await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => ({ data: {} }))
+    const groupData = data || {}
+    const getTs = (val) => {
+        if (!val) return null
+        if (val instanceof Date) return val.getTime()
+        return new Date(val).getTime()
+    }
+    const ordersTs = getTs(groupData.ordersTimestamp)
+    return {
+        code: 0,
+        data: {
+            ordersTimestamp: ordersTs,
+            recentTimestamp: ordersTs,
+            menuTimestamp: getTs(groupData.menuTimestamp),
+            membersTimestamp: getTs(groupData.membersTimestamp),
+            notice: groupData.notice || '',
+            noticeUpdatedAt: groupData.noticeUpdatedAt || null,
+        },
+    }
+}
+
+async function getRecentMenu(event, openid) {
+    const { data } = await db.collection(COL.MENU)
+        .where({ groupId: GROUP_ID })
+        .orderBy('sortNo', 'asc')
+        .get()
+    await _mergePublicStats(data)
+    const result = await _mergeUserStats(data, openid)
+    return { code: 0, data: result }
+}
+
+async function getRecentMembers(event, openid) {
+    const { data } = await db.collection(COL.MEMBERS)
+        .where({ groupId: GROUP_ID })
+        .orderBy('joinedAt', 'asc')
+        .get()
+    return { code: 0, data }
 }
 
 async function getMonthSummary(event, openid) {
@@ -353,7 +438,12 @@ async function _upsertUserStat(memberId, menuId, now) {
 }
 
 // 自动取消过期待确认订单（date < today && status === pending）
+let _autoCancelThrottle = 0
+
 async function _autoCancelExpiredPending() {
+    const now = Date.now()
+    if (now - _autoCancelThrottle < 60 * 1000) return { cancelled: 0, throttled: true }
+    _autoCancelThrottle = now
     const today = getToday()
     const expired = await fetchAll(db.collection(COL.ORDERS), {
         groupId: GROUP_ID,
@@ -362,16 +452,15 @@ async function _autoCancelExpiredPending() {
     })
     if (expired.length === 0) return { cancelled: 0 }
 
-    const now = db.serverDate()
+    const now2 = db.serverDate()
     const BATCH_SIZE = 100
     for (let i = 0; i < expired.length; i += BATCH_SIZE) {
         const chunk = expired.slice(i, i + BATCH_SIZE)
         await db.collection(COL.ORDERS)
             .where({ _id: _.in(chunk.map(o => o._id)) })
-            .update({ data: { status: STATUS.CANCELLED, updatedAt: now } })
+            .update({ data: { status: STATUS.CANCELLED, updatedAt: now2 } })
     }
 
-    // 重建受影响月份的统计
     const months = new Set(expired.map(o => o.date.substring(0, 7)))
     for (const ym of months) {
         try { await doRebuildMonthStats(ym) } catch (e) { console.error('rebuild month stats error:', e) }
@@ -433,7 +522,18 @@ async function submitOrder(event, openid) {
             : Promise.resolve(),
     ])
     await _touchAllTimestamps()
-    return { code: 0, data: order }
+    const [menuDoc, memberDoc] = await Promise.all([
+        db.collection(COL.MENU).doc(menuId).get().catch(() => null),
+        db.collection(COL.MEMBERS).doc(memberId).get().catch(() => null),
+    ])
+    return {
+        code: 0,
+        data: {
+            order,
+            updatedMenu: menuDoc && menuDoc.data ? menuDoc.data : null,
+            updatedMember: memberDoc && memberDoc.data ? memberDoc.data : null,
+        },
+    }
 }
 
 async function batchConfirm(event, openid) {

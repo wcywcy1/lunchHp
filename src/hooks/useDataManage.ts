@@ -2,11 +2,12 @@ import { ref, computed } from 'vue'
 import { onShow, onHide } from '@dcloudio/uni-app'
 import { useStore, saveSession, setCache, setRecentLoadTime, resetStore, clearAllCache, setActiveGroupId, getActiveGroupId, setStore } from '../services/store'
 import { menuAction, orderAction, backupAction } from '../services/repositories/baseRepository'
-import { resetInit, startInit } from '../services/appInit'
+import { resetInit, startInit, isInitRunning } from '../services/appInit'
 import { ORDER_STATUS, ROLE } from '../constants/orderStatus'
 import { CACHE_KEYS } from '../constants/cacheConfig'
 import { useRealtimeWatch } from './useRealtimeWatch'
 import { buildCsvLine, writeCsvWithBom, shareOrSaveFile, isPcPlatform, chooseFile } from '../utils/csv'
+import { getTodayString } from '../utils/date'
 
 export function useDataManage() {
     const MAX_BATCH_COUNT = 2000
@@ -96,20 +97,15 @@ export function useDataManage() {
     async function loadData() {
         loading.value = true
         try {
-            // 三个调用无依赖，并行执行
-            const [res, tsRes] = await Promise.all([
-                orderAction('getRecentOrders'),
-                menuAction('getDataTimestamps'),
-                loadHistoryCount(),
-            ])
+            const res = await orderAction('getRecentOrders')
             if (res.result.code === 0) {
                 const orders = res.result.data || []
-                const today = getDateStr()
+                const today = getTodayString()
                 const todayOrders = orders.filter((o: any) => o.date === today)
                 pendingOrders.value = todayOrders.filter((o: any) => o.status === ORDER_STATUS.PENDING)
                 confirmedOrders.value = todayOrders.filter((o: any) => o.status === ORDER_STATUS.CONFIRMED)
             }
-            // 同步当前通知（登录/刷新后从服务端拉取，避免本地状态丢失）
+            const tsRes = await menuAction('getDataTimestamps')
             if (tsRes.result.code === 0) {
                 currentNotice.value = tsRes.result.data.notice || ''
             }
@@ -213,13 +209,10 @@ export function useDataManage() {
         const ids = [...selectedIds.value]
         confirming.value = true
         try {
-            const res = await orderAction('batchConfirm', { orderIds: ids, date: getDateStr() })
+            const res = await orderAction('batchConfirm', { orderIds: ids, date: getTodayString() })
             if (res.result.code === 0) {
                 uni.showToast({ title: '确认成功', icon: 'success' })
                 selectedIds.value = []
-                store.recentTimestamp = res.result.data?.recentTimestamp || store.recentTimestamp
-                setCache(CACHE_KEYS.RECENT_TIMESTAMP, store.recentTimestamp)
-                setRecentLoadTime(Date.now())
                 await loadData()
             }
         } catch (e: any) {
@@ -291,11 +284,6 @@ export function useDataManage() {
         } catch (e: any) {
             uni.showToast({ title: e.message || '操作失败', icon: 'none' })
         }
-    }
-
-    function getDateStr() {
-        const d = new Date()
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
     }
 
     async function loadHistoryCount() {
@@ -464,7 +452,7 @@ export function useDataManage() {
                     })
                     lines.push(buildCsvLine(['合计', '', group.subtotal, '']))
                     const fs = wx.getFileSystemManager()
-                    const fileName = `确认单_${group.supplier}_${getDateStr()}.csv`
+                    const fileName = `确认单_${group.supplier}_${getTodayString()}.csv`
                     const path = `${wx.env.USER_DATA_PATH}/${fileName}`
                     writeCsvWithBom(fs, path, lines.join('\r\n'))
                     const shareRes = await shareLocalFile(path, fileName)
@@ -481,7 +469,7 @@ export function useDataManage() {
                 const total = confirmedOrders.value.reduce((s: number, o: any) => s + (o.price || 0), 0)
                 lines.push(buildCsvLine(['全部', '合计', '', total, '']))
                 const fs = wx.getFileSystemManager()
-                const fileName = `确认单_全部_${getDateStr()}.csv`
+                const fileName = `确认单_全部_${getTodayString()}.csv`
                 const path = `${wx.env.USER_DATA_PATH}/${fileName}`
                 writeCsvWithBom(fs, path, lines.join('\r\n'))
                 const shareRes = await shareLocalFile(path, fileName)
@@ -788,7 +776,7 @@ export function useDataManage() {
                 lines.push(buildCsvLine([o.date, o.menuName, o.memberName, o.price, o.note || '', statusMap[o.status] || o.status, o.supplier || '']))
             })
             const fs = wx.getFileSystemManager()
-            const fileName = `export_orders_${getDateStr()}.csv`
+            const fileName = `export_orders_${getTodayString()}.csv`
             const path = `${wx.env.USER_DATA_PATH}/${fileName}`
             writeCsvWithBom(fs, path, lines.join('\r\n'))
             const shareRes = await shareLocalFile(path, fileName)
@@ -812,7 +800,7 @@ export function useDataManage() {
                     lines.push(buildCsvLine([m.supplier, m.name, m.price, m.visible !== false ? '是' : '否']))
                 })
                 const fs = wx.getFileSystemManager()
-                const fileName = `export_menu_${getDateStr()}.csv`
+                const fileName = `export_menu_${getTodayString()}.csv`
                 const path = `${wx.env.USER_DATA_PATH}/${fileName}`
                 writeCsvWithBom(fs, path, lines.join('\r\n'))
                 const shareRes = await shareLocalFile(path, fileName)
@@ -837,7 +825,7 @@ export function useDataManage() {
                     lines.push(buildCsvLine([m.name || '', m.nickName || '', m.role || 'member', m.isVirtual ? '是' : '否']))
                 })
                 const fs = wx.getFileSystemManager()
-                const fileName = `export_members_${getDateStr()}.csv`
+                const fileName = `export_members_${getTodayString()}.csv`
                 const path = `${wx.env.USER_DATA_PATH}/${fileName}`
                 writeCsvWithBom(fs, path, lines.join('\r\n'))
                 const shareRes = await shareLocalFile(path, fileName)
@@ -1222,15 +1210,12 @@ export function useDataManage() {
         })
         if (!confirm) return
         switchingGroup.value = true
+        store.isSwitchingGroup = true
         try {
-            // 1. 停止实时监听
             realtime.closeAll()
-            // 2. 清空本地缓存和 store
             clearAllCache()
             resetStore()
-            // 3. 写入新组ID
             setActiveGroupId(target)
-            // 4. 重置 init 缓存并重新初始化（initGroup + joinGroup）
             resetInit()
             await startInit()
             const joinRes = await menuAction('joinGroup', { nickName: '', name: '' })
@@ -1241,7 +1226,6 @@ export function useDataManage() {
             }
             targetGroupId.value = ''
             uni.showToast({ title: '已切换组织', icon: 'success' })
-            // 5. 跳回首页重新加载
             setTimeout(() => {
                 uni.switchTab({ url: '/pages/home/index' })
             }, 800)
@@ -1249,6 +1233,7 @@ export function useDataManage() {
             uni.showToast({ title: e.message || '切换失败', icon: 'none' })
         } finally {
             switchingGroup.value = false
+            store.isSwitchingGroup = false
         }
     }
 

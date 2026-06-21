@@ -22,6 +22,9 @@ interface StoreState {
     membersTimestamp: any
     initialized: boolean
     joinedGroups: JoinedGroup[]
+    isSwitchingGroup: boolean
+    statsLoadTime: number
+    recentLoadTime: number
 }
 
 const store = reactive<StoreState>({
@@ -37,9 +40,10 @@ const store = reactive<StoreState>({
     membersTimestamp: null,
     initialized: false,
     joinedGroups: [],
+    isSwitchingGroup: false,
+    statsLoadTime: 0,
+    recentLoadTime: 0,
 })
-
-let _recentLoadTime = 0
 
 export function useStore() {
     return store
@@ -62,7 +66,9 @@ export function resetStore() {
     store.membersTimestamp = null
     store.initialized = false
     store.joinedGroups = []
-    _recentLoadTime = 0
+    store.isSwitchingGroup = false
+    store.statsLoadTime = 0
+    store.recentLoadTime = 0
 }
 
 export function getCache(key: string, skipTTL = false): any {
@@ -80,16 +86,49 @@ export function getCache(key: string, skipTTL = false): any {
     }
 }
 
-export function setCache(key: string, data: any) {
-    uni.setStorageSync(key, JSON.stringify({ data, ts: Date.now() }))
-}
-
 export function getRecentLoadTime() {
-    return _recentLoadTime
+    return store.recentLoadTime
 }
 
 export function setRecentLoadTime(time: number) {
-    _recentLoadTime = time
+    store.recentLoadTime = time
+}
+
+export function getStatsLoadTime() {
+    return store.statsLoadTime
+}
+
+export function setStatsLoadTime(time: number) {
+    store.statsLoadTime = time
+}
+
+export function setCache(key: string, data: any, immediate = false) {
+    const value = JSON.stringify({ data, ts: Date.now() })
+    if (immediate) {
+        uni.setStorageSync(key, value)
+        return
+    }
+    _pendingWrites.set(key, value)
+    if (_writeTimer) return
+    _writeTimer = setTimeout(() => {
+        for (const [k, v] of _pendingWrites) {
+            uni.setStorageSync(k, v)
+        }
+        _pendingWrites.clear()
+        _writeTimer = null
+    }, 300)
+}
+
+const _pendingWrites = new Map<string, string>()
+let _writeTimer: any = null
+
+export function flushCache() {
+    if (_writeTimer) clearTimeout(_writeTimer)
+    _writeTimer = null
+    for (const [k, v] of _pendingWrites) {
+        uni.setStorageSync(k, v)
+    }
+    _pendingWrites.clear()
 }
 
 export function restoreSession(): boolean {

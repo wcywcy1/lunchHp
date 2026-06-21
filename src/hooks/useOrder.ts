@@ -1,7 +1,8 @@
 import { ref, computed, ComputedRef, Ref } from 'vue'
-import { useStore, setCache } from '../services/store'
+import { useStore, setCache, flushCache } from '../services/store'
 import { menuAction, orderAction } from '../services/repositories/baseRepository'
 import { CACHE_KEYS } from '../constants/cacheConfig'
+import { getTodayString } from '../utils/date'
 
 interface MenuItem {
     _id: string
@@ -141,8 +142,7 @@ export function useOrder(): OrderReturn {
             : orderForMemberId.value
         const memberName = orderForName.value
 
-        const today = new Date()
-        const date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+        const date = getTodayString()
 
         submitting.value = true
         try {
@@ -171,28 +171,17 @@ export function useOrder(): OrderReturn {
                 }
                 store.recentOrders = [newOrder, ...(store.recentOrders || [])]
                 setCache(CACHE_KEYS.RECENT_ORDERS, store.recentOrders)
-                // 本地更新菜单/成员排序字段，使 LRU+频率排序立即生效
-                const now = Date.now()
-                if (store.menu) {
+                const updatedMenu = res.result.data?.updatedMenu
+                if (store.menu && updatedMenu) {
                     store.menu = (store.menu as any[]).map((i: any) =>
-                        i._id === item._id
-                            ? {
-                                ...i,
-                                lastOrderedAt: now,
-                                orderCount: (i.orderCount || 0) + 1,
-                                // 个人点餐统计（仅当发起人=当前用户时）
-                                userCount: store.member && store.member._id ? (i.userCount || 0) + 1 : i.userCount,
-                                userLastAt: store.member && store.member._id ? now : i.userLastAt,
-                            }
-                            : i
+                        i._id === updatedMenu._id ? updatedMenu : i
                     )
                     setCache(CACHE_KEYS.MENU, store.menu)
                 }
-                if (store.members) {
+                const updatedMember = res.result.data?.updatedMember
+                if (store.members && updatedMember) {
                     store.members = (store.members as any[]).map((m: any) =>
-                        m._id === memberId
-                            ? { ...m, lastOrderedAt: now }
-                            : m
+                        m._id === updatedMember._id ? updatedMember : m
                     )
                     setCache(CACHE_KEYS.MEMBERS, store.members)
                 }
