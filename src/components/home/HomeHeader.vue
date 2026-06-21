@@ -6,7 +6,8 @@
     </view>
     <view class="header-right" @tap="$emit('click-avatar')">
       <view class="avatar-circle">
-        <text class="avatar-text">{{ initial }}</text>
+        <image v-if="avatar" class="avatar-img" :src="avatar" mode="aspectFill" />
+        <text v-else class="avatar-text">{{ initial }}</text>
       </view>
       <text class="display-name">{{ displayName }}</text>
     </view>
@@ -19,6 +20,7 @@ import { computed } from 'vue'
 const props = defineProps<{
   displayName: string
   todayDate: string
+  avatar: string
 }>()
 
 defineEmits<{
@@ -66,6 +68,11 @@ const initial = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
+}
+.avatar-img {
+  width: 64rpx;
+  height: 64rpx;
 }
 .avatar-text {
   font-size: 28rpx;

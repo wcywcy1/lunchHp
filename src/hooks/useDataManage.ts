@@ -1243,31 +1243,59 @@ export function useDataManage() {
 
     const showMergeDialog = ref(false)
     const mergingMember = ref<any>(null)
+    const mergeTargetId = ref('')
+    const merging = ref(false)
+
+    // 可作为合帐目标的成员：已登录微信（非虚拟）且不是当前正在合并的虚拟成员
+    const mergeTargetCandidates = computed(() =>
+        (store.members || []).filter((m: any) =>
+            !m.isVirtual && m._id !== mergingMember.value?._id
+        )
+    )
 
     function openMergeDialog(member: any) {
         mergingMember.value = member
+        mergeTargetId.value = ''
         showMergeDialog.value = true
     }
 
     async function mergeWithWechat() {
-        if (saving.value) return
+        if (merging.value) return
         if (!mergingMember.value) return
-        saving.value = true
+        if (!mergeTargetId.value) {
+            uni.showToast({ title: '请选择目标微信成员', icon: 'none' })
+            return
+        }
+        const target = mergeTargetCandidates.value.find((m: any) => m._id === mergeTargetId.value)
+        const virtualName = mergingMember.value.name || mergingMember.value.nickName || '未命名'
+        const targetName = target?.name || target?.nickName || '未命名'
+        const { confirm } = await uni.showModal({
+            title: '确认合帐',
+            content: `将虚拟成员「${virtualName}」的所有订单和点餐统计转移到「${targetName}」，虚拟成员将被删除。确定？`,
+        })
+        if (!confirm) return
+        merging.value = true
         try {
-            const res = await menuAction('linkVirtualMember', { virtualMemberId: mergingMember.value._id })
+            const res = await menuAction('adminLinkVirtualMember', {
+                virtualMemberId: mergingMember.value._id,
+                targetMemberId: mergeTargetId.value,
+            })
             if (res.result.code === 0) {
-                const updated = res.result.data.member
-                store.members = store.members.map((m: any) => m._id === updated._id ? updated : m)
-                store.member = updated
-                saveSession({ groupId: updated.groupId, role: updated.role, member: updated })
+                const { mergedOrders, mergedStats } = res.result.data
+                // 从本地 members 列表移除虚拟成员
+                store.members = store.members.filter((m: any) => m._id !== mergingMember.value._id)
                 showMergeDialog.value = false
                 showNameEditDialog.value = false
-                uni.showToast({ title: '合帐成功', icon: 'success' })
+                uni.showToast({ title: `合帐成功（订单${mergedOrders}条）`, icon: 'success' })
+                // 订单数据变了，重新加载
+                await loadData()
+            } else {
+                throw new Error(res.result.msg || '合帐失败')
             }
         } catch (e: any) {
             uni.showToast({ title: e.message || '合帐失败', icon: 'none' })
         } finally {
-            saving.value = false
+            merging.value = false
         }
     }
 
@@ -1452,6 +1480,9 @@ export function useDataManage() {
         backingUp,
         showMergeDialog,
         mergingMember,
+        mergeTargetId,
+        mergeTargetCandidates,
+        merging,
         showMenuEditModal,
         menuEditForm,
         isMenuEdit,

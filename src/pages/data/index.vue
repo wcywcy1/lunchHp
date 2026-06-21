@@ -124,14 +124,37 @@
     </view>
 
     <view v-if="showMergeDialog" class="modal-mask" @tap="showMergeDialog = false">
-      <view class="edit-modal" @tap.stop>
+      <view class="edit-modal merge-modal" @tap.stop>
         <text class="modal-title">与微信账号合帐</text>
         <view class="merge-info">
-          <text class="merge-desc">将虚拟成员「{{ mergingMember?.name || '未命名' }}」与当前微信账号合并。合并后该虚拟成员将绑定到您的微信，您当前的账号数据将转移过去。</text>
+          <text class="merge-desc">将虚拟成员「{{ mergingMember?.name || mergingMember?.nickName || '未命名' }}」的所有订单和点餐统计转移到下方选中的已登录微信成员，虚拟成员将被删除。</text>
         </view>
+        <text class="merge-section-title">选择目标微信成员</text>
+        <scroll-view scroll-y class="merge-target-scroll">
+          <view
+            v-for="m in mergeTargetCandidates"
+            :key="m._id"
+            :class="['merge-target-item', mergeTargetId === m._id ? 'selected' : '']"
+            @tap="mergeTargetId = m._id"
+          >
+            <image v-if="m.avatar" class="merge-target-avatar" :src="m.avatar" mode="aspectFill" />
+            <view v-else class="merge-target-avatar placeholder">{{ (m.name || m.nickName || '?').charAt(0) }}</view>
+            <view class="merge-target-info">
+              <text class="merge-target-name">{{ m.name || m.nickName || '未命名' }}</text>
+              <text v-if="m.role === 'creator'" class="role-tag creator">👑创建者</text>
+              <text v-else-if="m.role === 'admin'" class="role-tag admin">🔧管理员</text>
+            </view>
+            <text v-if="mergeTargetId === m._id" class="merge-check">✓</text>
+          </view>
+          <view v-if="mergeTargetCandidates.length === 0" class="merge-empty">
+            <text>暂无可关联的微信成员</text>
+          </view>
+        </scroll-view>
         <view class="modal-actions">
           <view class="modal-btn cancel" @tap="showMergeDialog = false"><text>取消</text></view>
-          <view class="modal-btn confirm" @tap="mergeWithWechat"><text>确认合帐</text></view>
+          <view :class="['modal-btn confirm', (!mergeTargetId || merging) ? 'disabled' : '']" @tap="mergeWithWechat">
+            <text>{{ merging ? '合帐中...' : '确认合帐' }}</text>
+          </view>
         </view>
       </view>
     </view>
@@ -322,6 +345,9 @@ const {
   backingUp,
   showMergeDialog,
   mergingMember,
+  mergeTargetId,
+  mergeTargetCandidates,
+  merging,
   showMenuEditModal,
   menuEditForm,
   isMenuEdit,
@@ -514,6 +540,72 @@ onHide(() => {
   font-size: 26rpx;
   color: #666;
   line-height: 1.6;
+}
+.merge-modal {
+  width: 640rpx;
+}
+.merge-section-title {
+  display: block;
+  font-size: 26rpx;
+  font-weight: bold;
+  color: #333;
+  margin-bottom: 12rpx;
+}
+.merge-target-scroll {
+  max-height: 480rpx;
+  margin-bottom: 24rpx;
+}
+.merge-target-item {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  padding: 16rpx;
+  border: 1rpx solid #eee;
+  border-radius: 8rpx;
+  margin-bottom: 8rpx;
+}
+.merge-target-item.selected {
+  background: #e3f2fd;
+  border-color: #1976d2;
+}
+.merge-target-avatar {
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.merge-target-avatar.placeholder {
+  background: #1976d2;
+  color: #fff;
+  font-size: 28rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.merge-target-info {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  overflow: hidden;
+}
+.merge-target-name {
+  font-size: 28rpx;
+  color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.merge-check {
+  color: #1976d2;
+  font-size: 32rpx;
+  font-weight: bold;
+}
+.merge-empty {
+  text-align: center;
+  padding: 40rpx 0;
+  color: #999;
+  font-size: 26rpx;
 }
 .modal-actions {
   display: flex;

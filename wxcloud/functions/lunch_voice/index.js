@@ -42,34 +42,36 @@ async function speechRecognize(data) {
     var hotwordId = process.env.ASR_HOTWORD_MODEL_ID || ''
     var format = data.voiceFormat || 'mp3'
 
-    // ------ 主识别：FlashRecognition（极速一句话识别） ------
-    // TODO: Flash 调试未完成，暂时禁用，走 Sentence 兜底。调试好后取消注释即可启用。
-    // try {
-    //   var flashRes = await client.FlashRecognition({
-    //     EngSerViceType: '16k_zh',
-    //     VoiceFormat: format,
-    //     SourceType: 1,                    // 1 = base64 直传
-    //     Data: data.audioBase64,
-    //     ...(hotwordId ? { HotwordId: hotwordId } : {})
-    //   })
-    //   if (flashRes && flashRes.Result) {
-    //     return {
-    //       success: true,
-    //       text: flashRes.Result,
-    //       mode: 'flash',
-    //       requestId: flashRes.RequestId || ''
-    //     }
-    //   }
-    //   // Flash 返回但 Result 为空，走兜底
-    //   console.warn('FlashRecognition 返回空文本，降级 SentenceRecognition')
-    // } catch (flashErr) {
-    //   // Flash 调用失败（可能接口字段不兼容 / 权限 / 配额）
-    //   // 打印日志但不向上抛，走 Sentence 兜底
-    //   console.warn('FlashRecognition 调用失败，降级 SentenceRecognition：',
-    //     flashErr.code || '', flashErr.message || '')
-    // }
+    // ------ 主识别：FlashRecognition（极速一句话识别，1s 超时，失败/超时走 Sentence 兜底） ------
+    try {
+      var flashPromise = client.FlashRecognition({
+        EngSerViceType: '16k_zh',
+        VoiceFormat: format,
+        SourceType: 1,                    // 1 = base64 直传
+        Data: data.audioBase64,
+        ...(hotwordId ? { HotwordId: hotwordId } : {})
+      })
+      var timeoutP = new Promise(function (_, reject) {
+        setTimeout(function () { reject(new Error('FlashRecognition timeout')) }, 1000)
+      })
+      var flashRes = await Promise.race([flashPromise, timeoutP])
+      if (flashRes && flashRes.Result) {
+        return {
+          success: true,
+          text: flashRes.Result,
+          mode: 'flash',
+          requestId: flashRes.RequestId || ''
+        }
+      }
+      // Flash 返回但 Result 为空，走兜底
+      console.warn('FlashRecognition 返回空文本，降级 SentenceRecognition')
+    } catch (flashErr) {
+      // Flash 调用失败或超时，打印日志但不向上抛，走 Sentence 兜底
+      console.warn('FlashRecognition 失败/超时，降级 SentenceRecognition：',
+        flashErr.code || '', flashErr.message || '')
+    }
 
-    // ------ 兜底识别：SentenceRecognition（Flash 禁用期间作为主识别） ------
+    // ------ 兜底识别：SentenceRecognition ------
     var sentRes = await client.SentenceRecognition({
       SourceType: 1,
       Data: data.audioBase64,

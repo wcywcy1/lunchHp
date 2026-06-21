@@ -2,6 +2,15 @@
   <view v-if="show" class="modal-mask" @tap="$emit('close')">
     <view class="edit-modal name-edit-modal" :style="modalStyle" @tap.stop>
       <text class="modal-title">修改姓名</text>
+      <view class="avatar-section">
+        <button class="avatar-btn" open-type="chooseAvatar" @chooseavatar="$emit('choose-avatar', $event)">
+          <image v-if="avatar" class="avatar-img" :src="avatar" mode="aspectFill" />
+          <view v-else class="avatar-placeholder">
+            <text class="avatar-placeholder-text">选头像</text>
+          </view>
+        </button>
+        <text class="avatar-hint">点击设置头像（选填）</text>
+      </view>
       <view class="current-name">
         <text class="current-label">当前：</text>
         <text class="current-value">{{ currentName || '未设置' }}</text>
@@ -12,7 +21,8 @@
           class="form-input"
           :value="newName"
           @input="onInput"
-          placeholder="输入姓名"
+          placeholder="输入姓名，可点键盘上方使用微信昵称"
+          type="nickname"
           @keyboardheightchange="onKeyboardHeightChange"
         />
       </view>
@@ -61,6 +71,7 @@ const props = defineProps<{
   show: boolean
   currentName: string
   newName: string
+  avatar: string
   hasVirtualMembers: boolean
   showLinkList: boolean
   virtualMembers: any[]
@@ -75,6 +86,7 @@ const emit = defineEmits<{
   (e: 'select-virtual', id: string): void
   (e: 'confirm-link'): void
   (e: 'update:newName', val: string): void
+  (e: 'choose-avatar', val: any): void
 }>()
 
 const { modalStyle, onKeyboardHeightChange, reset } = useModalKeyboardAvoid({
@@ -115,6 +127,47 @@ function onInput(e: any) {
   font-weight: bold;
   text-align: center;
   margin-bottom: 24rpx;
+}
+.avatar-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 24rpx;
+}
+.avatar-btn {
+  width: 128rpx;
+  height: 128rpx;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  line-height: normal;
+}
+.avatar-btn::after {
+  border: none;
+}
+.avatar-img {
+  width: 128rpx;
+  height: 128rpx;
+  border-radius: 50%;
+}
+.avatar-placeholder {
+  width: 128rpx;
+  height: 128rpx;
+  border-radius: 50%;
+  background: #e3f2fd;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.avatar-placeholder-text {
+  font-size: 24rpx;
+  color: #1976d2;
+}
+.avatar-hint {
+  font-size: 22rpx;
+  color: #999;
+  margin-top: 8rpx;
 }
 .current-name {
   display: flex;

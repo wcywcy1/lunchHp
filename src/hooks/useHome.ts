@@ -15,11 +15,15 @@ export function useHome() {
     const showNameDialog = ref(false)
     const showWelcomeDialog = ref(false)
     const editingName = ref('')
+    const editingAvatar = ref('')
+    const avatarChanged = ref(false)
     const showLinkDialog = ref(false)
     const selectedVirtualId = ref('')
     const saving = ref(false)
     const noticeContent = ref('')
     const realtime = useRealtimeWatch()
+
+    const currentAvatar = computed(() => store.member?.avatar || '')
 
     let lastFreshnessCheck: number = 0
     const FRESHNESS_THROTTLE_MS = 10 * 1000
@@ -339,10 +343,25 @@ export function useHome() {
         if (!store.member) return
         saving.value = true
         try {
+            // 1. 保存姓名
             await menuAction('updateMemberName', { memberId: store.member._id, name })
             store.member.name = name
+            // 2. 头像变了：上传到云存储并更新 member.avatar
+            if (avatarChanged.value && editingAvatar.value) {
+                const cloudPath = `lunch/avatar_${store.member._id}_${Date.now()}.jpg`
+                const uploadRes = await wx.cloud.uploadFile({
+                    cloudPath,
+                    filePath: editingAvatar.value,
+                })
+                const profileRes = await menuAction('updateMemberProfile', { avatar: uploadRes.fileID })
+                if (profileRes.result.code === 0) {
+                    store.member.avatar = uploadRes.fileID
+                }
+            }
             saveSession({ groupId: store.member.groupId, role: store.member.role, member: store.member })
             editingName.value = ''
+            editingAvatar.value = ''
+            avatarChanged.value = false
             showNameDialog.value = false
             showWelcomeDialog.value = false
             uni.showToast({ title: '已保存', icon: 'success' })
@@ -353,12 +372,23 @@ export function useHome() {
         }
     }
 
+    function onChooseAvatar(e: any) {
+        const url = e?.detail?.avatarUrl
+        if (!url) return
+        editingAvatar.value = url
+        avatarChanged.value = true
+    }
+
     function skipWelcome() {
         showWelcomeDialog.value = false
+        editingAvatar.value = ''
+        avatarChanged.value = false
     }
 
     function openNameEdit() {
         editingName.value = store.member?.name || ''
+        editingAvatar.value = store.member?.avatar || ''
+        avatarChanged.value = false
         showNameDialog.value = true
     }
 
@@ -366,6 +396,8 @@ export function useHome() {
         showNameDialog.value = false
         showLinkDialog.value = false
         editingName.value = ''
+        editingAvatar.value = ''
+        avatarChanged.value = false
     }
 
     function openLinkDialog() {
@@ -410,6 +442,9 @@ export function useHome() {
         showNameDialog,
         showWelcomeDialog,
         editingName,
+        editingAvatar,
+        currentAvatar,
+        avatarChanged,
         virtualMembers,
         showLinkDialog,
         selectedVirtualId,
@@ -424,6 +459,7 @@ export function useHome() {
         agreePrivacy,
         disagreePrivacy,
         saveName,
+        onChooseAvatar,
         skipWelcome,
         openNameEdit,
         closeNameDialog,

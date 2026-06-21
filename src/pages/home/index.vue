@@ -3,6 +3,7 @@
     <HomeHeader
       :displayName="displayName"
       :todayDate="todayDate"
+      :avatar="currentAvatar"
       @click-avatar="openNameEdit"
     />
 
@@ -23,6 +24,7 @@
       :show="showNameDialog"
       :currentName="displayName"
       :newName="editingName"
+      :avatar="editingAvatar"
       :hasVirtualMembers="virtualMembers.length > 0"
       :showLinkList="showLinkDialog"
       :virtualMembers="virtualMembers"
@@ -34,6 +36,7 @@
       @select-virtual="selectVirtual"
       @confirm-link="linkVirtualMember"
       @update:newName="editingName = $event"
+      @choose-avatar="onChooseAvatar"
     />
 
     <view v-if="showPrivacyDialog" class="modal-mask" @tap.stop>
@@ -50,11 +53,21 @@
     <view v-if="showWelcomeDialog" class="modal-mask" @tap.stop>
       <view class="welcome-modal" :style="welcomeModalStyle" @tap.stop>
         <text class="modal-title">欢迎加入！</text>
+        <view class="welcome-avatar-section">
+          <button class="welcome-avatar-btn" open-type="chooseAvatar" @chooseavatar="onChooseAvatar">
+            <image v-if="editingAvatar" class="welcome-avatar-img" :src="editingAvatar" mode="aspectFill" />
+            <view v-else class="welcome-avatar-placeholder">
+              <text class="welcome-avatar-text">选头像</text>
+            </view>
+          </button>
+          <text class="welcome-avatar-hint">点击设置头像（选填）</text>
+        </view>
         <text class="welcome-tip">请输入你的姓名（选填）</text>
         <input
           class="welcome-input"
           v-model="editingName"
-          placeholder="不填将使用微信昵称"
+          placeholder="可点键盘上方使用微信昵称"
+          type="nickname"
           @keyboardheightchange="onWelcomeKeyboard"
         />
         <view class="modal-actions">
@@ -91,6 +104,8 @@ const {
   showNameDialog,
   showWelcomeDialog,
   editingName,
+  editingAvatar,
+  currentAvatar,
   virtualMembers,
   showLinkDialog,
   selectedVirtualId,
@@ -104,6 +119,7 @@ const {
   agreePrivacy,
   disagreePrivacy,
   saveName,
+  onChooseAvatar,
   skipWelcome,
   openNameEdit,
   closeNameDialog,
@@ -178,6 +194,47 @@ onPullDownRefresh(() => {
   font-size: 28rpx;
   color: #666;
   margin-bottom: 20rpx;
+}
+.welcome-avatar-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 24rpx;
+}
+.welcome-avatar-btn {
+  width: 128rpx;
+  height: 128rpx;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  line-height: normal;
+}
+.welcome-avatar-btn::after {
+  border: none;
+}
+.welcome-avatar-img {
+  width: 128rpx;
+  height: 128rpx;
+  border-radius: 50%;
+}
+.welcome-avatar-placeholder {
+  width: 128rpx;
+  height: 128rpx;
+  border-radius: 50%;
+  background: #e3f2fd;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.welcome-avatar-text {
+  font-size: 24rpx;
+  color: #1976d2;
+}
+.welcome-avatar-hint {
+  font-size: 22rpx;
+  color: #999;
+  margin-top: 8rpx;
 }
 .welcome-input {
   padding: 16rpx;

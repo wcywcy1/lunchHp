@@ -10,6 +10,10 @@
         :key="member._id"
         :class="['member-item', member.isVirtual ? 'virtual' : '']"
       >
+        <view class="member-avatar-wrap">
+          <image v-if="member.avatar" class="member-avatar" :src="member.avatar" mode="aspectFill" />
+          <view v-else class="member-avatar placeholder">{{ (member.name || member.nickName || '?').charAt(0) }}</view>
+        </view>
         <view class="member-info">
           <text class="member-name">{{ member.name || member.nickName || '未命名' }}</text>
           <text v-if="member.role === 'creator'" class="role-tag creator">👑创建者</text>
@@ -96,6 +100,23 @@ const expanded = ref(false)
 }
 .member-item.virtual {
   opacity: 0.6;
+}
+.member-avatar-wrap {
+  flex-shrink: 0;
+  margin-right: 16rpx;
+}
+.member-avatar {
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: 50%;
+}
+.member-avatar.placeholder {
+  background: #1976d2;
+  color: #fff;
+  font-size: 28rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .member-info {
   display: flex;
