@@ -30,7 +30,7 @@ type VoiceState = 'idle' | 'recording' | 'recognizing'
 
 interface VoiceSearchOptions {
     onStart?: () => void
-    onStop?: (text: string, keywords: string[]) => void
+    onStop?: (text: string, keywords: string[], mode?: 'flash' | 'sentence') => void
     onError?: (msg: string) => void
 }
 
@@ -40,22 +40,47 @@ interface VoiceSearchOptions {
  */
 export function useVoiceSearch(options: VoiceSearchOptions = {}) {
     const state = ref<VoiceState>('idle')
+    const volume = ref(0)
     let recorderManager: any = null
     let recordTempFilePath = ''
     let recorderReady = true
     let pendingStop = false
     let startTimeout: any = null
+    let volumeDecayTimer: any = null
+    let recognizeTimeout: any = null  // 识别阶段超时安全网
+
+    // 微信小程序 onVolumeChange 回调返回 res.volume（范围 0-1），无需归一化
+    function decayVolume() {
+        // 音量回调间隔约 300-800ms，给一个平滑衰减，否则条会生硬闪烁
+        if (volumeDecayTimer) return
+        volumeDecayTimer = setInterval(() => {
+            volume.value = Math.max(0, volume.value - 0.08)
+            if (volume.value <= 0) {
+                clearInterval(volumeDecayTimer)
+                volumeDecayTimer = null
+            }
+        }, 60)
+    }
 
     function getRecorderManager(): any {
         if (!recorderManager) {
             // #ifdef MP-WEIXIN
             recorderManager = uni.getRecorderManager()
             recorderManager.onStart(() => {
+                volume.value = 0
                 // 录音确认开始，清除启动超时安全网
                 if (startTimeout) {
                     clearTimeout(startTimeout)
                     startTimeout = null
                 }
+            })
+            recorderManager.onVolumeChange((res: any) => {
+                // 微信小程序 onVolumeChange 返回 res.volume（0-1），兼容旧版 res.size（0-60）
+                const v = typeof res.volume === 'number'
+                    ? res.volume
+                    : (typeof res.size === 'number' ? res.size / 60 : 0)
+                volume.value = Math.min(1, Math.max(0, v))
+                decayVolume()
             })
             recorderManager.onStop((res: any) => {
                 recordTempFilePath = res.tempFilePath
@@ -82,6 +107,15 @@ export function useVoiceSearch(options: VoiceSearchOptions = {}) {
             clearTimeout(startTimeout)
             startTimeout = null
         }
+        if (volumeDecayTimer) {
+            clearInterval(volumeDecayTimer)
+            volumeDecayTimer = null
+        }
+        if (recognizeTimeout) {
+            clearTimeout(recognizeTimeout)
+            recognizeTimeout = null
+        }
+        volume.value = 0
         state.value = 'idle'
         recorderReady = true
         pendingStop = false
@@ -148,10 +182,21 @@ export function useVoiceSearch(options: VoiceSearchOptions = {}) {
             start()
         } else if (state.value === 'recording') {
             stop()
+        } else if (state.value === 'recognizing') {
+            // 识别中点击：强制复位，避免网络挂起导致永久卡死
+            resetAllStatus()
+            options.onError?.('已取消识别')
         }
     }
 
     async function processVoiceRecord(filePath: string) {
+        // 识别阶段安全网：15s 内未返回则强制复位
+        recognizeTimeout = setTimeout(() => {
+            if (state.value === 'recognizing') {
+                resetAllStatus()
+                options.onError?.('识别超时，请重试')
+            }
+        }, 15000)
         try {
             // #ifdef MP-WEIXIN
             // 1. 读文件转 base64（本地操作，毫秒级）
@@ -177,7 +222,7 @@ export function useVoiceSearch(options: VoiceSearchOptions = {}) {
             const result = res.result || {}
             if (result.success && result.text) {
                 const keywords = extractKeywords(result.text)
-                options.onStop?.(result.text, keywords)
+                options.onStop?.(result.text, keywords, result.mode)
             } else {
                 options.onError?.(result.message || '语音识别失败，请再说一遍')
             }
@@ -194,5 +239,5 @@ export function useVoiceSearch(options: VoiceSearchOptions = {}) {
         }
     }
 
-    return { state, toggle, start, stop }
+    return { state, volume, toggle, start, stop }
 }

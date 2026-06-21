@@ -41,10 +41,19 @@
     <view v-if="voiceState !== 'idle'" class="voice-mask" @tap="$emit('voice-toggle')">
       <view class="voice-bottom-panel">
         <text class="voice-status">{{ voiceState === 'recognizing' ? '识别中...' : '录音中' }}</text>
-        <view class="voice-wave-wrap">
-          <view class="voice-wave-bar" v-for="i in 5" :key="i" :style="{ animationDelay: (i * 0.1) + 's' }"></view>
+        <view v-if="voiceState === 'recording'" class="voice-wave-wrap">
+          <view
+            v-for="(factor, i) in waveBars" :key="i" class="voice-wave-bar" :style="{
+              height: getBarHeight(i) + 'rpx',
+              opacity: getBarOpacity(i),
+              background: getBarColor(),
+              borderRadius: '4rpx'
+            }"></view>
         </view>
-        <text class="voice-tip">点击结束录音</text>
+        <view v-else class="voice-wave-wrap">
+          <view class="voice-pulse"></view>
+        </view>
+        <text class="voice-tip">{{ voiceState === 'recognizing' ? '请稍候' : '点击结束录音' }}</text>
       </view>
     </view>
 
@@ -95,7 +104,34 @@ const props = defineProps<{
   showAddMember: boolean
   memberList: any[]
   voiceState: string
+  voiceVolume?: number
 }>()
+
+// 音量条高度/透明度因子：中间条最高，两侧递减，形成波形效果
+const waveBars = [0.5, 0.75, 1, 0.75, 0.5]
+
+function getBarHeight(index: number): number {
+  const v = props.voiceVolume || 0
+  const factor = waveBars[index] || 0.5
+  // 基础最小高度 16rpx，最大 96rpx，跟随音量
+  const base = 16
+  const dynamic = v * factor * 96
+  return Math.max(base, Math.min(96, base + dynamic))
+}
+
+function getBarOpacity(index: number): number {
+  const v = props.voiceVolume || 0
+  const factor = waveBars[index] || 0.5
+  return Math.max(0.35, 0.35 + v * factor * 0.65)
+}
+
+function getBarColor(): string {
+  const v = props.voiceVolume || 0
+  // 安静：蓝色；大声：橙色（和录音按钮保持一致的配色）
+  if (v > 0.7) return '#e65100'
+  if (v > 0.35) return '#f57c00'
+  return '#1976d2'
+}
 
 const emit = defineEmits<{
   (e: 'switch-self'): void
@@ -221,15 +257,19 @@ watch(() => props.showAddMember, (val) => {
   height: 80rpx;
 }
 .voice-wave-bar {
-  width: 8rpx;
-  height: 40rpx;
-  border-radius: 4rpx;
-  background: #1976d2;
-  animation: voiceWave 0.8s ease-in-out infinite alternate;
+  width: 12rpx;
 }
-@keyframes voiceWave {
-  0% { height: 20rpx; opacity: 0.5; }
-  100% { height: 80rpx; opacity: 1; }
+.voice-pulse {
+  width: 40rpx;
+  height: 40rpx;
+  border-radius: 50%;
+  background: #1976d2;
+  opacity: 0.6;
+  animation: voicePulse 1s ease-in-out infinite;
+}
+@keyframes voicePulse {
+  0%, 100% { transform: scale(0.6); opacity: 0.4; }
+  50% { transform: scale(1.2); opacity: 1; }
 }
 .voice-tip {
   font-size: 26rpx;

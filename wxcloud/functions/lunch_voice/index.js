@@ -7,9 +7,13 @@ var tencentcloud = null
 try { tencentcloud = require('tencentcloud-sdk-nodejs') } catch (e) {}
 
 /**
- * 语音识别：调用腾讯云 ASR SentenceRecognition
+ * 语音识别：FlashRecognition 主识别 + SentenceRecognition 兜底
  * 入参: { audioBase64, voiceFormat }
- * 出参: { success, text, message }
+ * 出参: { success, text, mode, message, requestId }
+ *   mode: 'flash' | 'sentence'，标识实际命中的接口
+ * 环境变量:
+ *   TENCENT_SECRET_ID / TENCENT_SECRET_KEY  腾讯云密钥
+ *   ASR_HOTWORD_MODEL_ID                    可选，自定义词表 ModelId
  */
 async function speechRecognize(data) {
   if (!tencentcloud) {
@@ -34,20 +38,51 @@ async function speechRecognize(data) {
       return { success: false, message: '语音识别密钥未配置' }
     }
 
-    // SourceType=1 走 base64 直传，省掉 getTempFileURL + 腾讯外网拉音频两次往返
-    // 注：新版 SDK 已废弃 Length 参数，由 SDK 内部根据 base64 自算
     var client = new AsrClient(clientConfig)
-    var res = await client.SentenceRecognition({
+    var hotwordId = process.env.ASR_HOTWORD_MODEL_ID || ''
+    var format = data.voiceFormat || 'mp3'
+
+    // ------ 主识别：FlashRecognition（极速一句话识别） ------
+    // TODO: Flash 调试未完成，暂时禁用，走 Sentence 兜底。调试好后取消注释即可启用。
+    // try {
+    //   var flashRes = await client.FlashRecognition({
+    //     EngSerViceType: '16k_zh',
+    //     VoiceFormat: format,
+    //     SourceType: 1,                    // 1 = base64 直传
+    //     Data: data.audioBase64,
+    //     ...(hotwordId ? { HotwordId: hotwordId } : {})
+    //   })
+    //   if (flashRes && flashRes.Result) {
+    //     return {
+    //       success: true,
+    //       text: flashRes.Result,
+    //       mode: 'flash',
+    //       requestId: flashRes.RequestId || ''
+    //     }
+    //   }
+    //   // Flash 返回但 Result 为空，走兜底
+    //   console.warn('FlashRecognition 返回空文本，降级 SentenceRecognition')
+    // } catch (flashErr) {
+    //   // Flash 调用失败（可能接口字段不兼容 / 权限 / 配额）
+    //   // 打印日志但不向上抛，走 Sentence 兜底
+    //   console.warn('FlashRecognition 调用失败，降级 SentenceRecognition：',
+    //     flashErr.code || '', flashErr.message || '')
+    // }
+
+    // ------ 兜底识别：SentenceRecognition（Flash 禁用期间作为主识别） ------
+    var sentRes = await client.SentenceRecognition({
       SourceType: 1,
       Data: data.audioBase64,
       EngSerViceType: '16k_zh',
-      VoiceFormat: data.voiceFormat || 'mp3'
+      VoiceFormat: format,
+      ...(hotwordId ? { HotwordId: hotwordId } : {})
     })
 
     return {
       success: true,
-      text: res.Result || '',
-      requestId: res.RequestId || ''
+      text: sentRes.Result || '',
+      mode: 'sentence',
+      requestId: sentRes.RequestId || ''
     }
   } catch (error) {
     console.error('speechRecognize error:', error)

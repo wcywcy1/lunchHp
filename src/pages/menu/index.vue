@@ -33,6 +33,7 @@
       :showAddMember="showAddMember"
       :memberList="memberList"
       :voiceState="voiceState"
+      :voiceVolume="voiceVolume"
       @switch-self="switchToSelf"
       @switch-help="switchToHelp"
       @submit="submitOrder"
@@ -119,7 +120,7 @@ watch([orderFor, orderForMemberId], async () => {
   statsOverride.value = {}
 }, { immediate: true })
 
-const { state: voiceState, toggle: onVoiceToggle } = useVoiceSearch({
+const { state: voiceState, volume: voiceVolume, toggle: onVoiceToggle } = useVoiceSearch({
   onStop: async (text, keywords) => {
     // menuList 为空时等待加载完成，避免语音结果匹配为空
     if (menuList.value.length === 0) {
