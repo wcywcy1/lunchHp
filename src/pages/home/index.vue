@@ -4,6 +4,7 @@
       :displayName="displayName"
       :todayDate="todayDate"
       :avatar="currentAvatar"
+      :memberLoading="memberLoading"
       @click-avatar="openNameEdit"
     />
 
@@ -94,6 +95,7 @@ import { useModalKeyboardAvoid } from '../../hooks/useModalKeyboardAvoid'
 
 const {
   loading,
+  memberLoading,
   displayName,
   todayDate,
   monthCount,

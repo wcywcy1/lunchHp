@@ -2,7 +2,7 @@ import { ref, computed } from 'vue'
 import { onShow, onHide } from '@dcloudio/uni-app'
 import { useStore, setStore, getCache, setCache, saveSession, getRecentLoadTime, setRecentLoadTime, flushCache } from '../services/store'
 import { menuAction, orderAction } from '../services/repositories/baseRepository'
-import { waitForInit, isInitRunning } from '../services/appInit'
+import { waitForInit } from '../services/appInit'
 import { CACHE_KEYS, CACHE_TTL } from '../constants/cacheConfig'
 import { useRealtimeWatch } from './useRealtimeWatch'
 import { APP_MODE } from '../constants/appConfig'
@@ -39,9 +39,12 @@ export function useHome() {
             && t.getDate() === today.getDate()
     }
 
+    const memberLoading = ref(false)
+
     const displayName = computed(() => {
         const m = store.member
-        return m ? (m.name || m.nickName || '未命名') : ''
+        if (!m) return memberLoading.value ? '加载中...' : ''
+        return m.name || m.nickName || '未命名'
     })
 
     const currentMemberId = computed(() => store.member?._id || '')
@@ -69,8 +72,8 @@ export function useHome() {
 
     async function initApp() {
         loading.value = true
+        memberLoading.value = true
         try {
-            await waitForInit()
             const res = await orderAction('getInitData')
             if (res.result.code === 0) {
                 const { member, isNew, monthSummary, recentOrders, menu, members,
@@ -101,6 +104,7 @@ export function useHome() {
             uni.showToast({ title: '初始化失败，请重试', icon: 'none' })
         } finally {
             loading.value = false
+            memberLoading.value = false
         }
     }
 
@@ -131,7 +135,7 @@ export function useHome() {
             uni.reLaunch({ url: '/pages/group-select/index' })
             return
         }
-        if (isInitRunning() || store.isSwitchingGroup) return
+        if (store.isSwitchingGroup) return
         if (!store.member) {
             await initApp()
             return
@@ -455,6 +459,7 @@ export function useHome() {
 
     return {
         loading,
+        memberLoading,
         displayName,
         currentMemberId,
         todayDate,

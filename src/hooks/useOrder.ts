@@ -137,7 +137,11 @@ export function useOrder(): OrderReturn {
         const item = selectedMenuItem.value
         if (!item) return
         if (!store.member) {
-            uni.showToast({ title: '请先登录', icon: 'none' })
+            uni.showToast({ title: '用户信息加载中，请稍后', icon: 'none' })
+            return
+        }
+        if (!store.member.name && !store.member.nickName) {
+            uni.showToast({ title: '请先设置姓名', icon: 'none' })
             return
         }
 

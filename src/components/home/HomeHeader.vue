@@ -9,7 +9,7 @@
         <image v-if="avatar" class="avatar-img" :src="avatar" mode="aspectFill" />
         <text v-else class="avatar-text">{{ initial }}</text>
       </view>
-      <text class="display-name">{{ displayName }}</text>
+      <text class="display-name" :class="{ 'name-loading': memberLoading }">{{ displayName }}</text>
     </view>
   </view>
 </template>
@@ -21,6 +21,7 @@ const props = defineProps<{
   displayName: string
   todayDate: string
   avatar: string
+  memberLoading?: boolean
 }>()
 
 defineEmits<{
@@ -86,5 +87,8 @@ const initial = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.name-loading {
+  color: #999;
 }
 </style>
