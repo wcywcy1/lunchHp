@@ -84,6 +84,14 @@
         @import="importData"
       />
 
+      <view class="card-section relation-section">
+        <text class="section-title">🔗 订单关联修复</text>
+        <text class="relation-hint">覆盖导入人员或菜单后，如发现"最近点过"排序异常，可点击重置关联</text>
+        <view :class="['relation-btn', rebuilding ? 'disabled' : '']" @tap="rebuildRelations">
+          <text>{{ rebuilding ? '处理中...' : '重置订单关联' }}</text>
+        </view>
+      </view>
+
       <DataBackup
         :backingUp="backingUp"
         @backup="manualBackup"
@@ -114,7 +122,7 @@
           <input class="form-input" v-model="editingName" placeholder="输入姓名" @keyboardheightchange="onNameEditKeyboard" />
         </view>
         <view v-if="editingMember?.isVirtual" class="merge-section" @tap="openMergeDialog(editingMember)">
-          <text class="merge-btn">🔗 与微信账号合帐</text>
+          <text class="merge-btn">🔗 关联微信账号</text>
         </view>
         <view class="modal-actions">
           <view class="modal-btn cancel" @tap="showNameEditDialog = false"><text>取消</text></view>
@@ -125,9 +133,9 @@
 
     <view v-if="showMergeDialog" class="modal-mask" @tap="showMergeDialog = false">
       <view class="edit-modal merge-modal" @tap.stop>
-        <text class="modal-title">与微信账号合帐</text>
+        <text class="modal-title">关联微信账号</text>
         <view class="merge-info">
-          <text class="merge-desc">将虚拟成员「{{ mergingMember?.name || mergingMember?.nickName || '未命名' }}」的所有订单和点餐统计转移到下方选中的已登录微信成员，虚拟成员将被删除。</text>
+          <text class="merge-desc">将下方选中的已登录微信成员的订单和统计转移到「{{ mergingMember?.name || mergingMember?.nickName || '未命名' }}」，保留该虚拟成员并挂上微信账号，微信成员记录将被删除。</text>
         </view>
         <text class="merge-section-title">选择目标微信成员</text>
         <scroll-view scroll-y class="merge-target-scroll">
@@ -401,6 +409,8 @@ const {
   selectBackup,
   confirmRestore,
   restoreBackup,
+  rebuilding,
+  rebuildRelations,
   toggleHistoryPending,
   toggleHistoryConfirmed,
   loadMoreHistoryPending,
@@ -785,5 +795,31 @@ onHide(() => {
   color: #999;
   margin-bottom: 20rpx;
   text-align: center;
+}
+.relation-section {
+  margin: 0 32rpx 24rpx;
+  background: #fff;
+  border-radius: 16rpx;
+  padding: 24rpx;
+  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.06);
+}
+.relation-hint {
+  display: block;
+  font-size: 24rpx;
+  color: #999;
+  margin-bottom: 16rpx;
+  line-height: 1.5;
+}
+.relation-btn {
+  text-align: center;
+  padding: 16rpx 0;
+  border-radius: 12rpx;
+  font-size: 28rpx;
+  background: #fff3e0;
+  color: #e65100;
+}
+.relation-btn.disabled {
+  color: #bbb;
+  background: #f5f5f5;
 }
 </style>

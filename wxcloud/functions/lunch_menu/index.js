@@ -314,6 +314,7 @@ async function getMembers(event, openid) {
 async function updateMemberName(event, openid) {
     const { memberId, name } = event
     if (!memberId || name === undefined) return { code: 400, msg: 'missing memberId or name' }
+    if (!String(name).trim()) return { code: 400, msg: '姓名不能为空' }
 
     const caller = await getMemberByOpenid(openid)
     if (!caller) return { code: 403, msg: 'not a member' }
@@ -325,7 +326,7 @@ async function updateMemberName(event, openid) {
     const isAdminOrCreator = checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)
     if (!isSelf && !isAdminOrCreator) return { code: 403, msg: 'no permission' }
 
-    await db.collection(COL.MEMBERS).doc(memberId).update({ data: { name } })
+    await db.collection(COL.MEMBERS).doc(memberId).update({ data: { name: String(name).trim() } })
     await updateGroupTimestamp('membersTimestamp')
     return { code: 0 }
 }
@@ -415,24 +416,80 @@ async function linkVirtualMember(event, openid) {
     const virtual = (await db.collection(COL.MEMBERS).doc(virtualMemberId).get()).data
     if (!virtual || !virtual.isVirtual) return { code: 404, msg: 'virtual member not found' }
 
-    await db.collection(COL.MEMBERS).doc(virtualMemberId).update({
-        data: { openid, isVirtual: false, nickName: caller.nickName || '', privacyAgreed: caller.privacyAgreed || false }
-    })
+    const virtualName = virtual.name || virtual.nickName || ''
 
-    if (caller.role !== ROLE.MEMBER) {
-        await db.collection(COL.MEMBERS).doc(virtualMemberId).update({ data: { role: caller.role } })
+    // 1. 转移订单：把当前微信成员的订单 memberId/memberName 改到虚拟成员（保留张三的历史）
+    if (caller._id && caller._id !== 'recovered') {
+        const callerOrders = await fetchAll(db.collection(COL.ORDERS), { groupId: GROUP_ID, memberId: caller._id })
+        if (callerOrders.length > 0) {
+            const BATCH = 100
+            for (let i = 0; i < callerOrders.length; i += BATCH) {
+                const chunkIds = callerOrders.slice(i, i + BATCH).map(o => o._id)
+                await db.collection(COL.ORDERS)
+                    .where({ _id: _.in(chunkIds) })
+                    .update({ data: { memberId: virtualMemberId, memberName: virtualName } })
+            }
+        }
+
+        // 2. 合并个人点餐统计：把当前微信成员的统计转移到虚拟成员
+        const callerStats = await fetchAll(db.collection(COL.USER_STATS), { groupId: GROUP_ID, memberId: caller._id })
+        for (const cs of callerStats) {
+            const newId = `${GROUP_ID}_${virtualMemberId}_${cs.menuId}`
+            const existing = await db.collection(COL.USER_STATS).doc(newId).get().catch(() => ({ data: null }))
+            if (existing.data) {
+                const mergedCount = (existing.data.count || 0) + (cs.count || 0)
+                const mergedLastAt = (cs.lastAt && existing.data.lastAt)
+                    ? (new Date(cs.lastAt) > new Date(existing.data.lastAt) ? cs.lastAt : existing.data.lastAt)
+                    : (cs.lastAt || existing.data.lastAt)
+                await db.collection(COL.USER_STATS).doc(newId).update({
+                    data: { count: mergedCount, lastAt: mergedLastAt }
+                })
+                await db.collection(COL.USER_STATS).doc(cs._id).remove()
+            } else {
+                await db.collection(COL.USER_STATS).doc(newId).set({
+                    data: {
+                        groupId: GROUP_ID,
+                        memberId: virtualMemberId,
+                        menuId: cs.menuId,
+                        count: cs.count || 0,
+                        lastAt: cs.lastAt || null,
+                    }
+                })
+                await db.collection(COL.USER_STATS).doc(cs._id).remove()
+            }
+        }
     }
 
+    // 3. 更新虚拟成员：挂 openid，isVirtual=false，保留 caller role，avatar 取舍
+    const update = {
+        openid,
+        isVirtual: false,
+        nickName: caller.nickName || '',
+        privacyAgreed: caller.privacyAgreed || false,
+    }
+    if (caller.role !== ROLE.MEMBER) {
+        update.role = caller.role
+    }
+    if (caller.avatar && !virtual.avatar) {
+        update.avatar = caller.avatar
+    }
+    await db.collection(COL.MEMBERS).doc(virtualMemberId).update({ data: update })
+
+    // 4. 删除当前微信成员记录
     if (caller._id !== 'recovered') {
         await db.collection(COL.MEMBERS).doc(caller._id).remove()
     }
 
     await updateGroupTimestamp('membersTimestamp')
+    try {
+        await db.collection(COL.GROUPS).doc(GROUP_ID).update({ data: { ordersTimestamp: db.serverDate() } })
+    } catch (e) { console.error('touch ordersTimestamp error:', e) }
     const updated = (await db.collection(COL.MEMBERS).doc(virtualMemberId).get()).data
     return { code: 0, data: { member: updated } }
 }
 
-// 管理员代关联：把虚拟成员的数据转移到指定的已登录微信成员，并删除虚拟成员
+// 管理员代关联：把已登录微信成员的数据转移到指定的虚拟成员，保留虚拟成员（带着历史订单），
+// 挂上微信 openid，删除微信成员记录。结果名字为虚拟成员的名字。
 // 参数: { virtualMemberId, targetMemberId }
 async function adminLinkVirtualMember(event, openid) {
     const { virtualMemberId, targetMemberId } = event
@@ -450,59 +507,72 @@ async function adminLinkVirtualMember(event, openid) {
     if (target.isVirtual) return { code: 400, msg: '目标成员必须为已登录微信成员' }
     if (!target.openid) return { code: 400, msg: '目标成员未绑定微信' }
 
-    // 1. 转移订单：把虚拟成员的订单 memberId/memberName 改到目标成员
-    const virtualOrders = await fetchAll(db.collection(COL.ORDERS), { groupId: GROUP_ID, memberId: virtualMemberId })
-    if (virtualOrders.length > 0) {
-        const targetName = target.name || target.nickName || ''
+    const virtualName = virtual.name || virtual.nickName || ''
+
+    // 1. 转移订单：把目标微信成员的订单 memberId/memberName 改到虚拟成员（保留张三的历史）
+    const targetOrders = await fetchAll(db.collection(COL.ORDERS), { groupId: GROUP_ID, memberId: targetMemberId })
+    if (targetOrders.length > 0) {
         const BATCH = 100
-        for (let i = 0; i < virtualOrders.length; i += BATCH) {
-            const chunkIds = virtualOrders.slice(i, i + BATCH).map(o => o._id)
+        for (let i = 0; i < targetOrders.length; i += BATCH) {
+            const chunkIds = targetOrders.slice(i, i + BATCH).map(o => o._id)
             await db.collection(COL.ORDERS)
                 .where({ _id: _.in(chunkIds) })
-                .update({ data: { memberId: targetMemberId, memberName: targetName } })
+                .update({ data: { memberId: virtualMemberId, memberName: virtualName } })
         }
     }
 
-    // 2. 合并个人点餐统计（lunch_user_menu_stats，_id 格式: groupId_memberId_menuId）
-    const virtualStats = await fetchAll(db.collection(COL.USER_STATS), { groupId: GROUP_ID, memberId: virtualMemberId })
-    for (const vs of virtualStats) {
-        const newId = `${GROUP_ID}_${targetMemberId}_${vs.menuId}`
+    // 2. 合并个人点餐统计：把目标微信成员的统计转移到虚拟成员
+    const targetStats = await fetchAll(db.collection(COL.USER_STATS), { groupId: GROUP_ID, memberId: targetMemberId })
+    for (const ts of targetStats) {
+        const newId = `${GROUP_ID}_${virtualMemberId}_${ts.menuId}`
         const existing = await db.collection(COL.USER_STATS).doc(newId).get().catch(() => ({ data: null }))
         if (existing.data) {
-            // 合并：count 累加，lastAt 取较大值
-            const mergedCount = (existing.data.count || 0) + (vs.count || 0)
-            const mergedLastAt = (vs.lastAt && existing.data.lastAt)
-                ? (new Date(vs.lastAt) > new Date(existing.data.lastAt) ? vs.lastAt : existing.data.lastAt)
-                : (vs.lastAt || existing.data.lastAt)
+            const mergedCount = (existing.data.count || 0) + (ts.count || 0)
+            const mergedLastAt = (ts.lastAt && existing.data.lastAt)
+                ? (new Date(ts.lastAt) > new Date(existing.data.lastAt) ? ts.lastAt : existing.data.lastAt)
+                : (ts.lastAt || existing.data.lastAt)
             await db.collection(COL.USER_STATS).doc(newId).update({
                 data: { count: mergedCount, lastAt: mergedLastAt }
             })
-            await db.collection(COL.USER_STATS).doc(vs._id).remove()
+            await db.collection(COL.USER_STATS).doc(ts._id).remove()
         } else {
-            // 直接改 _id 和 memberId：删旧建新
             await db.collection(COL.USER_STATS).doc(newId).set({
                 data: {
                     groupId: GROUP_ID,
-                    memberId: targetMemberId,
-                    menuId: vs.menuId,
-                    count: vs.count || 0,
-                    lastAt: vs.lastAt || null,
+                    memberId: virtualMemberId,
+                    menuId: ts.menuId,
+                    count: ts.count || 0,
+                    lastAt: ts.lastAt || null,
                 }
             })
-            await db.collection(COL.USER_STATS).doc(vs._id).remove()
+            await db.collection(COL.USER_STATS).doc(ts._id).remove()
         }
     }
 
-    // 3. 删除虚拟成员
-    await db.collection(COL.MEMBERS).doc(virtualMemberId).remove()
+    // 3. 更新虚拟成员：挂目标 openid，isVirtual=false，保留目标 role，avatar 取舍
+    const update = {
+        openid: target.openid,
+        isVirtual: false,
+        role: target.role || ROLE.MEMBER,
+        nickName: target.nickName || virtual.nickName || '',
+        privacyAgreed: target.privacyAgreed || false,
+    }
+    if (target.avatar) {
+        update.avatar = target.avatar
+    }
+    await db.collection(COL.MEMBERS).doc(virtualMemberId).update({ data: update })
 
-    // 4. 触发成员时间戳 + 订单时间戳（订单 memberId 变了）
+    // 4. 删除目标微信成员记录
+    await db.collection(COL.MEMBERS).doc(targetMemberId).remove()
+
+    // 5. 触发成员时间戳 + 订单时间戳（订单 memberId 变了）
     await updateGroupTimestamp('membersTimestamp')
     try {
         await db.collection(COL.GROUPS).doc(GROUP_ID).update({ data: { ordersTimestamp: db.serverDate() } })
     } catch (e) { console.error('touch ordersTimestamp error:', e) }
 
-    return { code: 0, data: { mergedOrders: virtualOrders.length, mergedStats: virtualStats.length } }
+    const updated = (await db.collection(COL.MEMBERS).doc(virtualMemberId).get()).data
+    return { code: 0, data: { member: updated, mergedOrders: targetOrders.length, mergedStats: targetStats.length } }
 }
 
 // 用户更新自己的头像和昵称（微信平台限制：必须用户主动设置）

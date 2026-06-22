@@ -101,6 +101,7 @@ exports.main = async (event, context) => {
         getHistoryOrders,
         importFromXlsx,
         getUserMenuStats,
+        rebuildOrderRelations,
     }
 
     const fn = handlers[action]
@@ -164,6 +165,7 @@ async function getInitData(event, openid) {
     // 内联 joinGroup: 根据 openid 查找或创建成员，返回给前端
     let currentMember = null
     let memberRole = ROLE.MEMBER
+    let isNew = false
     try {
         const { data: existingMembers } = await db.collection(COL.MEMBERS)
             .where({ groupId: GROUP_ID, openid })
@@ -183,7 +185,7 @@ async function getInitData(event, openid) {
                 const newMember = {
                     groupId: GROUP_ID,
                     openid,
-                    name: `成员${new Date().getMilliseconds()}`,
+                    name: '',
                     nickName: '',
                     avatar: '',
                     role: ROLE.MEMBER,
@@ -194,6 +196,7 @@ async function getInitData(event, openid) {
                 const addRes = await db.collection(COL.MEMBERS).add({ data: newMember })
                 currentMember = { ...newMember, _id: addRes._id }
                 membersResult.data.push(currentMember)
+                isNew = true
                 await _touchMenuAndMembersTimestamp()
             }
         }
@@ -213,6 +216,7 @@ async function getInitData(event, openid) {
             members: membersResult.data,
             member: currentMember,
             role: memberRole,
+            isNew,
             groupId: GROUP_ID,
             recentTimestamp: groupData.ordersTimestamp || null,
             menuTimestamp: groupData.menuTimestamp || null,
@@ -1209,6 +1213,79 @@ async function importOrders(event, openid) {
     }
 
     return { code: 0, data: { count: toInsert.length, errors: errorCount, skipped: skippedCount, skippedDetails } }
+}
+
+async function rebuildOrderRelations(event, openid) {
+    const caller = await getMemberByOpenid(openid)
+    if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
+
+    const allMembers = await fetchAll(db.collection(COL.MEMBERS), { groupId: GROUP_ID })
+    const memberByName = {}
+    allMembers.forEach(m => { memberByName[m.name] = m._id })
+
+    const allMenu = await fetchAll(db.collection(COL.MENU), { groupId: GROUP_ID })
+    const menuByKey = {}
+    const menuByName = {}
+    allMenu.forEach(it => {
+        const key = (it.supplier || '') + '|' + it.name
+        menuByKey[key] = it._id
+        if (!menuByName[it.name]) menuByName[it.name] = it._id
+    })
+
+    const allOrders = await fetchAll(db.collection(COL.ORDERS), { groupId: GROUP_ID })
+    const toUpdate = []
+    let memberFixed = 0
+    let menuFixed = 0
+    let memberNotFound = 0
+    let menuNotFound = 0
+
+    for (const order of allOrders) {
+        const update = {}
+        let changed = false
+
+        const matchedMemberId = memberByName[order.memberName]
+        if (matchedMemberId && order.memberId !== matchedMemberId) {
+            update.memberId = matchedMemberId
+            memberFixed++
+            changed = true
+        } else if (!matchedMemberId && order.memberName) {
+            memberNotFound++
+        }
+
+        const menuKey = (order.supplier || '') + '|' + order.menuName
+        const matchedMenuId = menuByKey[menuKey] || menuByName[order.menuName]
+        if (matchedMenuId && order.menuId !== matchedMenuId) {
+            update.menuId = matchedMenuId
+            menuFixed++
+            changed = true
+        } else if (!matchedMenuId && order.menuName) {
+            menuNotFound++
+        }
+
+        if (changed) toUpdate.push({ orderId: order._id, update })
+    }
+
+    for (let i = 0; i < toUpdate.length; i += 100) {
+        const batch = toUpdate.slice(i, i + 100)
+        await Promise.all(batch.map(u =>
+            db.collection(COL.ORDERS).doc(u.orderId).update({ data: u.update })
+        ))
+    }
+
+    await db.collection(COL.USER_STATS).where({ groupId: GROUP_ID }).remove()
+    await _updateOrdersTimestamp()
+
+    return {
+        code: 0,
+        data: {
+            totalOrders: allOrders.length,
+            memberFixed,
+            menuFixed,
+            memberNotFound,
+            menuNotFound,
+            updated: toUpdate.length,
+        }
+    }
 }
 
 async function downloadConfirmed(event, openid) {

@@ -340,13 +340,16 @@ export function useHome() {
     async function saveName() {
         if (saving.value) return
         const name = editingName.value.trim()
+        if (!name) {
+            uni.showToast({ title: '姓名不能为空', icon: 'none' })
+            return
+        }
         if (!store.member) return
         saving.value = true
+        const oldName = store.member.name
         try {
-            // 1. 保存姓名
-            await menuAction('updateMemberName', { memberId: store.member._id, name })
             store.member.name = name
-            // 2. 头像变了：上传到云存储并更新 member.avatar
+            await menuAction('updateMemberName', { memberId: store.member._id, name })
             if (avatarChanged.value && editingAvatar.value) {
                 const cloudPath = `lunch/avatar_${store.member._id}_${Date.now()}.jpg`
                 const uploadRes = await wx.cloud.uploadFile({
@@ -366,6 +369,9 @@ export function useHome() {
             showWelcomeDialog.value = false
             uni.showToast({ title: '已保存', icon: 'success' })
         } catch (e: any) {
+            if (store.member) {
+                store.member.name = oldName
+            }
             uni.showToast({ title: e.message || '保存失败', icon: 'none' })
         } finally {
             saving.value = false
@@ -379,10 +385,27 @@ export function useHome() {
         avatarChanged.value = true
     }
 
-    function skipWelcome() {
-        showWelcomeDialog.value = false
-        editingAvatar.value = ''
-        avatarChanged.value = false
+    async function skipWelcome() {
+        if (saving.value) return
+        if (!store.member) return
+        saving.value = true
+        const autoName = `用户${Date.now()}`
+        const oldName = store.member.name
+        try {
+            store.member.name = autoName
+            await menuAction('updateMemberName', { memberId: store.member._id, name: autoName })
+            saveSession({ groupId: store.member.groupId, role: store.member.role, member: store.member })
+            showWelcomeDialog.value = false
+            editingAvatar.value = ''
+            avatarChanged.value = false
+        } catch (e: any) {
+            if (store.member) {
+                store.member.name = oldName
+            }
+            uni.showToast({ title: e.message || '保存失败', icon: 'none' })
+        } finally {
+            saving.value = false
+        }
     }
 
     function openNameEdit() {

@@ -53,6 +53,7 @@ export function useDataManage() {
     const backupStep = ref<'list' | 'preview' | 'confirm'>('list')
     const selectedBackup = ref<any>(null)
     const backingUp = ref(false)
+    const rebuilding = ref(false)
     const saving = ref(false)
     const realtime = useRealtimeWatch()
 
@@ -1149,6 +1150,30 @@ export function useDataManage() {
         }
     }
 
+    async function rebuildRelations() {
+        const { confirm } = await uni.showModal({
+            title: '重置订单关联',
+            content: '将根据成员姓名和餐品名称重新匹配所有订单的内部关联，并清除个人点餐统计（下次点餐自动重建）。确认？',
+        })
+        if (!confirm) return
+        rebuilding.value = true
+        try {
+            const res = await orderAction('rebuildOrderRelations')
+            if (res.result.code === 0) {
+                const d = res.result.data
+                let content = `扫描 ${d.totalOrders} 条订单\n修复成员关联 ${d.memberFixed} 条\n修复菜单关联 ${d.menuFixed} 条`
+                if (d.memberNotFound) content += `\n⚠ ${d.memberNotFound} 条未找到对应成员`
+                if (d.menuNotFound) content += `\n⚠ ${d.menuNotFound} 条未找到对应餐品`
+                uni.showModal({ title: '重置完成', content, showCancel: false })
+                await loadData()
+            }
+        } catch (e: any) {
+            uni.showToast({ title: e.message || '重置失败', icon: 'none' })
+        } finally {
+            rebuilding.value = false
+        }
+    }
+
     async function deleteMember(member: any) {
         if (member.role === 'creator') return
         const { confirm } = await uni.showModal({
@@ -1270,8 +1295,8 @@ export function useDataManage() {
         const virtualName = mergingMember.value.name || mergingMember.value.nickName || '未命名'
         const targetName = target?.name || target?.nickName || '未命名'
         const { confirm } = await uni.showModal({
-            title: '确认合帐',
-            content: `将虚拟成员「${virtualName}」的所有订单和点餐统计转移到「${targetName}」，虚拟成员将被删除。确定？`,
+            title: '确认关联',
+            content: `将微信成员「${targetName}」的订单和统计转移到「${virtualName}」，保留「${virtualName}」并挂上微信账号，「${targetName}」记录将被删除。确定？`,
         })
         if (!confirm) return
         merging.value = true
@@ -1281,19 +1306,23 @@ export function useDataManage() {
                 targetMemberId: mergeTargetId.value,
             })
             if (res.result.code === 0) {
-                const { mergedOrders, mergedStats } = res.result.data
-                // 从本地 members 列表移除虚拟成员
-                store.members = store.members.filter((m: any) => m._id !== mergingMember.value._id)
+                const { member: mergedMember, mergedOrders } = res.result.data
+                // 从本地 members 列表移除目标微信成员
+                store.members = store.members.filter((m: any) => m._id !== mergeTargetId.value)
+                // 若被删的微信成员是当前登录用户，更新 store.member 为合并后的成员
+                if (store.member?._id === mergeTargetId.value) {
+                    setStore({ member: mergedMember, role: mergedMember.role })
+                    saveSession({ groupId: mergedMember.groupId, role: mergedMember.role, member: mergedMember })
+                }
                 showMergeDialog.value = false
                 showNameEditDialog.value = false
-                uni.showToast({ title: `合帐成功（订单${mergedOrders}条）`, icon: 'success' })
-                // 订单数据变了，重新加载
+                uni.showToast({ title: `关联成功（订单${mergedOrders}条）`, icon: 'success' })
                 await loadData()
             } else {
-                throw new Error(res.result.msg || '合帐失败')
+                throw new Error(res.result.msg || '关联失败')
             }
         } catch (e: any) {
-            uni.showToast({ title: e.message || '合帐失败', icon: 'none' })
+            uni.showToast({ title: e.message || '关联失败', icon: 'none' })
         } finally {
             merging.value = false
         }
@@ -1540,6 +1569,8 @@ export function useDataManage() {
         selectBackup,
         confirmRestore,
         restoreBackup,
+        rebuilding,
+        rebuildRelations,
         toggleHistoryPending,
         toggleHistoryConfirmed,
         loadMoreHistoryPending,
