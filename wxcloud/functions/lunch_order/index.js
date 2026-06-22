@@ -53,7 +53,20 @@ async function getMemberByOpenid(openid) {
     if (data[0]) return data[0]
     const groupData = (await db.collection(COL.GROUPS).doc(GROUP_ID).get()).data
     if (groupData && groupData.creatorId === openid) {
-        return { _id: 'recovered', groupId: GROUP_ID, openid, role: ROLE.CREATOR, name: 'creator' }
+        const now = db.serverDate()
+        const member = {
+            groupId: GROUP_ID,
+            openid,
+            name: '',
+            nickName: '',
+            avatar: '',
+            role: ROLE.CREATOR,
+            isVirtual: false,
+            privacyAgreed: false,
+            joinedAt: now,
+        }
+        const { _id } = await db.collection(COL.MEMBERS).add({ data: member })
+        return { ...member, _id }
     }
     return null
 }
@@ -93,6 +106,22 @@ function csvEscape(field) {
 
 function buildCsvLine(fields) {
     return fields.map(csvEscape).join(',')
+}
+
+let _collectionsEnsured = false
+async function ensureCollections() {
+    if (_collectionsEnsured) return
+    const required = [COL.ORDERS, COL.MENU, COL.MEMBERS, COL.MONTHLY_STATS, COL.GROUPS, COL.USER_STATS, COL.AUDIT_LOGS]
+    for (const name of required) {
+        try {
+            await db.createCollection(name)
+        } catch (e) {
+            if (!e.message || !e.message.includes('already exists')) {
+                console.warn(`createCollection ${name}:`, e.message)
+            }
+        }
+    }
+    _collectionsEnsured = true
 }
 
 exports.main = async (event, context) => {
@@ -145,6 +174,7 @@ exports.main = async (event, context) => {
 }
 
 async function getInitData(event, openid) {
+    await ensureCollections()
     await _autoCancelExpiredPending()
     const today = getToday()
     const yearMonth = today.substring(0, 7)
@@ -204,13 +234,9 @@ async function getInitData(event, openid) {
             currentMember = existingMembers[0]
             memberRole = currentMember.role || ROLE.MEMBER
         } else {
-            // 检查是否是组织创建者
             const creatorMatch = groupData && groupData.creatorId === openid
-            if (creatorMatch) {
-                currentMember = { _id: 'recovered', groupId: GROUP_ID, openid, role: ROLE.CREATOR, name: 'creator' }
-                memberRole = ROLE.CREATOR
-            } else if (openid) {
-                // 新成员: 自动加入（与 joinGroup 行为一致）
+            const role = creatorMatch ? ROLE.CREATOR : ROLE.MEMBER
+            if (openid) {
                 const now2 = db.serverDate()
                 const newMember = {
                     groupId: GROUP_ID,
@@ -218,13 +244,14 @@ async function getInitData(event, openid) {
                     name: '',
                     nickName: '',
                     avatar: '',
-                    role: ROLE.MEMBER,
+                    role,
                     isVirtual: false,
                     privacyAgreed: false,
                     joinedAt: now2,
                 }
                 const addRes = await db.collection(COL.MEMBERS).add({ data: newMember })
                 currentMember = { ...newMember, _id: addRes._id }
+                memberRole = role
                 membersResult.data.push(currentMember)
                 isNew = true
                 await _touchMenuAndMembersTimestamp()
@@ -439,7 +466,7 @@ async function _mergePublicStats(menu) {
 // 合并当前用户对每道菜的个人点餐统计（userCount/userLastAt），用于"最近点过"个人化排序
 async function _mergeUserStats(menu, openid) {
     const caller = await getMemberByOpenid(openid).catch(() => null)
-    if (!caller || !caller._id || caller._id === 'recovered') return menu
+    if (!caller || !caller._id) return menu
     const { data: stats } = await db.collection(COL.USER_STATS)
         .where({ groupId: GROUP_ID, memberId: caller._id })
         .get()
@@ -457,7 +484,7 @@ async function _mergeUserStats(menu, openid) {
 
 // upsert 当前用户对某道菜的个人点餐统计（确定性 _id 避免重复）
 async function _upsertUserStat(memberId, menuId, now) {
-    if (!memberId || memberId === 'recovered') return
+    if (!memberId) return
     const statId = `${GROUP_ID}_${memberId}_${menuId}`
     const existing = await db.collection(COL.USER_STATS).doc(statId).get().catch(() => ({ data: null }))
     if (existing.data) {
@@ -546,7 +573,7 @@ async function submitOrder(event, openid) {
     // 同时 upsert 发起人的个人点餐统计（createdBy=我），用于"最近点过"个人化排序
     // 失败不阻断下单主流程
     const caller = await getMemberByOpenid(openid).catch(() => null)
-    const callerMemberId = caller && caller._id && caller._id !== 'recovered' ? caller._id : null
+    const callerMemberId = caller && caller._id ? caller._id : null
     await Promise.all([
         db.collection(COL.MENU).doc(menuId).update({
             data: { lastOrderedAt: now, orderCount: _.inc(1) },
