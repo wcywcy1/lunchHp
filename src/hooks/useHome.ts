@@ -189,6 +189,32 @@ export function useHome() {
                 }
             }
         })
+        const isAdminOrCreator = store.role === 'admin' || store.role === 'creator'
+        if (isAdminOrCreator) {
+            realtime.watchMembers({
+                onInit: (members: any[]) => {
+                    setStore({ members })
+                    setCache(CACHE_KEYS.MEMBERS, members)
+                },
+                onPatch: (changes: any[]) => {
+                    if (!changes || changes.length === 0) return
+                    const members = [...(store.members || [])]
+                    for (const c of changes) {
+                        const idx = members.findIndex((m: any) => m._id === c.doc._id)
+                        if (c.queueType === 'add' || c.queueType === 'init') {
+                            if (idx < 0) members.push(c.doc)
+                        } else if (c.queueType === 'update' || c.queueType === 'replace') {
+                            if (idx >= 0) members[idx] = c.doc
+                        } else if (c.queueType === 'remove') {
+                            if (idx >= 0) members.splice(idx, 1)
+                        }
+                    }
+                    setStore({ members })
+                    setCache(CACHE_KEYS.MEMBERS, members)
+                },
+                onError: () => { orderAction('getRecentMembers').then((res: any) => { if (res.result.code === 0) { setStore({ members: res.result.data }); setCache(CACHE_KEYS.MEMBERS, res.result.data) } }).catch(() => {}) }
+            })
+        }
     }
 
     const showNoticeBanner = computed(() => noticeContent.value.length > 0)

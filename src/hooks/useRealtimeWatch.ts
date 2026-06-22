@@ -12,11 +12,25 @@ interface OrderWatchCallbacks {
     onError?: () => void
 }
 
+interface MemberChange {
+    queueType: string
+    doc: any
+}
+
+interface MemberWatchCallbacks {
+    onInit?: (members: any[]) => void
+    onPatch?: (changes: MemberChange[]) => void
+    onError?: () => void
+}
+
 export function useRealtimeWatch() {
     let orderWatcher: WatcherRef | null = null
     let groupWatcher: WatcherRef | null = null
+    let memberWatcher: WatcherRef | null = null
     let orderRetryTimer: any = null
     let orderRetryCount = 0
+    let memberRetryTimer: any = null
+    let memberRetryCount = 0
 
     function watchTodayOrders(callbacks: OrderWatchCallbacks | ((snapshot: any) => void)) {
         closeOrderWatcherWithRetry()
@@ -72,6 +86,39 @@ export function useRealtimeWatch() {
             })
     }
 
+    function watchMembers(callbacks: MemberWatchCallbacks) {
+        closeMemberWatcher()
+        const db = wx.cloud.database()
+
+        const startWatcher = () => {
+            memberWatcher = db.collection(COLLECTIONS.MEMBERS)
+                .where({ groupId: GROUP_ID })
+                .watch({
+                    onChange: (snapshot: any) => {
+                        memberRetryCount = 0
+                        if (snapshot.type === 'init') {
+                            if (callbacks.onInit) callbacks.onInit(snapshot.docs || [])
+                            return
+                        }
+                        if (callbacks.onPatch && snapshot.docChanges && snapshot.docChanges.length > 0) {
+                            callbacks.onPatch(snapshot.docChanges.map((c: any) => ({
+                                queueType: c.queueType || c.dataType || 'update',
+                                doc: c.doc,
+                            })))
+                        }
+                    },
+                    onError: (err: any) => {
+                        console.error('[watchMembers] error:', err)
+                        memberWatcher = null
+                        if (callbacks.onError) callbacks.onError()
+                        const delay = Math.min(30000 * Math.pow(2, memberRetryCount++), 300000)
+                        memberRetryTimer = setTimeout(startWatcher, delay)
+                    },
+                })
+        }
+        startWatcher()
+    }
+
     function closeOrderWatcherWithRetry() {
         if (orderRetryTimer) {
             clearTimeout(orderRetryTimer)
@@ -95,16 +142,31 @@ export function useRealtimeWatch() {
         }
     }
 
+    function closeMemberWatcher() {
+        if (memberRetryTimer) {
+            clearTimeout(memberRetryTimer)
+            memberRetryTimer = null
+        }
+        memberRetryCount = 0
+        if (memberWatcher) {
+            memberWatcher.close()
+            memberWatcher = null
+        }
+    }
+
     function closeAll() {
         closeOrderWatcherWithRetry()
         closeGroupWatcher()
+        closeMemberWatcher()
     }
 
     return {
         watchTodayOrders,
         watchGroupNotice,
+        watchMembers,
         closeOrderWatcher,
         closeGroupWatcher,
+        closeMemberWatcher,
         closeAll,
     }
 }
