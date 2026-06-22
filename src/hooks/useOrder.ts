@@ -140,6 +140,11 @@ export function useOrder(): OrderReturn {
             uni.showToast({ title: '请先登录', icon: 'none' })
             return
         }
+        if (!store.member.name) {
+            uni.showToast({ title: '请先设置姓名', icon: 'none' })
+            setTimeout(() => { uni.switchTab({ url: '/pages/home/index' }) }, 500)
+            return
+        }
 
         const memberId = orderFor.value === 'self'
             ? store.member._id
@@ -198,6 +203,12 @@ export function useOrder(): OrderReturn {
                 }, 1000)
             } else if (res.result.code === 409 || (res.result.msg && res.result.msg.includes('已提交'))) {
                 uni.showToast({ title: '已提交，请联系管理员', icon: 'none', duration: 2000 })
+            } else if (res.result.code === 403) {
+                uni.showToast({ title: '请先登录', icon: 'none' })
+                store.member = null
+                store.role = null
+                uni.removeStorageSync('lunch_session')
+                setTimeout(() => { uni.switchTab({ url: '/pages/home/index' }) }, 500)
             } else {
                 throw new Error(res.result.msg)
             }

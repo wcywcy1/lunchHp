@@ -507,6 +507,9 @@ async function submitOrder(event, openid) {
     const { date, memberId, memberName, menuId, menuName, supplier, price, note } = event
     if (!date || !memberId || !menuId) return { code: 400, msg: 'missing required fields' }
 
+    const { data: memberDoc } = await db.collection(COL.MEMBERS).doc(memberId).get().catch(() => ({ data: null }))
+    if (!memberDoc) return { code: 403, msg: '成员不存在，请重新登录' }
+
     const { data: existing } = await db.collection(COL.ORDERS)
         .where({
             groupId: GROUP_ID,
