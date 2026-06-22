@@ -13,8 +13,48 @@ const COL = {
     MENU: 'lunch_menu',
     ORDERS: 'lunch_orders',
     USER_STATS: 'lunch_user_menu_stats',
+    AUDIT_LOGS: 'lunch_audit_logs',
 }
 const ROLE = { CREATOR: 'creator', ADMIN: 'admin', MEMBER: 'member' }
+
+const AUDIT_ACTION = {
+    MEMBER_NAME: 'updateMemberName',
+    MEMBER_PROFILE: 'updateMemberProfile',
+    MEMBER_ADD: 'addMember',
+    MEMBER_DELETE: 'deleteMember',
+    MEMBER_IMPORT: 'importMembers',
+    MEMBER_LINK: 'linkVirtualMember',
+    MEMBER_LINK_ADMIN: 'adminLinkVirtualMember',
+    MENU_UPDATE: 'updateMenuItem',
+    MENU_DELETE: 'deleteMenuItem',
+    MENU_ADD: 'addMenuItem',
+    MENU_IMPORT: 'importMenuItems',
+    MENU_VISIBLE: 'toggleMenuVisible',
+    ORDERS_IMPORT: 'importOrders',
+}
+
+async function writeAuditLog(openid, action, targetType, targetId, oldValue, newValue, extra) {
+    try {
+        const now = new Date()
+        const expireAt = new Date(now.getTime() + 2 * 365 * 24 * 60 * 60 * 1000)
+        await db.collection(COL.AUDIT_LOGS).add({
+            data: {
+                groupId: GROUP_ID,
+                operatorOpenid: openid || '',
+                action,
+                targetType,
+                targetId: targetId || '',
+                oldValue: oldValue || null,
+                newValue: newValue || null,
+                extra: extra || null,
+                createdAt: now,
+                expireAt,
+            }
+        })
+    } catch (e) {
+        console.error('writeAuditLog failed:', e && e.message)
+    }
+}
 
 async function getMemberByOpenid(openid) {
     const { data } = await db.collection(COL.MEMBERS)
@@ -73,6 +113,7 @@ exports.main = async (event, context) => {
         toggleVisible,
         batchToggleVisibleBySupplier,
         parseXlsx,
+        parseCsv,
         setNotice,
         clearNotice,
         // 通用模式：选组/创建组
@@ -326,7 +367,9 @@ async function updateMemberName(event, openid) {
     const isAdminOrCreator = checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)
     if (!isSelf && !isAdminOrCreator) return { code: 403, msg: 'no permission' }
 
-    await db.collection(COL.MEMBERS).doc(memberId).update({ data: { name: String(name).trim() } })
+    const newName = String(name).trim()
+    await db.collection(COL.MEMBERS).doc(memberId).update({ data: { name: newName } })
+    await writeAuditLog(openid, AUDIT_ACTION.MEMBER_NAME, 'member', memberId, { name: target.name }, { name: newName }, null)
     await updateGroupTimestamp('membersTimestamp')
     return { code: 0 }
 }
@@ -352,6 +395,7 @@ async function addVirtualMember(event, openid) {
     }
     const { _id } = await db.collection(COL.MEMBERS).add({ data: member })
     member._id = _id
+    await writeAuditLog(openid, AUDIT_ACTION.MEMBER_ADD, 'member', _id, null, { name: member.name }, null)
     await updateGroupTimestamp('membersTimestamp')
     return { code: 0, data: member }
 }
@@ -390,6 +434,7 @@ async function importMembers(event, openid) {
         inserted += chunk.length
     }
 
+    await writeAuditLog(openid, AUDIT_ACTION.MEMBER_IMPORT, 'member', '', null, { count: inserted, mode }, null)
     await updateGroupTimestamp('membersTimestamp')
     if (mode === 'rewrite') {
         await db.collection(COL.GROUPS).doc(GROUP_ID).update({
@@ -419,8 +464,10 @@ async function linkVirtualMember(event, openid) {
     const virtualName = virtual.name || virtual.nickName || ''
 
     // 1. 转移订单：把当前微信成员的订单 memberId/memberName 改到虚拟成员（保留张三的历史）
+    let callerOrderCount = 0
     if (caller._id && caller._id !== 'recovered') {
         const callerOrders = await fetchAll(db.collection(COL.ORDERS), { groupId: GROUP_ID, memberId: caller._id })
+        callerOrderCount = callerOrders.length
         if (callerOrders.length > 0) {
             const BATCH = 100
             for (let i = 0; i < callerOrders.length; i += BATCH) {
@@ -480,6 +527,9 @@ async function linkVirtualMember(event, openid) {
         await db.collection(COL.MEMBERS).doc(caller._id).remove()
     }
 
+    await writeAuditLog(openid, AUDIT_ACTION.MEMBER_LINK, 'member', virtualMemberId,
+        { callerId: caller._id !== 'recovered' ? caller._id : null, callerName: caller.name, callerAvatar: caller.avatar, virtualSnapshot: virtual },
+        { memberId: virtualMemberId }, { ordersMoved: callerOrderCount })
     await updateGroupTimestamp('membersTimestamp')
     try {
         await db.collection(COL.GROUPS).doc(GROUP_ID).update({ data: { ordersTimestamp: db.serverDate() } })
@@ -565,6 +615,10 @@ async function adminLinkVirtualMember(event, openid) {
     // 4. 删除目标微信成员记录
     await db.collection(COL.MEMBERS).doc(targetMemberId).remove()
 
+    await writeAuditLog(openid, AUDIT_ACTION.MEMBER_LINK_ADMIN, 'member', virtualMemberId,
+        { targetSnapshot: target, virtualSnapshot: virtual },
+        { memberId: virtualMemberId }, { ordersMoved: targetOrders.length, statsMoved: targetStats.length })
+
     // 5. 触发成员时间戳 + 订单时间戳（订单 memberId 变了）
     await updateGroupTimestamp('membersTimestamp')
     try {
@@ -589,7 +643,9 @@ async function updateMemberProfile(event, openid) {
     if (nickName !== undefined) update.nickName = String(nickName).trim()
     if (Object.keys(update).length === 0) return { code: 400, msg: 'nothing to update' }
 
+    const oldSnapshot = { avatar: caller.avatar, nickName: caller.nickName }
     await db.collection(COL.MEMBERS).doc(caller._id).update({ data: update })
+    await writeAuditLog(openid, AUDIT_ACTION.MEMBER_PROFILE, 'member', caller._id, oldSnapshot, update, null)
     await updateGroupTimestamp('membersTimestamp')
 
     const updated = (await db.collection(COL.MEMBERS).doc(caller._id).get()).data
@@ -607,6 +663,7 @@ async function deleteMember(event, openid) {
     if (!target) return { code: 404, msg: 'member not found' }
     if (target.role === ROLE.CREATOR) return { code: 400, msg: 'cannot delete creator' }
 
+    await writeAuditLog(openid, AUDIT_ACTION.MEMBER_DELETE, 'member', memberId, target, null, null)
     await db.collection(COL.MEMBERS).doc(memberId).remove()
     await updateGroupTimestamp('membersTimestamp')
     return { code: 0 }
@@ -686,6 +743,7 @@ async function addMenuItem(event, openid) {
     }
     const { _id } = await db.collection(COL.MENU).add({ data: item })
     item._id = _id
+    await writeAuditLog(openid, AUDIT_ACTION.MENU_ADD, 'menu', _id, null, item, null)
     await updateGroupTimestamp('menuTimestamp')
     return { code: 0, data: item }
 }
@@ -730,6 +788,7 @@ async function importMenuItems(event, openid) {
         inserted += chunk.length
     }
 
+    await writeAuditLog(openid, AUDIT_ACTION.MENU_IMPORT, 'menu', '', null, { count: inserted, mode }, null)
     await updateGroupTimestamp('menuTimestamp')
     return { code: 0, data: { count: inserted } }
 }
@@ -748,7 +807,9 @@ async function updateMenuItem(event, openid) {
     if (photo !== undefined) update.photo = photo
     if (Object.keys(update).length === 0) return { code: 400, msg: 'nothing to update' }
 
+    const oldItem = (await db.collection(COL.MENU).doc(menuId).get()).data
     await db.collection(COL.MENU).doc(menuId).update({ data: update })
+    await writeAuditLog(openid, AUDIT_ACTION.MENU_UPDATE, 'menu', menuId, oldItem, update, null)
     await updateGroupTimestamp('menuTimestamp')
     return { code: 0 }
 }
@@ -760,6 +821,9 @@ async function deleteMenuItem(event, openid) {
     const caller = await getMemberByOpenid(openid)
     if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
 
+    const oldItem = (await db.collection(COL.MENU).doc(menuId).get()).data
+    if (!oldItem) return { code: 404, msg: 'menu item not found' }
+    await writeAuditLog(openid, AUDIT_ACTION.MENU_DELETE, 'menu', menuId, oldItem, null, null)
     await db.collection(COL.MENU).doc(menuId).remove()
     await updateGroupTimestamp('menuTimestamp')
     return { code: 0 }
@@ -796,6 +860,8 @@ async function toggleVisible(event, openid) {
         await db.collection(COL.MENU).doc(menuId).update({ data: { visible: false, sortNo: maxSortNo + 10 } })
     }
 
+    await writeAuditLog(openid, AUDIT_ACTION.MENU_VISIBLE, 'menu', menuId,
+        { visible: target.visible, sortNo: target.sortNo }, { visible: newVisible }, null)
     await updateGroupTimestamp('menuTimestamp')
     return { code: 0, data: { visible: newVisible } }
 }
@@ -869,6 +935,71 @@ async function parseXlsx(event) {
     )
 
     return { code: 0, data: { rows } }
+}
+
+async function parseCsv(event, openid) {
+    const { fileID } = event
+    if (!fileID) return { code: 400, msg: 'missing fileID' }
+
+    try {
+        const downloadRes = await cloud.downloadFile({ fileID })
+        const buf = Buffer.isBuffer(downloadRes.fileContent)
+            ? downloadRes.fileContent
+            : Buffer.from(downloadRes.fileContent)
+
+        let text = ''
+        if (buf.length >= 3 && buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) {
+            text = buf.slice(3).toString('utf-8')
+        } else if (buf.length >= 2 && buf[0] === 0xFF && buf[1] === 0xFE) {
+            text = buf.slice(2).toString('utf-16le')
+        } else if (buf.length >= 2 && buf[0] === 0xFE && buf[1] === 0xFF) {
+            text = buf.slice(2).toString('utf-16be')
+        } else {
+            try {
+                text = new TextDecoder('utf-8', { fatal: true }).decode(buf)
+            } catch (utf8Err) {
+                try {
+                    text = new TextDecoder('gbk').decode(buf)
+                } catch (gbkErr) {
+                    text = buf.toString('utf-8')
+                }
+            }
+        }
+
+        const rows = []
+        let row = []
+        let field = ''
+        let inQuotes = false
+        for (let i = 0; i < text.length; i++) {
+            const ch = text[i]
+            if (inQuotes) {
+                if (ch === '"') {
+                    if (i + 1 < text.length && text[i + 1] === '"') {
+                        field += '"'; i++
+                    } else {
+                        inQuotes = false
+                    }
+                } else {
+                    field += ch
+                }
+            } else {
+                if (ch === '"') { inQuotes = true }
+                else if (ch === ',') { row.push(field); field = '' }
+                else if (ch === '\r' || ch === '\n') {
+                    if (ch === '\r' && i + 1 < text.length && text[i + 1] === '\n') { i++ }
+                    row.push(field); rows.push(row); row = []; field = ''
+                } else {
+                    field += ch
+                }
+            }
+        }
+        if (field !== '' || row.length > 0) { row.push(field); rows.push(row) }
+
+        const filtered = rows.filter(r => r.some(cell => cell && String(cell).trim()))
+        return { code: 0, data: { rows: filtered } }
+    } catch (e) {
+        return { code: 500, msg: `CSV 解析失败: ${e.message || e}` }
+    }
 }
 
 async function setNotice(event, openid) {

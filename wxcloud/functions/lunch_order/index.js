@@ -14,9 +14,38 @@ const COL = {
     MONTHLY_STATS: 'lunch_monthly_stats',
     GROUPS: 'lunch_groups',
     USER_STATS: 'lunch_user_menu_stats',
+    AUDIT_LOGS: 'lunch_audit_logs',
 }
 const ROLE = { CREATOR: 'creator', ADMIN: 'admin', MEMBER: 'member' }
 const STATUS = { PENDING: 'pending', CONFIRMED: 'confirmed', CANCELLED: 'cancelled' }
+
+const AUDIT_ACTION = {
+    ORDERS_IMPORT: 'importOrders',
+    ORDERS_IMPORT_FROM_CSV: 'importFromCsv',
+}
+
+async function writeAuditLog(openid, action, targetType, targetId, oldValue, newValue, extra) {
+    try {
+        const now = new Date()
+        const expireAt = new Date(now.getTime() + 2 * 365 * 24 * 60 * 60 * 1000)
+        await db.collection(COL.AUDIT_LOGS).add({
+            data: {
+                groupId: GROUP_ID,
+                operatorOpenid: openid || '',
+                action,
+                targetType,
+                targetId: targetId || '',
+                oldValue: oldValue || null,
+                newValue: newValue || null,
+                extra: extra || null,
+                createdAt: now,
+                expireAt,
+            }
+        })
+    } catch (e) {
+        console.error('writeAuditLog failed:', e && e.message)
+    }
+}
 
 async function getMemberByOpenid(openid) {
     const { data } = await db.collection(COL.MEMBERS)
@@ -100,6 +129,7 @@ exports.main = async (event, context) => {
         getHistoryOrderCount,
         getHistoryOrders,
         importFromXlsx,
+        importFromCsv,
         getUserMenuStats,
         rebuildOrderRelations,
     }
@@ -1212,7 +1242,80 @@ async function importOrders(event, openid) {
         }
     }
 
+    await writeAuditLog(openid, AUDIT_ACTION.ORDERS_IMPORT, 'order', '', null,
+        { count: toInsert.length, mode: event.mode || '', errors: errorCount, skipped: skippedCount }, null)
     return { code: 0, data: { count: toInsert.length, errors: errorCount, skipped: skippedCount, skippedDetails } }
+}
+
+async function importFromCsv(event, openid) {
+    const { fileID, mode } = event
+    if (!fileID) return { code: 400, msg: 'missing fileID' }
+
+    const caller = await getMemberByOpenid(openid)
+    if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
+
+    try {
+        const downloadRes = await cloud.downloadFile({ fileID })
+        const buf = Buffer.isBuffer(downloadRes.fileContent)
+            ? downloadRes.fileContent
+            : Buffer.from(downloadRes.fileContent)
+
+        let text = ''
+        if (buf.length >= 3 && buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) {
+            text = buf.slice(3).toString('utf-8')
+        } else if (buf.length >= 2 && buf[0] === 0xFF && buf[1] === 0xFE) {
+            text = buf.slice(2).toString('utf-16le')
+        } else if (buf.length >= 2 && buf[0] === 0xFE && buf[1] === 0xFF) {
+            text = buf.slice(2).toString('utf-16be')
+        } else {
+            try {
+                text = new TextDecoder('utf-8', { fatal: true }).decode(buf)
+            } catch (utf8Err) {
+                try {
+                    text = new TextDecoder('gbk').decode(buf)
+                } catch (gbkErr) {
+                    text = buf.toString('utf-8')
+                }
+            }
+        }
+
+        const rows = []
+        let row = []
+        let field = ''
+        let inQuotes = false
+        for (let i = 0; i < text.length; i++) {
+            const ch = text[i]
+            if (inQuotes) {
+                if (ch === '"') {
+                    if (i + 1 < text.length && text[i + 1] === '"') {
+                        field += '"'; i++
+                    } else {
+                        inQuotes = false
+                    }
+                } else {
+                    field += ch
+                }
+            } else {
+                if (ch === '"') { inQuotes = true }
+                else if (ch === ',') { row.push(field); field = '' }
+                else if (ch === '\r' || ch === '\n') {
+                    if (ch === '\r' && i + 1 < text.length && text[i + 1] === '\n') { i++ }
+                    row.push(field); rows.push(row); row = []; field = ''
+                } else {
+                    field += ch
+                }
+            }
+        }
+        if (field !== '' || row.length > 0) { row.push(field); rows.push(row) }
+        const filtered = rows.filter(r => r.some(cell => cell && String(cell).trim()))
+
+        const result = await _importOrdersFromRows(filtered, mode || 'append', openid)
+        await writeAuditLog(openid, AUDIT_ACTION.ORDERS_IMPORT_FROM_CSV, 'order', '', null,
+            { count: (result.data && result.data.count) || 0, mode }, null)
+        return result
+    } catch (e) {
+        return { code: 500, msg: `CSV 导入失败: ${e.message || e}` }
+    }
 }
 
 async function rebuildOrderRelations(event, openid) {

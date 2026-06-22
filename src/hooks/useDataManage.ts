@@ -11,7 +11,7 @@ import { getTodayString } from '../utils/date'
 
 export function useDataManage() {
     const MAX_BATCH_COUNT = 2000
-    const MAX_BATCH_BYTES = 800 * 1024
+    const MAX_BATCH_BYTES = 400 * 1024 // 400KB，避免云函数 callFunction payload 超限
 
     function splitBatches<T>(records: T[]): T[][] {
         if (records.length === 0) return []
@@ -887,46 +887,7 @@ export function useDataManage() {
         })
     }
 
-    async function doImportOrders(filePath: string, ext: string) {
-        if (ext === 'xlsx') {
-            await doImportXlsx(filePath, 'orders')
-            return
-        }
-        const fs = wx.getFileSystemManager()
-        let content = fs.readFileSync(filePath, 'utf8') as string
-        if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1)
-        const rows = splitCsvLines(content).map(l => parseCsvLine(l))
-        if (rows.length < 2) {
-            uni.showToast({ title: '文件为空', icon: 'none' })
-            return
-        }
-        const header = rows[0]
-        const idx = mapHeader(header, ['date', 'menuName', 'memberName', 'price', 'note', 'status', 'supplier'])
-        if (idx.date === undefined || idx.menuName === undefined || idx.memberName === undefined || idx.price === undefined) {
-            uni.showToast({ title: '格式不正确，需包含日期/菜品/姓名/金额', icon: 'none' })
-            return
-        }
-        const records = rows.slice(1)
-            .filter(cols => cols[idx.date!] && cols[idx.menuName!] && cols[idx.memberName!])
-            .map(cols => {
-                let statusVal = idx.status !== undefined && cols[idx.status] ? cols[idx.status] : 'confirmed'
-                const statusMap: Record<string, string> = { '待确认': 'pending', '已确认': 'confirmed', '已取消': 'cancelled' }
-                statusVal = statusMap[statusVal] || statusVal
-                return {
-                    date: parseDate(cols[idx.date!]),
-                    menuName: cols[idx.menuName!] || '',
-                    memberName: cols[idx.memberName!] || '',
-                    price: Number(cols[idx.price!]) || 0,
-                    note: idx.note !== undefined ? (cols[idx.note] || '') : '',
-                    status: statusVal,
-                    supplier: idx.supplier !== undefined ? (cols[idx.supplier] || '') : '',
-                }
-            })
-            .filter(r => r.date)
-        if (records.length === 0) {
-            uni.showToast({ title: '无有效数据', icon: 'none' })
-            return
-        }
+    async function doImportCsvOrders(filePath: string) {
         const mode = await new Promise<'append' | 'rewrite' | ''>(resolve => {
             uni.showModal({
                 title: '导入方式',
@@ -937,34 +898,50 @@ export function useDataManage() {
             })
         })
         if (!mode) return
-        const batches = splitBatches(records)
-        let totalInserted = 0
-        let totalErrors = 0
-        let totalSkipped = 0
-        const allSkippedDetails: any[] = []
-        for (let i = 0; i < batches.length; i++) {
-            const batchMode = i === 0 ? mode : (mode === 'rewrite' ? 'rewrite_continue' : 'append')
-            const isLastBatch = i === batches.length - 1
-            const res = await orderAction('importOrders', { orders: batches[i], mode: batchMode, isLastBatch })
-            if (res.result.code === 0) {
-                totalInserted += res.result.data.count
-                totalErrors += res.result.data.errors || 0
-                totalSkipped += res.result.data.skipped || 0
-                if (res.result.data.skippedDetails) {
-                    allSkippedDetails.push(...res.result.data.skippedDetails)
+
+        uni.showLoading({ title: '上传文件...' })
+        try {
+            const cloudPath = `csv_import/${Date.now()}_${Math.random().toString(36).substr(2, 6)}.csv`
+            const uploadRes = await wx.cloud.uploadFile({ cloudPath, filePath })
+            uni.showLoading({ title: '导入中...' })
+            const res = await orderAction('importFromCsv', { fileID: uploadRes.fileID, mode })
+            try { await wx.cloud.deleteFile({ fileList: [uploadRes.fileID] }).catch(() => {}) } catch {}
+            const result = res?.result
+            if (!result) throw new Error('云函数未返回结果')
+            if (result.code === 0) {
+                const data = result.data || {}
+                const parts = [`导入${data.count || 0}条`]
+                if (data.skipped > 0) parts.push(`跳过${data.skipped}条`)
+                if (data.errors > 0) parts.push(`${data.errors}条失败`)
+                uni.showToast({ title: parts.join('，'), icon: (data.count || 0) > 0 ? 'success' : 'none' })
+                await loadData()
+                if (data.skippedDetails && data.skippedDetails.length > 0) {
+                    showSkippedDetails(data.skippedDetails)
                 }
             } else {
-                throw new Error(res.result.msg || '导入失败')
+                throw new Error(result.msg || '导入失败')
             }
+        } catch (e: any) {
+            uni.hideLoading()
+            uni.showToast({ title: e.message || '导入失败', icon: 'none', duration: 3000 })
         }
-        const parts = [`导入${totalInserted}条`]
-        if (totalSkipped > 0) parts.push(`跳过${totalSkipped}条`)
-        if (totalErrors > 0) parts.push(`${totalErrors}条失败`)
-        uni.showToast({ title: parts.join('，'), icon: totalInserted > 0 ? 'success' : 'none' })
-        await loadData()
-        if (allSkippedDetails.length > 0) {
-            showSkippedDetails(allSkippedDetails)
+    }
+
+    async function doImportOrders(filePath: string, ext: string) {
+        if (ext === 'xlsx') {
+            await doImportXlsx(filePath, 'orders')
+            return
         }
+        await doImportCsvOrders(filePath)
+    }
+
+    async function fetchCsvRowsFromCloud(filePath: string): Promise<string[][]> {
+        const cloudPath = `csv_import/${Date.now()}_${Math.random().toString(36).substr(2, 6)}.csv`
+        const uploadRes = await wx.cloud.uploadFile({ cloudPath, filePath })
+        const res = await menuAction('parseCsv', { fileID: uploadRes.fileID })
+        try { await wx.cloud.deleteFile({ fileList: [uploadRes.fileID] }).catch(() => {}) } catch {}
+        if (res.result.code !== 0) throw new Error(res.result.msg || 'CSV解析失败')
+        return res.result.data.rows || []
     }
 
     async function doImportMenu(filePath: string, ext: string) {
@@ -972,59 +949,56 @@ export function useDataManage() {
             await doImportXlsx(filePath, 'menu')
             return
         }
-        const fs = wx.getFileSystemManager()
-        let content = fs.readFileSync(filePath, 'utf8') as string
-        if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1)
-        const rows = splitCsvLines(content).map(l => parseCsvLine(l))
-        if (rows.length < 2) {
-            uni.showToast({ title: '文件为空', icon: 'none' })
-            return
-        }
-        const header = rows[0]
-        const idx = mapHeader(header, ['supplier_menu', 'menuName_menu', 'price_menu', 'visible'])
-        if (idx.supplier_menu === undefined || idx.menuName_menu === undefined) {
-            uni.showToast({ title: '格式不正确，需包含供应商/菜品名', icon: 'none' })
-            return
-        }
-        const items = rows.slice(1)
-            .filter(cols => cols[idx.supplier_menu!] && cols[idx.menuName_menu!])
-            .map(cols => ({
-                supplier: cols[idx.supplier_menu!] || '',
-                name: cols[idx.menuName_menu!] || '',
-                price: idx.price_menu !== undefined ? (Number(cols[idx.price_menu]) || 0) : 0,
-                visible: idx.visible !== undefined ? cols[idx.visible] !== '否' : true,
-            }))
-        if (items.length === 0) {
-            uni.showToast({ title: '无有效数据', icon: 'none' })
-            return
-        }
-        const mode = await new Promise<'append' | 'rewrite' | ''>(resolve => {
-            uni.showModal({
-                title: '导入方式',
-                content: '追加数据：仅导入新数据，重复跳过\n清库重写：清空所有菜单后导入',
-                confirmText: '追加',
-                cancelText: '清库重写',
-                success: res => resolve(res.confirm ? 'append' : 'rewrite'),
-            })
-        })
-        if (!mode) return
-        const batches = splitBatches(items)
-        let totalInserted = 0
-        for (let i = 0; i < batches.length; i++) {
-            const batchMode = i === 0 ? mode : (mode === 'rewrite' ? 'rewrite_continue' : 'append')
-            const res = await menuAction('importMenuItems', { items: batches[i], mode: batchMode })
-            if (res.result.code === 0) totalInserted += res.result.data.count
-            else throw new Error(res.result.msg || '导入失败')
-        }
-        uni.showToast({ title: `导入${totalInserted}条`, icon: 'success' })
+        uni.showLoading({ title: '上传文件...' })
         try {
-            const res = await menuAction('getMenuList')
-            if (res.result.code === 0) {
-                const data = res.result.data || []
-                store.menu = data
-                setCache(CACHE_KEYS.MENU, data)
+            const rows = await fetchCsvRowsFromCloud(filePath)
+            if (rows.length < 2) throw new Error('文件为空')
+            const header = rows[0]
+            const idx = mapHeader(header, ['supplier_menu', 'menuName_menu', 'price_menu', 'visible'])
+            if (idx.supplier_menu === undefined || idx.menuName_menu === undefined) {
+                throw new Error('格式不正确，需包含供应商/菜品名')
             }
-        } catch {}
+            const items = rows.slice(1)
+                .filter(cols => cols[idx.supplier_menu!] && cols[idx.menuName_menu!])
+                .map(cols => ({
+                    supplier: cols[idx.supplier_menu!] || '',
+                    name: cols[idx.menuName_menu!] || '',
+                    price: idx.price_menu !== undefined ? (Number(cols[idx.price_menu]) || 0) : 0,
+                    visible: idx.visible !== undefined ? cols[idx.visible] !== '否' : true,
+                }))
+            if (items.length === 0) throw new Error('无有效数据')
+            const mode = await new Promise<'append' | 'rewrite' | ''>(resolve => {
+                uni.showModal({
+                    title: '导入方式',
+                    content: '追加数据：仅导入新数据，重复跳过\n清库重写：清空所有菜单后导入',
+                    confirmText: '追加',
+                    cancelText: '清库重写',
+                    success: res => resolve(res.confirm ? 'append' : 'rewrite'),
+                })
+            })
+            if (!mode) return
+            const batches = splitBatches(items)
+            uni.showLoading({ title: '导入中...' })
+            let totalInserted = 0
+            for (let i = 0; i < batches.length; i++) {
+                const batchMode = i === 0 ? mode : (mode === 'rewrite' ? 'rewrite_continue' : 'append')
+                const res = await menuAction('importMenuItems', { items: batches[i], mode: batchMode })
+                if (res.result.code === 0) totalInserted += res.result.data.count
+                else throw new Error(res.result.msg || '导入失败')
+            }
+            uni.showToast({ title: `导入${totalInserted}条`, icon: 'success' })
+            try {
+                const res = await menuAction('getMenuList')
+                if (res.result.code === 0) {
+                    const data = res.result.data || []
+                    store.menu = data
+                    setCache(CACHE_KEYS.MENU, data)
+                }
+            } catch {}
+        } catch (e: any) {
+            uni.hideLoading()
+            uni.showToast({ title: e.message || '导入失败', icon: 'none', duration: 3000 })
+        }
     }
 
     async function doImportMembers(filePath: string, ext: string) {
@@ -1032,12 +1006,14 @@ export function useDataManage() {
             await doImportXlsx(filePath, 'members')
             return
         }
-        const fs = wx.getFileSystemManager()
-        let content = fs.readFileSync(filePath, 'utf8') as string
-        if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1)
-        const rows = splitCsvLines(content).map(l => parseCsvLine(l))
-        if (rows.length < 2) {
-            uni.showToast({ title: '文件为空', icon: 'none' })
+        uni.showLoading({ title: '上传文件...' })
+        let rows: string[][]
+        try {
+            rows = await fetchCsvRowsFromCloud(filePath)
+            if (rows.length < 2) throw new Error('文件为空')
+        } catch (e: any) {
+            uni.hideLoading()
+            uni.showToast({ title: e.message || '导入失败', icon: 'none', duration: 3000 })
             return
         }
         const header = rows[0]
