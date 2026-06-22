@@ -89,6 +89,12 @@ defineEmits<{
 const expanded = ref(false)
 const hiddenExpanded = ref(false)
 
+function collapse() {
+  expanded.value = false
+  hiddenExpanded.value = false
+}
+defineExpose({ collapse })
+
 interface MenuGroup {
   supplier: string
   items: any[]

@@ -60,6 +60,7 @@
       />
 
       <MemberList
+        ref="memberListRef"
         :members="members"
         :isCreator="isCreator"
         @edit-name="openNameEdit"
@@ -69,6 +70,7 @@
       />
 
       <MenuManage
+        ref="menuManageRef"
         :menuList="menuList"
         @add="openMenuAdd"
         @edit="openMenuEdit"
@@ -303,7 +305,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { onShow, onHide } from '@dcloudio/uni-app'
 import { useStore } from '../../services/store'
 import { useAuth } from '../../hooks/useAuth'
@@ -435,6 +437,9 @@ watch(showNoticeSendDialog, (val) => { if (!val) resetNoticeKb() })
 const autoBackups = computed(() => backupList.value.filter((b: any) => b.type === 'auto'))
 const manualBackups = computed(() => backupList.value.filter((b: any) => b.type === 'manual'))
 
+const memberListRef = ref()
+const menuManageRef = ref()
+
 function formatTime(ts: any) {
   if (!ts) return ''
   const d = new Date(ts)
@@ -447,7 +452,8 @@ onShow(() => {
     uni.switchTab({ url: '/pages/home/index' })
     return
   }
-  // realtime watcher 始终开启，保证管理员实时看到新订单
+  memberListRef.value?.collapse()
+  menuManageRef.value?.collapse()
   startRealtimeWatch()
   // 节流：30 秒内不重复全量加载
   const now = Date.now()

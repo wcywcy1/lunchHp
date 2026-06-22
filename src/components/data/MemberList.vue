@@ -63,6 +63,11 @@ defineEmits<{
 }>()
 
 const expanded = ref(false)
+
+function collapse() {
+  expanded.value = false
+}
+defineExpose({ collapse })
 </script>
 
 <style scoped>
