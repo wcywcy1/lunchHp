@@ -225,10 +225,15 @@ export function useHome() {
                             setStore({ members, membersTimestamp })
                             setCache(CACHE_KEYS.MEMBERS, members)
                             setCache(CACHE_KEYS.MEMBERS_TIMESTAMP, membersTimestamp)
-                            // 同步本人角色变更（如被设/撤管理员），使 TabBar/权限立即生效
                             if (store.member?._id) {
                                 const me = members.find((m: any) => m._id === store.member._id)
-                                if (me && me.role !== store.member.role) {
+                                if (!me) {
+                                    setStore({ member: null, role: null })
+                                    uni.removeStorageSync(CACHE_KEYS.SESSION)
+                                    await initApp()
+                                    return
+                                }
+                                if (me.role !== store.member.role) {
                                     setStore({ member: me, role: me.role })
                                     saveSession({ groupId: me.groupId, role: me.role, member: me })
                                 }
