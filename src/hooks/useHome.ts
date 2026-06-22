@@ -27,6 +27,7 @@ export function useHome() {
 
     let lastFreshnessCheck: number = 0
     const FRESHNESS_THROTTLE_MS = 10 * 1000
+    let _serverValidated = false
 
     // 判断通知是否是今天的（0点自动过期）
     function isNoticeToday(noticeTime: any): boolean {
@@ -90,6 +91,7 @@ export function useHome() {
                 setCache(CACHE_KEYS.MONTH_SUMMARY, monthSummary)
                 setRecentLoadTime(Date.now())
                 noticeContent.value = notice && isNoticeToday(noticeUpdatedAt) ? notice : ''
+                _serverValidated = true
                 if (member && !member.privacyAgreed) {
                     showPrivacyDialog.value = true
                 } else if (isNew && member && !member.name) {
@@ -132,7 +134,7 @@ export function useHome() {
             return
         }
         if (isInitRunning() || store.isSwitchingGroup) return
-        if (!store.member) {
+        if (!store.member || !_serverValidated) {
             await initApp()
             return
         }

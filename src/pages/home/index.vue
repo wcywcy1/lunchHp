@@ -62,16 +62,19 @@
           </button>
           <text class="welcome-avatar-hint">点击设置头像（选填）</text>
         </view>
-        <text class="welcome-tip">请输入你的姓名（选填）</text>
+        <text class="welcome-tip" @tap="welcomeFocus = true">请输入你的姓名</text>
         <input
+          ref="welcomeInputRef"
           class="welcome-input"
           v-model="editingName"
+          :focus="welcomeFocus"
           placeholder="可点键盘上方使用微信昵称"
           type="nickname"
+          @focus="welcomeFocus = true"
+          @blur="welcomeFocus = false"
           @keyboardheightchange="onWelcomeKeyboard"
         />
         <view class="modal-actions">
-          <view class="modal-btn cancel" @tap="skipWelcome"><text>跳过</text></view>
           <view class="modal-btn confirm" @tap="saveName"><text>确认</text></view>
         </view>
       </view>
@@ -82,7 +85,7 @@
 </template>
 
 <script setup lang="ts">
-import { watch } from 'vue'
+import { ref, watch } from 'vue'
 import { onShow, onHide, onPullDownRefresh } from '@dcloudio/uni-app'
 import HomeHeader from '../../components/home/HomeHeader.vue'
 import MonthlyStats from '../../components/home/MonthlyStats.vue'
@@ -132,8 +135,15 @@ const { modalStyle: welcomeModalStyle, onKeyboardHeightChange: onWelcomeKeyboard
   modalSelector: '.welcome-modal'
 })
 
+const welcomeFocus = ref(false)
+
 watch(() => showWelcomeDialog.value, (val) => {
-  if (!val) resetWelcomeKb()
+  if (!val) {
+    resetWelcomeKb()
+    welcomeFocus.value = false
+  } else {
+    setTimeout(() => { welcomeFocus.value = true }, 300)
+  }
 })
 
 onShow(() => {
