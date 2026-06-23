@@ -1,12 +1,9 @@
 <template>
   <view class="home-header">
     <view class="header-left">
-      <view class="title-row">
-        <text class="app-title">🍚 我要干饭</text>
-        <view class="group-switch" @tap="goGroupSelect">
-          <text class="group-switch-text">{{ groupName }}</text>
-          <text class="group-switch-arrow">›</text>
-        </view>
+      <view class="group-switch" @tap="goGroupSelect">
+        <text class="group-name">{{ groupName }}</text>
+        <text class="group-switch-arrow">›</text>
       </view>
       <text class="today-date">{{ todayDate }}</text>
     </view>
@@ -67,35 +64,23 @@ function goGroupSelect() {
   flex-direction: column;
   gap: 4rpx;
 }
-.title-row {
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-}
-.app-title {
-  font-size: 36rpx;
-  font-weight: bold;
-  color: #333;
-}
 .group-switch {
   display: flex;
   align-items: center;
-  background: #e3f2fd;
-  border-radius: 20rpx;
-  padding: 4rpx 16rpx;
-  gap: 4rpx;
+  gap: 6rpx;
 }
-.group-switch-text {
-  font-size: 22rpx;
-  color: #1976d2;
-  max-width: 120rpx;
+.group-name {
+  font-size: 36rpx;
+  font-weight: bold;
+  color: #333;
+  max-width: 280rpx;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .group-switch-arrow {
-  font-size: 26rpx;
-  color: #1976d2;
+  font-size: 32rpx;
+  color: #999;
   font-weight: bold;
 }
 .today-date {
