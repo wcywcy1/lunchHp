@@ -64,12 +64,7 @@ export function useHome() {
         todayOrders.value.filter((o: any) => o.status !== 'cancelled').length
     )
 
-    const monthCount = computed(() => {
-        const ym = getTodayString().substring(0, 7)
-        return (store.recentOrders || [])
-            .filter((o: any) => o.date && o.date.startsWith(ym) && o.status !== 'cancelled')
-            .length
-    })
+    const monthCount = computed(() => store.monthSummary?.count || 0)
 
     const virtualMembers = computed(() =>
         (store.members || []).filter((m: any) => m.isVirtual === true)
