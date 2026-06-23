@@ -137,11 +137,12 @@ export function flushCache() {
 export function restoreSession(): boolean {
     const session = getCache(CACHE_KEYS.SESSION)
     if (!session) return false
+    const groupName = session.groupName || (session.groupId === GROUP_ID ? 'HP午饭' : '')
     setStore({
         member: session.member,
         role: session.role,
         groupId: session.groupId,
-        groupName: session.groupName || '',
+        groupName,
     })
     return true
 }
