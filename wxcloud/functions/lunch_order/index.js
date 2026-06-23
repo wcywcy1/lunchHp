@@ -65,7 +65,9 @@ function checkRole(member, ...allowed) {
 
 function getToday() {
     const d = new Date()
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    const utc = d.getTime() + d.getTimezoneOffset() * 60000
+    const cst = new Date(utc + 8 * 3600000)
+    return `${cst.getFullYear()}-${String(cst.getMonth() + 1).padStart(2, '0')}-${String(cst.getDate()).padStart(2, '0')}`
 }
 
 async function fetchAll(collection, where) {
@@ -350,70 +352,54 @@ async function getMonthSummary(event, openid) {
 
 async function _updateDataTimestamp() {
     const now = db.serverDate()
-    const existing = await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => null)
-    if (existing && existing.data) {
-        await db.collection(COL.GROUPS).doc(GROUP_ID).update({
-            data: { dataTimestamp: now },
-        })
-    } else {
+    await db.collection(COL.GROUPS).doc(GROUP_ID).update({
+        data: { dataTimestamp: now },
+    }).catch(async () => {
         await db.collection(COL.GROUPS).add({
             data: { _id: GROUP_ID, dataTimestamp: now, createdAt: now },
         })
-    }
+    })
 }
 
 async function _updateOrdersTimestamp() {
     const now = db.serverDate()
-    const existing = await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => null)
-    if (existing && existing.data) {
-        await db.collection(COL.GROUPS).doc(GROUP_ID).update({
-            data: { ordersTimestamp: now },
-        })
-    } else {
+    await db.collection(COL.GROUPS).doc(GROUP_ID).update({
+        data: { ordersTimestamp: now },
+    }).catch(async () => {
         await db.collection(COL.GROUPS).add({
             data: { _id: GROUP_ID, ordersTimestamp: now, createdAt: now },
         })
-    }
+    })
 }
 
 async function _resetDataTimestamp() {
-    const existing = await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => null)
-    if (existing && existing.data) {
-        await db.collection(COL.GROUPS).doc(GROUP_ID).update({
-            data: { dataTimestamp: 0 },
-        })
-    }
+    await db.collection(COL.GROUPS).doc(GROUP_ID).update({
+        data: { dataTimestamp: 0 },
+    }).catch(() => { })
 }
 
-// 触发菜单与成员的时间戳，前端 checkFreshness 感知后刷新排序
 async function _touchMenuAndMembersTimestamp() {
     const now = db.serverDate()
-    const existing = await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => null)
-    if (existing && existing.data) {
-        await db.collection(COL.GROUPS).doc(GROUP_ID).update({
-            data: { menuTimestamp: now, membersTimestamp: now },
-        })
-    } else {
+    await db.collection(COL.GROUPS).doc(GROUP_ID).update({
+        data: { menuTimestamp: now, membersTimestamp: now },
+    }).catch(async () => {
         await db.collection(COL.GROUPS).add({
             data: { _id: GROUP_ID, menuTimestamp: now, membersTimestamp: now, createdAt: now },
         })
-    }
+    })
 }
 
 // 一次性更新 orders/data/menu/members 四个时间戳，替代分散的多次 get+update
 async function _touchAllTimestamps() {
     const now = db.serverDate()
-    const existing = await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => null)
-    if (existing && existing.data) {
-        await db.collection(COL.GROUPS).doc(GROUP_ID).update({
-            data: {
-                ordersTimestamp: now,
-                dataTimestamp: now,
-                menuTimestamp: now,
-                membersTimestamp: now,
-            },
-        })
-    } else {
+    await db.collection(COL.GROUPS).doc(GROUP_ID).update({
+        data: {
+            ordersTimestamp: now,
+            dataTimestamp: now,
+            menuTimestamp: now,
+            membersTimestamp: now,
+        },
+    }).catch(async () => {
         await db.collection(COL.GROUPS).add({
             data: {
                 _id: GROUP_ID,
@@ -424,7 +410,7 @@ async function _touchAllTimestamps() {
                 createdAt: now,
             },
         })
-    }
+    })
 }
 
 // 合并大众点餐统计（orderCount/lastOrderedAt）到 menu
@@ -585,7 +571,8 @@ async function batchConfirm(event, openid) {
         .where({ _id: _.in(orderIds), groupId: GROUP_ID })
         .update({ data: { status: STATUS.CONFIRMED, updatedAt: now } })
     const results = orderIds.map(id => ({ orderId: id, success: true }))
-    if (updateRes.stats && updateRes.stats.updated !== orderIds.length) {
+    const partialSuccess = updateRes.stats && updateRes.stats.updated !== orderIds.length
+    if (partialSuccess) {
         console.warn('batchConfirm partial update:', updateRes.stats.updated, '/', orderIds.length)
     }
 
@@ -594,7 +581,7 @@ async function batchConfirm(event, openid) {
     }
     await _touchAllTimestamps()
 
-    return { code: 0, data: results }
+    return { code: 0, data: results, partialSuccess: partialSuccess || false, updatedCount: (updateRes.stats && updateRes.stats.updated) || 0 }
 }
 
 async function cancelOrder(event, openid) {
@@ -694,10 +681,9 @@ async function cancelMyOrder(event, openid) {
         data: { status: STATUS.CANCELLED, updatedAt: db.serverDate() },
     })
     await _updateOrdersTimestamp()
+    await _updateDataTimestamp()
     return { code: 0 }
 }
-
-// 管理员查询待处理的取消申请
 async function getPendingCancelRequests(event, openid) {
     const caller = await getMemberByOpenid(openid)
     if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }

@@ -90,7 +90,7 @@ const hasActiveFilter = computed(() => {
 })
 
 onMounted(() => {
-  loadStats()
+  if (isAdmin.value) loadStats()
 })
 
 onShow(() => {
@@ -100,7 +100,7 @@ onShow(() => {
     return
   }
   if (!loading.value && Date.now() - getStatsLoadTime() > 30 * 1000) {
-    loadStats()
+    loadStats(true)
   }
 })
 

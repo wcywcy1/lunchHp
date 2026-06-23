@@ -159,17 +159,15 @@ export function useDataManage() {
         }
     }
 
-    async function batchCancelConfirmed() {
-        if (confirmedSelectedIds.value.length === 0) return
-        const ids = [...confirmedSelectedIds.value]
-        const { confirm } = await uni.showModal({ title: '取消订单', content: `确认取消 ${ids.length} 条已确认订单？` })
+    async function doBatchCancel(ids: string[], label: string, clearSelection: () => void) {
+        const { confirm } = await uni.showModal({ title: '取消订单', content: `确认取消 ${ids.length} 条${label}？` })
         if (!confirm) return
         cancelling.value = true
         try {
             const res = await orderAction('batchCancelOrders', { orderIds: ids })
             if (res.result.code === 0) {
                 uni.showToast({ title: '取消成功', icon: 'success' })
-                confirmedSelectedIds.value = []
+                clearSelection()
                 await loadData()
                 await loadPendingCancelRequests()
             } else {
@@ -182,27 +180,14 @@ export function useDataManage() {
         }
     }
 
+    async function batchCancelConfirmed() {
+        if (confirmedSelectedIds.value.length === 0) return
+        await doBatchCancel([...confirmedSelectedIds.value], '已确认订单', () => { confirmedSelectedIds.value = [] })
+    }
+
     async function batchCancelPending() {
         if (selectedIds.value.length === 0) return
-        const ids = [...selectedIds.value]
-        const { confirm } = await uni.showModal({ title: '取消订单', content: `确认取消 ${ids.length} 条待确认订单？` })
-        if (!confirm) return
-        cancelling.value = true
-        try {
-            const res = await orderAction('batchCancelOrders', { orderIds: ids })
-            if (res.result.code === 0) {
-                uni.showToast({ title: '取消成功', icon: 'success' })
-                selectedIds.value = []
-                await loadData()
-                await loadPendingCancelRequests()
-            } else {
-                throw new Error(res.result.msg || '取消失败')
-            }
-        } catch (e: any) {
-            uni.showToast({ title: e.message || '取消失败', icon: 'none' })
-        } finally {
-            cancelling.value = false
-        }
+        await doBatchCancel([...selectedIds.value], '待确认订单', () => { selectedIds.value = [] })
     }
 
     async function batchConfirm() {
@@ -1410,10 +1395,47 @@ export function useDataManage() {
         }
     }
 
+    function applyOrderPatch(changes: any[]) {
+        if (!changes || changes.length === 0) return
+        const today = getTodayString()
+        for (const c of changes) {
+            const isToday = c.doc && c.doc.date === today
+            if (c.queueType === 'add' || c.queueType === 'init') {
+                if (!isToday) continue
+                const status = c.doc.status
+                if (status === ORDER_STATUS.PENDING) {
+                    const idx = pendingOrders.value.findIndex((o: any) => o._id === c.doc._id)
+                    if (idx < 0) pendingOrders.value.unshift(c.doc)
+                } else if (status === ORDER_STATUS.CONFIRMED) {
+                    const idx = confirmedOrders.value.findIndex((o: any) => o._id === c.doc._id)
+                    if (idx < 0) confirmedOrders.value.unshift(c.doc)
+                }
+            } else if (c.queueType === 'update' || c.queueType === 'replace') {
+                const oldPendingIdx = pendingOrders.value.findIndex((o: any) => o._id === c.doc._id)
+                const oldConfirmedIdx = confirmedOrders.value.findIndex((o: any) => o._id === c.doc._id)
+                if (oldPendingIdx >= 0) pendingOrders.value.splice(oldPendingIdx, 1)
+                if (oldConfirmedIdx >= 0) confirmedOrders.value.splice(oldConfirmedIdx, 1)
+                if (isToday) {
+                    if (c.doc.status === ORDER_STATUS.PENDING) {
+                        pendingOrders.value.unshift(c.doc)
+                    } else if (c.doc.status === ORDER_STATUS.CONFIRMED) {
+                        confirmedOrders.value.unshift(c.doc)
+                    }
+                }
+            } else if (c.queueType === 'remove') {
+                const pIdx = pendingOrders.value.findIndex((o: any) => o._id === c.doc._id)
+                if (pIdx >= 0) pendingOrders.value.splice(pIdx, 1)
+                const cIdx = confirmedOrders.value.findIndex((o: any) => o._id === c.doc._id)
+                if (cIdx >= 0) confirmedOrders.value.splice(cIdx, 1)
+            }
+        }
+    }
+
     function startRealtimeWatch() {
-        realtime.watchTodayOrders((snapshot: any) => {
-            if (snapshot.type === 'init') return
-            loadData()
+        realtime.watchTodayOrders({
+            onInit: () => {},
+            onPatch: (changes: any[]) => applyOrderPatch(changes),
+            onError: () => { loadData() },
         })
     }
 

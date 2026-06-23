@@ -1,4 +1,5 @@
 import { GROUP_ID, COLLECTIONS } from '../constants/appConfig'
+import { useStore } from '../services/store'
 import { getTodayString } from '../utils/date'
 
 interface WatcherRef {
@@ -12,16 +13,23 @@ interface OrderWatchCallbacks {
     onError?: () => void
 }
 
+function currentGroupId(): string {
+    return useStore().groupId || GROUP_ID
+}
+
 export function useRealtimeWatch() {
     let orderWatcher: WatcherRef | null = null
     let groupWatcher: WatcherRef | null = null
     let orderRetryTimer: any = null
     let orderRetryCount = 0
+    let groupRetryTimer: any = null
+    let groupRetryCount = 0
 
     function watchTodayOrders(callbacks: OrderWatchCallbacks | ((snapshot: any) => void)) {
         closeOrderWatcherWithRetry()
         const db = wx.cloud.database()
         const today = getTodayString()
+        const gid = currentGroupId()
 
         const cb = typeof callbacks === 'function'
             ? { onChange: callbacks }
@@ -29,7 +37,7 @@ export function useRealtimeWatch() {
 
         const startWatcher = () => {
             orderWatcher = db.collection(COLLECTIONS.ORDERS)
-                .where({ groupId: GROUP_ID, date: today })
+                .where({ groupId: gid, date: today })
                 .watch({
                     onChange: (snapshot: any) => {
                         orderRetryCount = 0
@@ -59,17 +67,27 @@ export function useRealtimeWatch() {
     }
 
     function watchGroupNotice(onChange: (snapshot: any) => void) {
-        closeGroupWatcher()
+        closeGroupWatcherWithRetry()
         const db = wx.cloud.database()
-        groupWatcher = db.collection(COLLECTIONS.GROUPS)
-            .where({ _id: GROUP_ID })
-            .watch({
-                onChange,
-                onError: (err: any) => {
-                    console.error('[watchGroupNotice] error:', err)
-                    groupWatcher = null
-                },
-            })
+        const gid = currentGroupId()
+
+        const startWatcher = () => {
+            groupWatcher = db.collection(COLLECTIONS.GROUPS)
+                .where({ _id: gid })
+                .watch({
+                    onChange: (snapshot: any) => {
+                        groupRetryCount = 0
+                        onChange(snapshot)
+                    },
+                    onError: (err: any) => {
+                        console.error('[watchGroupNotice] error:', err)
+                        groupWatcher = null
+                        const delay = Math.min(5000 * Math.pow(2, groupRetryCount++), 300000)
+                        groupRetryTimer = setTimeout(startWatcher, delay)
+                    },
+                })
+        }
+        startWatcher()
     }
 
     function closeOrderWatcherWithRetry() {
@@ -88,16 +106,25 @@ export function useRealtimeWatch() {
         closeOrderWatcherWithRetry()
     }
 
-    function closeGroupWatcher() {
+    function closeGroupWatcherWithRetry() {
+        if (groupRetryTimer) {
+            clearTimeout(groupRetryTimer)
+            groupRetryTimer = null
+        }
+        groupRetryCount = 0
         if (groupWatcher) {
             groupWatcher.close()
             groupWatcher = null
         }
     }
 
+    function closeGroupWatcher() {
+        closeGroupWatcherWithRetry()
+    }
+
     function closeAll() {
         closeOrderWatcherWithRetry()
-        closeGroupWatcher()
+        closeGroupWatcherWithRetry()
     }
 
     return {

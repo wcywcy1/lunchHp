@@ -205,17 +205,20 @@ export function useHome() {
                 } else {
                     noticeContent.value = ''
                 }
+                const updates: Record<string, any> = {}
                 if (recentTimestamp !== store.recentTimestamp) {
                     await fetchRecentOrders(recentTimestamp)
                 } else {
                     setRecentLoadTime(Date.now())
+                    updates.recentTimestamp = recentTimestamp
                 }
                 if (menuTimestamp !== store.menuTimestamp) {
                     try {
                         const menuRes = await orderAction('getRecentMenu')
                         if (menuRes.result.code === 0) {
                             const menu = menuRes.result.data
-                            setStore({ menu, menuTimestamp })
+                            updates.menu = menu
+                            updates.menuTimestamp = menuTimestamp
                             setCache(CACHE_KEYS.MENU, menu)
                             setCache(CACHE_KEYS.MENU_TIMESTAMP, menuTimestamp)
                         }
@@ -226,19 +229,23 @@ export function useHome() {
                         const membersRes = await orderAction('getRecentMembers')
                         if (membersRes.result.code === 0) {
                             const members = membersRes.result.data
-                            setStore({ members, membersTimestamp })
+                            updates.members = members
+                            updates.membersTimestamp = membersTimestamp
                             setCache(CACHE_KEYS.MEMBERS, members)
                             setCache(CACHE_KEYS.MEMBERS_TIMESTAMP, membersTimestamp)
-                            // 同步本人角色变更（如被设/撤管理员），使 TabBar/权限立即生效
                             if (store.member?._id) {
                                 const me = members.find((m: any) => m._id === store.member._id)
                                 if (me && me.role !== store.member.role) {
-                                    setStore({ member: me, role: me.role })
+                                    updates.member = me
+                                    updates.role = me.role
                                     saveSession({ groupId: me.groupId, role: me.role, member: me })
                                 }
                             }
                         }
                     } catch (e) { console.error('checkFreshness members error:', e) }
+                }
+                if (Object.keys(updates).length > 0) {
+                    setStore(updates)
                 }
             }
         } catch (e) {

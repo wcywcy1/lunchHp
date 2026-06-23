@@ -9,12 +9,25 @@ const COL = {
     MENU: 'lunch_menu',
     MEMBERS: 'lunch_members',
     BACKUPS: 'lunch_backups',
+    MONTHLY_STATS: 'lunch_monthly_stats',
+    USER_STATS: 'lunch_user_menu_stats',
 }
 const ROLE = { CREATOR: 'creator', ADMIN: 'admin' }
 
 const AUTO_MAX = 8
 const MANUAL_MAX = 10
 const BATCH_SIZE = 100
+
+async function touchAllTimestamps() {
+    const now = db.serverDate()
+    await db.collection(COL.GROUPS).doc(GROUP_ID).update({
+        data: { ordersTimestamp: now, menuTimestamp: now, membersTimestamp: now, dataTimestamp: now },
+    }).catch(async () => {
+        await db.collection(COL.GROUPS).add({
+            data: { _id: GROUP_ID, ordersTimestamp: now, menuTimestamp: now, membersTimestamp: now, dataTimestamp: now, createdAt: now },
+        })
+    })
+}
 
 async function getMemberByOpenid(openid) {
     const { data } = await db.collection(COL.MEMBERS)
@@ -185,34 +198,50 @@ async function restoreBackup(event, openid) {
     await db.collection(COL.ORDERS).where({ groupId: GROUP_ID }).remove()
     await db.collection(COL.MENU).where({ groupId: GROUP_ID }).remove()
     await db.collection(COL.MEMBERS).where({ groupId: GROUP_ID }).remove()
+    await db.collection(COL.MONTHLY_STATS).where({ groupId: GROUP_ID }).remove()
+    await db.collection(COL.USER_STATS).where({ groupId: GROUP_ID }).remove()
 
     const now = db.serverDate()
 
     for (let i = 0; i < orders.length; i += BATCH_SIZE) {
-        const batch = orders.slice(i, i + BATCH_SIZE).map(o => {
+        const batch = orders.slice(i, i + BATCH_SIZE)
+        await Promise.all(batch.map(o => {
             const { _id, ...rest } = o
-            return { ...rest, createdAt: now, updatedAt: now }
-        })
-        await db.collection(COL.ORDERS).add({ data: batch })
+            return db.collection(COL.ORDERS).doc(_id).set({
+                data: { ...rest, createdAt: now, updatedAt: now },
+            }).catch(() => db.collection(COL.ORDERS).add({
+                data: { ...rest, createdAt: now, updatedAt: now },
+            }))
+        }))
     }
 
     for (let i = 0; i < menu.length; i += BATCH_SIZE) {
-        const batch = menu.slice(i, i + BATCH_SIZE).map(m => {
+        const batch = menu.slice(i, i + BATCH_SIZE)
+        await Promise.all(batch.map(m => {
             const { _id, ...rest } = m
-            return { ...rest, createdAt: now, updatedAt: now }
-        })
-        await db.collection(COL.MENU).add({ data: batch })
+            return db.collection(COL.MENU).doc(_id).set({
+                data: { ...rest, createdAt: now, updatedAt: now },
+            }).catch(() => db.collection(COL.MENU).add({
+                data: { ...rest, createdAt: now, updatedAt: now },
+            }))
+        }))
     }
 
     for (let i = 0; i < members.length; i += BATCH_SIZE) {
-        const batch = members.slice(i, i + BATCH_SIZE).map(m => {
+        const batch = members.slice(i, i + BATCH_SIZE)
+        await Promise.all(batch.map(m => {
             const { _id, ...rest } = m
-            return { ...rest, joinedAt: now }
-        })
-        await db.collection(COL.MEMBERS).add({ data: batch })
+            return db.collection(COL.MEMBERS).doc(_id).set({
+                data: { ...rest, joinedAt: now },
+            }).catch(() => db.collection(COL.MEMBERS).add({
+                data: { ...rest, joinedAt: now },
+            }))
+        }))
     }
 
-    return { code: 0, data: { orderCount: orders.length, menuCount: menu.length, memberCount: members.length } }
+    await touchAllTimestamps()
+
+    return { code: 0, data: { orderCount: orders.length, menuCount: menu.length, memberCount: members.length, timestampsUpdated: true } }
 }
 
 async function getBackupList(event, openid) {
@@ -269,6 +298,9 @@ async function clearAllData(event, openid) {
     await db.collection(COL.ORDERS).where({ groupId: GROUP_ID }).remove()
     await db.collection(COL.MENU).where({ groupId: GROUP_ID }).remove()
     await db.collection(COL.MEMBERS).where({ groupId: GROUP_ID, role: _.neq('creator') }).remove()
+    await db.collection(COL.MONTHLY_STATS).where({ groupId: GROUP_ID }).remove()
+    await db.collection(COL.USER_STATS).where({ groupId: GROUP_ID }).remove()
+    await touchAllTimestamps()
 
     return { code: 0 }
 }

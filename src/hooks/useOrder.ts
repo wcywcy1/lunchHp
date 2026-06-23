@@ -178,7 +178,10 @@ export function useOrder(): OrderReturn {
                     note: '',
                     status: 'pending',
                 }
-                store.recentOrders = [newOrder, ...(store.recentOrders || [])]
+                const orders = store.recentOrders || []
+                if (!newOrder._id || !orders.some((o: any) => o._id === newOrder._id)) {
+                    store.recentOrders = [newOrder, ...orders]
+                }
                 setCache(CACHE_KEYS.RECENT_ORDERS, store.recentOrders)
                 const updatedMenu = res.result.data?.updatedMenu
                 if (store.menu && updatedMenu) {
