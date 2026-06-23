@@ -96,8 +96,21 @@ async function doBackup(type, remark) {
         : null
 
     const data = JSON.stringify({ orders, menu, members })
+    const DATA_SIZE_LIMIT = 10 * 1024 * 1024
 
     const now = db.serverDate()
+    let dataRef = null
+
+    if (data.length > DATA_SIZE_LIMIT) {
+        const ts = Date.now()
+        const cloudPath = `lunch/backups/${GROUP_ID}_${ts}.json`
+        const uploadRes = await cloud.uploadFile({
+            cloudPath,
+            fileContent: Buffer.from(data, 'utf-8'),
+        })
+        dataRef = uploadRes.fileID
+    }
+
     const backup = {
         type,
         createdAt: now,
@@ -106,7 +119,12 @@ async function doBackup(type, remark) {
         memberCount: members.length,
         dateRange,
         remark: remark || '',
-        data,
+    }
+
+    if (dataRef) {
+        backup.dataRef = dataRef
+    } else {
+        backup.data = data
     }
 
     const { _id } = await db.collection(COL.BACKUPS).add({ data: backup })
@@ -132,12 +150,17 @@ async function cleanupOldBackups(type, maxKeep) {
         .where({ type })
         .orderBy('createdAt', 'desc')
         .limit(maxKeep + 5)
-        .field({ _id: true })
+        .field({ _id: true, dataRef: true })
         .get()
 
     if (all.length <= maxKeep) return
 
-    const toDeleteIds = all.slice(maxKeep).map(item => item._id)
+    const toDelete = all.slice(maxKeep)
+    const cloudFiles = toDelete.filter(item => item.dataRef).map(item => item.dataRef)
+    if (cloudFiles.length > 0) {
+        try { await cloud.deleteFile({ fileList: cloudFiles }) } catch (e) { }
+    }
+    const toDeleteIds = toDelete.map(item => item._id)
     await db.collection(COL.BACKUPS).where({ _id: _.in(toDeleteIds) }).remove()
 }
 
@@ -192,7 +215,16 @@ async function restoreBackup(event, openid) {
     const { data: backupDoc } = await db.collection(COL.BACKUPS).doc(backupId).get()
     if (!backupDoc) return { code: 404, msg: 'backup not found' }
 
-    const backupData = JSON.parse(backupDoc.data)
+    let backupDataStr
+    if (backupDoc.dataRef) {
+        const downloadRes = await cloud.downloadFile({ fileID: backupDoc.dataRef })
+        const buf = Buffer.isBuffer(downloadRes.fileContent) ? downloadRes.fileContent : Buffer.from(downloadRes.fileContent)
+        backupDataStr = buf.toString('utf-8')
+    } else {
+        backupDataStr = backupDoc.data
+    }
+
+    const backupData = JSON.parse(backupDataStr)
     const { orders = [], menu = [], members = [] } = backupData
 
     await db.collection(COL.ORDERS).where({ groupId: GROUP_ID }).remove()
@@ -263,6 +295,11 @@ async function deleteBackup(event, openid) {
 
     const { backupId } = event
     if (!backupId) return { code: 400, msg: 'missing backupId' }
+
+    const { data: doc } = await db.collection(COL.BACKUPS).doc(backupId).get().catch(() => ({ data: null }))
+    if (doc && doc.dataRef) {
+        try { await cloud.deleteFile({ fileList: [doc.dataRef] }) } catch (e) { }
+    }
 
     await db.collection(COL.BACKUPS).doc(backupId).remove()
     return { code: 0 }

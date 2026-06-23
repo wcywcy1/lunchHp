@@ -105,10 +105,7 @@ export function useDataManage() {
                 const todayOrders = orders.filter((o: any) => o.date === today)
                 pendingOrders.value = todayOrders.filter((o: any) => o.status === ORDER_STATUS.PENDING)
                 confirmedOrders.value = todayOrders.filter((o: any) => o.status === ORDER_STATUS.CONFIRMED)
-            }
-            const tsRes = await menuAction('getDataTimestamps')
-            if (tsRes.result.code === 0) {
-                currentNotice.value = tsRes.result.data.notice || ''
+                currentNotice.value = res.result.notice || ''
             }
         } catch (e) {
             console.error('loadData error:', e)

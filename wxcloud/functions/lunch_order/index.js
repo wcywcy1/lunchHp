@@ -255,6 +255,7 @@ async function getInitData(event, openid) {
             membersTimestamp: groupData.membersTimestamp || null,
             notice: groupData.notice || '',
             noticeUpdatedAt: groupData.noticeUpdatedAt || null,
+            serverTime: Date.now(),
         },
     }
 }
@@ -270,13 +271,23 @@ async function getRecentOrders(event, openid) {
 
     const actualLimit = Math.min(Math.max(reqLimit, todayCount), 500)
 
-    const { data } = await db.collection(COL.ORDERS)
-        .where({ groupId: GROUP_ID })
-        .orderBy('createdAt', 'desc')
-        .limit(actualLimit)
-        .get()
+    const [orderResult, groupResult] = await Promise.all([
+        db.collection(COL.ORDERS)
+            .where({ groupId: GROUP_ID })
+            .orderBy('createdAt', 'desc')
+            .limit(actualLimit)
+            .get(),
+        db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => ({ data: {} })),
+    ])
 
-    return { code: 0, data }
+    const groupData = groupResult.data || {}
+
+    return {
+        code: 0,
+        data: orderResult.data,
+        notice: groupData.notice || '',
+        noticeUpdatedAt: groupData.noticeUpdatedAt || null,
+    }
 }
 
 async function getRecentTimestamp(event, openid) {
@@ -1081,156 +1092,25 @@ async function importOrders(event, openid) {
     const { orders, mode } = event
     if (!Array.isArray(orders) || orders.length === 0) return { code: 400, msg: 'missing orders' }
 
-    if (mode === 'rewrite') {
-        await db.collection(COL.ORDERS).where({ groupId: GROUP_ID }).remove()
-    }
-
-    const allMembers = await fetchAll(db.collection(COL.MEMBERS), { groupId: GROUP_ID })
-    const memberMap = {}
-    allMembers.forEach(m => { memberMap[m.name] = m })
-
-    const allMenu = await fetchAll(db.collection(COL.MENU), { groupId: GROUP_ID })
-    const menuMap = {}
-    allMenu.forEach(it => {
-        const key = (it.supplier || '') + '|' + it.name
-        menuMap[key] = it
-        if (!menuMap[it.name]) menuMap[it.name] = it
-    })
-
-    // auto-create missing members and menu items（批量 add，避免循环单条写入）
-    const now = db.serverDate()
-    const newMembers = {}
-    const newMenuItems = {}
-
-    const membersToCreate = []
+    const header = ['date', 'menuName', 'memberName', 'price', 'note', 'status', 'supplier']
+    const rows = [header]
     for (const o of orders) {
-        if (!o.memberName || memberMap[o.memberName] || newMembers[o.memberName]) continue
-        newMembers[o.memberName] = { _id: null, name: o.memberName } // 占位，add 后回填
-        membersToCreate.push({
-            groupId: GROUP_ID, name: o.memberName, nickName: '', avatar: '', openid: '',
-            role: ROLE.MEMBER, isVirtual: true, privacyAgreed: false, joinedAt: now,
-        })
-    }
-    // 批量插入新成员（每批 100 条），回填 _id
-    for (let i = 0; i < membersToCreate.length; i += 100) {
-        const chunk = membersToCreate.slice(i, i + 100)
-        const addRes = await db.collection(COL.MEMBERS).add({ data: chunk })
-        addRes._ids.forEach((id, idx) => {
-            const name = chunk[idx].name
-            newMembers[name]._id = id
-        })
-    }
-    Object.assign(memberMap, newMembers)
-
-    const menuToCreate = []
-    for (const o of orders) {
-        if (!o.menuName) continue
-        const menuKey = (o.supplier || '') + '|' + o.menuName
-        if (menuMap[menuKey] || menuMap[o.menuName] || newMenuItems[menuKey]) continue
-        newMenuItems[menuKey] = { _id: null, name: o.menuName, supplier: o.supplier || '' }
-        if (!newMenuItems[o.menuName]) newMenuItems[o.menuName] = newMenuItems[menuKey]
-        menuToCreate.push({
-            groupId: GROUP_ID, sortNo: (allMenu.length + menuToCreate.length + 1) * 10,
-            supplier: o.supplier || '', name: o.menuName, price: Number(o.price) || 0,
-            photo: '', visible: true, createdAt: now,
-        })
-    }
-    for (let i = 0; i < menuToCreate.length; i += 100) {
-        const chunk = menuToCreate.slice(i, i + 100)
-        const addRes = await db.collection(COL.MENU).add({ data: chunk })
-        addRes._ids.forEach((id, idx) => {
-            const item = chunk[idx]
-            const key = (item.supplier || '') + '|' + item.name
-            newMenuItems[key]._id = id
-            if (newMenuItems[item.name]) newMenuItems[item.name]._id = id
-        })
-    }
-    Object.assign(menuMap, newMenuItems)
-
-    let lastDaySet = null
-    if (mode === 'append') {
-        // 只查最近一天的订单用于去重，避免 fetchAll 全量订单
-        const { list: lastDateAgg } = await db.collection(COL.ORDERS)
-            .aggregate()
-            .match({ groupId: GROUP_ID })
-            .group({ _id: null, lastDate: $.max('$date') })
-            .end()
-        if (lastDateAgg.length > 0) {
-            const lastDate = lastDateAgg[0].lastDate
-            const { data: lastDayOrders } = await db.collection(COL.ORDERS)
-                .where({ groupId: GROUP_ID, date: lastDate })
-                .get()
-            lastDaySet = new Set(lastDayOrders.map(o => `${o.memberId}|${o.menuId}`))
-        }
+        rows.push([
+            o.date || '',
+            o.menuName || '',
+            o.memberName || '',
+            String(o.price || 0),
+            o.note || '',
+            o.status || '',
+            o.supplier || '',
+        ])
     }
 
-    const toInsert = []
-    let errorCount = 0
-    let skippedCount = 0
-    const skippedDetails = []
-
-    for (const o of orders) {
-        if (!o.date || !o.memberName || !o.menuName) {
-            errorCount++
-            continue
-        }
-
-        const member = memberMap[o.memberName]
-        const menuKey = (o.supplier || '') + '|' + o.menuName
-        const menuItem = menuMap[menuKey] || menuMap[o.menuName]
-
-        if (!member) {
-            errorCount++
-            continue
-        }
-        if (!menuItem) {
-            errorCount++
-            continue
-        }
-
-        if (lastDaySet && lastDaySet.has(`${member._id}|${menuItem._id}`)) {
-            skippedCount++
-            skippedDetails.push({
-                memberName: o.memberName,
-                menuName: o.menuName,
-                date: o.date,
-                price: Number(o.price) || 0,
-            })
-            continue
-        }
-
-        toInsert.push({
-            groupId: GROUP_ID,
-            date: o.date,
-            memberId: member._id,
-            memberName: member.name,
-            menuId: menuItem._id,
-            menuName: menuItem.name,
-            supplier: o.supplier || '',
-            price: Number(o.price) || 0,
-            note: o.note || '',
-            status: o.status || STATUS.CONFIRMED,
-            createdBy: openid,
-            createdAt: now,
-            updatedAt: now,
-        })
-    }
-
-    if (toInsert.length > 0) {
-        const BATCH_SIZE = 100
-        for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
-            await db.collection(COL.ORDERS).add({ data: toInsert.slice(i, i + BATCH_SIZE) })
-        }
-        await _updateOrdersTimestamp()
-        // 仅最后一批清零 dataTimestamp，由前端传 isLastBatch 标记
-        if (event.isLastBatch) {
-            await _resetDataTimestamp()
-        }
-    }
+    const result = await _importOrdersFromRows(rows, mode || 'append', openid, event.isLastBatch !== false)
 
     await writeAuditLog(openid, AUDIT_ACTION.ORDERS_IMPORT, 'order', '', null,
-        { count: toInsert.length, mode: event.mode || '', errors: errorCount, skipped: skippedCount }, null)
-    return { code: 0, data: { count: toInsert.length, errors: errorCount, skipped: skippedCount, skippedDetails } }
+        { count: (result.data && result.data.count) || 0, mode: event.mode || '', errors: (result.data && result.data.errors) || 0, skipped: (result.data && result.data.skipped) || 0 }, null)
+    return result
 }
 
 async function importFromCsv(event, openid) {

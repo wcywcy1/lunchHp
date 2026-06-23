@@ -1,5 +1,6 @@
 import { GROUP_ID, COLLECTIONS } from '../constants/appConfig'
 import { useStore } from '../services/store'
+import { getDB } from '../services/cloudClient'
 import { getTodayString } from '../utils/date'
 
 interface WatcherRef {
@@ -27,7 +28,7 @@ export function useRealtimeWatch() {
 
     function watchTodayOrders(callbacks: OrderWatchCallbacks | ((snapshot: any) => void)) {
         closeOrderWatcherWithRetry()
-        const db = wx.cloud.database()
+        const db = getDB()
         const today = getTodayString()
         const gid = currentGroupId()
 
@@ -68,7 +69,7 @@ export function useRealtimeWatch() {
 
     function watchGroupNotice(onChange: (snapshot: any) => void) {
         closeGroupWatcherWithRetry()
-        const db = wx.cloud.database()
+        const db = getDB()
         const gid = currentGroupId()
 
         const startWatcher = () => {

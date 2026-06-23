@@ -1,0 +1,16 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "npm",
+			"script": "dev:custom",
+			"problemMatcher": [],
+			"label": "npm: dev:custom",
+			"detail": "uni -p",
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
+		}
+	]
+}

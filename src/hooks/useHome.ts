@@ -6,7 +6,7 @@ import { waitForInit } from '../services/appInit'
 import { CACHE_KEYS, CACHE_TTL } from '../constants/cacheConfig'
 import { useRealtimeWatch } from './useRealtimeWatch'
 import { APP_MODE } from '../constants/appConfig'
-import { getTodayString } from '../utils/date'
+import { getTodayString, syncServerTime } from '../utils/date'
 
 export function useHome() {
     const store = useStore()
@@ -64,7 +64,12 @@ export function useHome() {
         todayOrders.value.filter((o: any) => o.status !== 'cancelled').length
     )
 
-    const monthCount = computed(() => store.monthSummary?.count || 0)
+    const monthCount = computed(() => {
+        const ym = getTodayString().substring(0, 7)
+        return (store.recentOrders || [])
+            .filter((o: any) => o.date && o.date.startsWith(ym) && o.status !== 'cancelled')
+            .length
+    })
 
     const virtualMembers = computed(() =>
         (store.members || []).filter((m: any) => m.isVirtual === true)
@@ -77,7 +82,8 @@ export function useHome() {
             const res = await orderAction('getInitData')
             if (res.result.code === 0) {
                 const { member, isNew, monthSummary, recentOrders, menu, members,
-                    recentTimestamp, menuTimestamp, membersTimestamp, notice, noticeUpdatedAt } = res.result.data
+                    recentTimestamp, menuTimestamp, membersTimestamp, notice, noticeUpdatedAt, serverTime } = res.result.data
+                if (serverTime) syncServerTime(serverTime)
                 if (member) {
                     setStore({ member, role: member.role, groupId: member.groupId })
                     saveSession({ groupId: member.groupId, role: member.role, member })
@@ -113,7 +119,8 @@ export function useHome() {
         try {
             const res = await orderAction('getInitData')
             if (res.result.code === 0) {
-                const { monthSummary, recentOrders, menu, members, recentTimestamp, menuTimestamp, membersTimestamp, notice, noticeUpdatedAt } = res.result.data
+                const { monthSummary, recentOrders, menu, members, recentTimestamp, menuTimestamp, membersTimestamp, notice, noticeUpdatedAt, serverTime } = res.result.data
+                if (serverTime) syncServerTime(serverTime)
                 setStore({ monthSummary, recentOrders, menu, members, recentTimestamp, menuTimestamp, membersTimestamp, initialized: true })
                 setCache(CACHE_KEYS.RECENT_ORDERS, recentOrders)
                 setCache(CACHE_KEYS.MENU, menu)
@@ -272,17 +279,22 @@ export function useHome() {
         }
     }
 
+    let monthSummaryTimer: any = null
+
     async function refreshMonthSummary() {
-        try {
-            const res = await orderAction('getMonthSummary')
-            if (res.result.code === 0) {
-                const monthSummary = res.result.data
-                setStore({ monthSummary })
-                setCache(CACHE_KEYS.MONTH_SUMMARY, monthSummary)
+        if (monthSummaryTimer) clearTimeout(monthSummaryTimer)
+        monthSummaryTimer = setTimeout(async () => {
+            try {
+                const res = await orderAction('getMonthSummary')
+                if (res.result.code === 0) {
+                    const monthSummary = res.result.data
+                    setStore({ monthSummary })
+                    setCache(CACHE_KEYS.MONTH_SUMMARY, monthSummary)
+                }
+            } catch (e) {
+                console.error('refreshMonthSummary error:', e)
             }
-        } catch (e) {
-            console.error('refreshMonthSummary error:', e)
-        }
+        }, 3000)
     }
 
     async function refreshData() {
