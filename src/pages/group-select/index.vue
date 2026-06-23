@@ -107,7 +107,7 @@ async function enterGroup(g: any) {
   }
   loading.value = true
   try {
-    await switchToGroup(g.groupId)
+    await switchToGroup(g.groupId, g.groupName)
     uni.showToast({ title: `已进入「${g.groupName}」`, icon: 'success' })
     setTimeout(() => uni.switchTab({ url: '/pages/home/index' }), 800)
   } catch (e: any) {
@@ -136,8 +136,9 @@ async function doJoin(name: string) {
       return
     }
     const groupId = res.result.data.groupId
-    await switchToGroup(groupId)
-    uni.showToast({ title: `已加入「${res.result.data.groupName}」`, icon: 'success' })
+    const groupName = res.result.data.groupName
+    await switchToGroup(groupId, groupName)
+    uni.showToast({ title: `已加入「${groupName}」`, icon: 'success' })
     setTimeout(() => uni.switchTab({ url: '/pages/home/index' }), 800)
   } catch (e: any) {
     uni.showToast({ title: e.message || '加入失败', icon: 'none' })
@@ -160,7 +161,7 @@ async function onCreate() {
       return
     }
     const { groupId, groupName, member } = res.result.data
-    await switchToGroup(groupId)
+    await switchToGroup(groupId, groupName)
     uni.showToast({ title: `已创建「${groupName}」`, icon: 'success' })
     setTimeout(() => uni.switchTab({ url: '/pages/home/index' }), 800)
   } catch (e: any) {
@@ -171,19 +172,18 @@ async function onCreate() {
 }
 
 // 切换到目标组：清缓存 → 设新组ID → 重新初始化 → joinGroup 获取 member → 保存 session
-async function switchToGroup(targetGroupId: string) {
+async function switchToGroup(targetGroupId: string, targetGroupName?: string) {
   clearAllCache()
   resetStore()
   setActiveGroupId(targetGroupId)
   currentGroupId.value = targetGroupId
   resetInit()
   await startInit()
-  // 调用 joinGroup 获取当前用户在该组的 member 记录
   const joinRes = await menuAction('joinGroup', { nickName: '', name: '' })
   if (joinRes && joinRes.result && joinRes.result.code === 0) {
     const { member } = joinRes.result.data
-    setStore({ member, role: member.role, groupId: member.groupId })
-    saveSession({ groupId: member.groupId, role: member.role, member })
+    setStore({ member, role: member.role, groupId: member.groupId, groupName: targetGroupName || '' })
+    saveSession({ groupId: member.groupId, role: member.role, member, groupName: targetGroupName || '' })
   }
 }
 </script>

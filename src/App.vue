@@ -9,7 +9,7 @@ onLaunch(() => {
   initCloud();
   // 启动时把激活组ID同步到 store（session 恢复会覆盖，无 session 时用激活值）
   const activeGroupId = getActiveGroupId();
-  setStore({ groupId: activeGroupId });
+  setStore({ groupId: activeGroupId, groupName: activeGroupId === GROUP_ID ? 'HP午饭' : '' });
   restoreSession();
   restoreFromCache();
 

@@ -1,7 +1,13 @@
 <template>
   <view class="home-header">
     <view class="header-left">
-      <text class="app-title">🍚 我要干饭</text>
+      <view class="title-row">
+        <text class="app-title">🍚 我要干饭</text>
+        <view class="group-switch" @tap="goGroupSelect">
+          <text class="group-switch-text">{{ groupName }}</text>
+          <text class="group-switch-arrow">›</text>
+        </view>
+      </view>
       <text class="today-date">{{ todayDate }}</text>
     </view>
     <view class="header-right" @tap="$emit('click-avatar')">
@@ -16,6 +22,8 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useStore } from '@/services/store'
+import { GROUP_ID } from '@/constants/appConfig'
 
 const props = defineProps<{
   displayName: string
@@ -28,10 +36,22 @@ defineEmits<{
   (e: 'click-avatar'): void
 }>()
 
+const store = useStore()
+
 const initial = computed(() => {
   const name = props.displayName
   return name ? name.charAt(0) : '?'
 })
+
+const groupName = computed(() => {
+  if (store.groupName) return store.groupName
+  const gid = store.groupId || GROUP_ID
+  return gid === GROUP_ID ? 'HP午饭' : gid.replace(/^lunch_/, '')
+})
+
+function goGroupSelect() {
+  uni.navigateTo({ url: '/pages/group-select/index' })
+}
 </script>
 
 <style scoped>
@@ -47,10 +67,36 @@ const initial = computed(() => {
   flex-direction: column;
   gap: 4rpx;
 }
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
 .app-title {
   font-size: 36rpx;
   font-weight: bold;
   color: #333;
+}
+.group-switch {
+  display: flex;
+  align-items: center;
+  background: #e3f2fd;
+  border-radius: 20rpx;
+  padding: 4rpx 16rpx;
+  gap: 4rpx;
+}
+.group-switch-text {
+  font-size: 22rpx;
+  color: #1976d2;
+  max-width: 120rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.group-switch-arrow {
+  font-size: 26rpx;
+  color: #1976d2;
+  font-weight: bold;
 }
 .today-date {
   font-size: 24rpx;

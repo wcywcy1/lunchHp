@@ -13,6 +13,7 @@ interface StoreState {
     member: any
     role: string | null
     groupId: string | null
+    groupName: string
     menu: any[]
     members: any[]
     recentOrders: any[]
@@ -31,6 +32,7 @@ const store = reactive<StoreState>({
     member: null,
     role: null,
     groupId: null,
+    groupName: '',
     menu: [],
     members: [],
     recentOrders: [],
@@ -57,6 +59,7 @@ export function resetStore() {
     store.member = null
     store.role = null
     store.groupId = null
+    store.groupName = ''
     store.menu = []
     store.members = []
     store.recentOrders = []
@@ -138,11 +141,12 @@ export function restoreSession(): boolean {
         member: session.member,
         role: session.role,
         groupId: session.groupId,
+        groupName: session.groupName || '',
     })
     return true
 }
 
-export function saveSession(data: { groupId: string; role: string; member: any }) {
+export function saveSession(data: { groupId: string; role: string; member: any; groupName?: string }) {
     setCache(CACHE_KEYS.SESSION, data)
 }
 
