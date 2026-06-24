@@ -70,30 +70,35 @@ export function useHome() {
         (store.members || []).filter((m: any) => m.isVirtual === true)
     )
 
+    function syncInitDataToStore(data: any) {
+        const { monthSummary, recentOrders, menu, members,
+            recentTimestamp, menuTimestamp, membersTimestamp, notice, noticeUpdatedAt, serverTime } = data
+        if (serverTime) syncServerTime(serverTime)
+        setStore({ monthSummary, recentOrders, menu, members,
+            recentTimestamp, menuTimestamp, membersTimestamp, initialized: true })
+        setCache(CACHE_KEYS.RECENT_ORDERS, recentOrders)
+        setCache(CACHE_KEYS.MENU, menu)
+        setCache(CACHE_KEYS.MEMBERS, members)
+        setCache(CACHE_KEYS.RECENT_TIMESTAMP, recentTimestamp)
+        setCache(CACHE_KEYS.MENU_TIMESTAMP, menuTimestamp)
+        setCache(CACHE_KEYS.MEMBERS_TIMESTAMP, membersTimestamp)
+        setCache(CACHE_KEYS.MONTH_SUMMARY, monthSummary)
+        setRecentLoadTime(Date.now())
+        noticeContent.value = notice && isNoticeToday(noticeUpdatedAt) ? notice : ''
+    }
+
     async function initApp() {
         loading.value = true
         memberLoading.value = true
         try {
             const res = await orderAction('getInitData')
             if (res.result.code === 0) {
-                const { member, isNew, monthSummary, recentOrders, menu, members,
-                    recentTimestamp, menuTimestamp, membersTimestamp, notice, noticeUpdatedAt, serverTime } = res.result.data
-                if (serverTime) syncServerTime(serverTime)
+                const { member, isNew } = res.result.data
+                syncInitDataToStore(res.result.data)
                 if (member) {
                     setStore({ member, role: member.role, groupId: member.groupId })
                     saveSession({ groupId: member.groupId, role: member.role, member })
                 }
-                setStore({ monthSummary, recentOrders, menu, members,
-                    recentTimestamp, menuTimestamp, membersTimestamp, initialized: true })
-                setCache(CACHE_KEYS.RECENT_ORDERS, recentOrders)
-                setCache(CACHE_KEYS.MENU, menu)
-                setCache(CACHE_KEYS.MEMBERS, members)
-                setCache(CACHE_KEYS.RECENT_TIMESTAMP, recentTimestamp)
-                setCache(CACHE_KEYS.MENU_TIMESTAMP, menuTimestamp)
-                setCache(CACHE_KEYS.MEMBERS_TIMESTAMP, membersTimestamp)
-                setCache(CACHE_KEYS.MONTH_SUMMARY, monthSummary)
-                setRecentLoadTime(Date.now())
-                noticeContent.value = notice && isNoticeToday(noticeUpdatedAt) ? notice : ''
                 if (member && !member.privacyAgreed) {
                     showPrivacyDialog.value = true
                 } else if (isNew && member && !member.name) {
@@ -114,18 +119,7 @@ export function useHome() {
         try {
             const res = await orderAction('getInitData')
             if (res.result.code === 0) {
-                const { monthSummary, recentOrders, menu, members, recentTimestamp, menuTimestamp, membersTimestamp, notice, noticeUpdatedAt, serverTime } = res.result.data
-                if (serverTime) syncServerTime(serverTime)
-                setStore({ monthSummary, recentOrders, menu, members, recentTimestamp, menuTimestamp, membersTimestamp, initialized: true })
-                setCache(CACHE_KEYS.RECENT_ORDERS, recentOrders)
-                setCache(CACHE_KEYS.MENU, menu)
-                setCache(CACHE_KEYS.MEMBERS, members)
-                setCache(CACHE_KEYS.RECENT_TIMESTAMP, recentTimestamp)
-                setCache(CACHE_KEYS.MENU_TIMESTAMP, menuTimestamp)
-                setCache(CACHE_KEYS.MEMBERS_TIMESTAMP, membersTimestamp)
-                setCache(CACHE_KEYS.MONTH_SUMMARY, monthSummary)
-                setRecentLoadTime(Date.now())
-                noticeContent.value = notice && isNoticeToday(noticeUpdatedAt) ? notice : ''
+                syncInitDataToStore(res.result.data)
             }
         } catch (e) {
             console.error('loadInitData error:', e)
