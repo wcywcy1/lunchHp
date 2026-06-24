@@ -89,10 +89,6 @@ export function getCache(key: string, skipTTL = false): any {
     }
 }
 
-export function getRecentLoadTime() {
-    return store.recentLoadTime
-}
-
 export function setRecentLoadTime(time: number) {
     store.recentLoadTime = time
 }

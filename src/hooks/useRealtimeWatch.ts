@@ -103,10 +103,6 @@ export function useRealtimeWatch() {
         }
     }
 
-    function closeOrderWatcher() {
-        closeOrderWatcherWithRetry()
-    }
-
     function closeGroupWatcherWithRetry() {
         if (groupRetryTimer) {
             clearTimeout(groupRetryTimer)
@@ -119,10 +115,6 @@ export function useRealtimeWatch() {
         }
     }
 
-    function closeGroupWatcher() {
-        closeGroupWatcherWithRetry()
-    }
-
     function closeAll() {
         closeOrderWatcherWithRetry()
         closeGroupWatcherWithRetry()
@@ -131,8 +123,6 @@ export function useRealtimeWatch() {
     return {
         watchTodayOrders,
         watchGroupNotice,
-        closeOrderWatcher,
-        closeGroupWatcher,
         closeAll,
     }
 }

@@ -20,10 +20,7 @@ export function buildCsvLine(fields: any[]): string {
     return fields.map(csvEscape).join(',')
 }
 
-/** 将多行 CSV 拼接为完整内容（CRLF 行尾） */
-export function buildCsv(lines: string[]): string {
-    return lines.join('\r\n')
-}
+
 
 /** 写入带 UTF-8 BOM 的 CSV 文件（微信小程序 FS API） */
 export function writeCsvWithBom(fs: any, path: string, content: string) {

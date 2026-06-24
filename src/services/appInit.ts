@@ -27,7 +27,3 @@ export function resetInit() {
     initPromise = null
     _isRunning = false
 }
-
-export function isInitRunning() {
-    return _isRunning
-}

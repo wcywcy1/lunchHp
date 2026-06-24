@@ -1,6 +1,3 @@
-export const APP_NAME = '我要干饭'
-
-// 默认组ID（写死，作为回退值）
 export const GROUP_ID = 'lunch_hp'
 
 // 当前激活组ID的本地存储键（运行时可切换）
@@ -11,16 +8,6 @@ export const ACTIVE_GROUP_ID_KEY = 'lunch_active_group_id'
 export const APP_MODE = 'hp' as 'hp' | 'general'
 
 export const CLOUD_ENV = 'cloud1-d0g9zww8h390b6f41'
-
-export const ENABLE_SCENE_JOIN = false
-
-export const DB_PREFIX = 'lunch_'
-
-export const CLOUD_FUNC_PREFIX = 'lunch_'
-
-export const STORAGE_PREFIX = 'lunch_'
-
-export const CLOUD_STORAGE_PATH = 'lunch/'
 
 export const COLLECTIONS = {
     GROUPS: 'lunch_groups',
