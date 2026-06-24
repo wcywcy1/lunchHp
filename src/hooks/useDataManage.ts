@@ -26,6 +26,7 @@ export function useDataManage() {
     const backupList = ref<any[]>([])
     const selectedBackupId = ref('')
     const restoring = ref(false)
+    const restoreProgress = ref('')
     const backupStep = ref<'list' | 'preview' | 'confirm'>('list')
     const selectedBackup = ref<any>(null)
     const backingUp = ref(false)
@@ -412,23 +413,43 @@ export function useDataManage() {
             return
         }
         restoring.value = true
+        restoreProgress.value = '准备中...'
         try {
-            const res = await backupAction('restoreBackup', { backupId: selectedBackupId.value })
-            if (res.result.code === 0) {
-                uni.showToast({ title: '恢复成功', icon: 'success' })
-                showBackupDialog.value = false
-                await Promise.all([
-                    orderManage.loadData(),
-                    loadMenuList(true),
-                    loadMembers(),
-                ])
-            } else {
-                uni.showToast({ title: res.result.msg || '恢复失败', icon: 'none' })
+            const prepareRes = await backupAction('restorePrepare', { backupId: selectedBackupId.value })
+            if (prepareRes.result.code !== 0) {
+                uni.showToast({ title: prepareRes.result.msg || '准备恢复失败', icon: 'none' })
+                return
             }
+            const { sessionId, totalChunks, totalItems } = prepareRes.result.data
+
+            for (let i = 0; i < totalChunks; i++) {
+                restoreProgress.value = `恢复中 ${Math.min((i + 1) * 500, totalItems)}/${totalItems}`
+                const batchRes = await backupAction('restoreBatch', { sessionId, chunkIndex: i })
+                if (batchRes.result.code !== 0) {
+                    uni.showToast({ title: batchRes.result.msg || `第${i + 1}批写入失败`, icon: 'none' })
+                    return
+                }
+            }
+
+            restoreProgress.value = '完成中...'
+            const finishRes = await backupAction('restoreFinish', { sessionId })
+            if (finishRes.result.code !== 0) {
+                uni.showToast({ title: finishRes.result.msg || '完成恢复失败', icon: 'none' })
+                return
+            }
+
+            uni.showToast({ title: '恢复成功', icon: 'success' })
+            showBackupDialog.value = false
+            await Promise.all([
+                orderManage.loadData(),
+                loadMenuList(true),
+                loadMembers(),
+            ])
         } catch (e: any) {
             uni.showToast({ title: e.message || '恢复失败', icon: 'none' })
         } finally {
             restoring.value = false
+            restoreProgress.value = ''
         }
     }
 
@@ -566,6 +587,7 @@ export function useDataManage() {
         backupList,
         selectedBackupId,
         restoring,
+        restoreProgress,
         backupStep,
         selectedBackup,
         backingUp,

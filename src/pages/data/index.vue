@@ -277,7 +277,7 @@
             <text>下一步</text>
           </view>
           <view v-if="backupStep === 'confirm'" :class="['modal-btn confirm', restoring ? 'disabled' : '']" @tap="restoreBackup">
-            <text>{{ restoring ? '恢复中...' : '确认恢复' }}</text>
+            <text>{{ restoring ? (restoreProgress || '恢复中...') : '确认恢复' }}</text>
           </view>
         </view>
       </view>
@@ -348,6 +348,7 @@ const {
   backupList,
   selectedBackupId,
   restoring,
+  restoreProgress,
   backupStep,
   selectedBackup,
   backingUp,

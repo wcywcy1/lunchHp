@@ -18,6 +18,7 @@ const ROLE = { CREATOR: 'creator', ADMIN: 'admin' }
 const AUTO_MAX = 8
 const MANUAL_MAX = 10
 const BATCH_SIZE = 100
+const RESTORE_BATCH_SIZE = 500
 
 async function touchAllTimestamps() {
     const now = db.serverDate()
@@ -175,6 +176,9 @@ exports.main = async (event, context) => {
         backupAuto,
         backupManual,
         restoreBackup,
+        restorePrepare,
+        restoreBatch,
+        restoreFinish,
         getBackupList,
         deleteBackup,
         exportAllOrders,
@@ -275,6 +279,118 @@ async function restoreBackup(event, openid) {
     await touchAllTimestamps()
 
     return { code: 0, data: { orderCount: orders.length, menuCount: menu.length, memberCount: members.length, timestampsUpdated: true } }
+}
+
+async function restorePrepare(event, openid) {
+    const caller = await getMemberByOpenid(openid)
+    if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
+
+    const { backupId } = event
+    if (!backupId) return { code: 400, msg: 'missing backupId' }
+
+    await doBackup('manual', '恢复前自动备份')
+
+    const { data: backupDoc } = await db.collection(COL.BACKUPS).doc(backupId).get()
+    if (!backupDoc) return { code: 404, msg: 'backup not found' }
+
+    let backupDataStr
+    if (backupDoc.dataRef) {
+        const downloadRes = await cloud.downloadFile({ fileID: backupDoc.dataRef })
+        const buf = Buffer.isBuffer(downloadRes.fileContent) ? downloadRes.fileContent : Buffer.from(downloadRes.fileContent)
+        backupDataStr = buf.toString('utf-8')
+    } else {
+        backupDataStr = backupDoc.data
+    }
+
+    const backupData = JSON.parse(backupDataStr)
+    const { orders = [], menu = [], members = [] } = backupData
+
+    await db.collection(COL.ORDERS).where({ groupId: GROUP_ID }).remove()
+    await db.collection(COL.MENU).where({ groupId: GROUP_ID }).remove()
+    await db.collection(COL.MEMBERS).where({ groupId: GROUP_ID }).remove()
+    await db.collection(COL.MONTHLY_STATS).where({ groupId: GROUP_ID }).remove()
+    await db.collection(COL.USER_STATS).where({ groupId: GROUP_ID }).remove()
+
+    const sessionId = `restore_${GROUP_ID}_${Date.now()}`
+    const chunks = []
+    const allItems = [
+        ...orders.map(o => ({ col: COL.ORDERS, data: o })),
+        ...menu.map(m => ({ col: COL.MENU, data: m })),
+        ...members.map(m => ({ col: COL.MEMBERS, data: m })),
+    ]
+
+    for (let i = 0; i < allItems.length; i += RESTORE_BATCH_SIZE) {
+        chunks.push(allItems.slice(i, i + RESTORE_BATCH_SIZE))
+    }
+
+    for (let i = 0; i < chunks.length; i++) {
+        await db.collection(COL.BACKUPS).doc(`${sessionId}_${i}`).set({
+            data: { sessionId, chunkIndex: i, items: chunks[i], createdAt: db.serverDate() },
+        })
+    }
+
+    return {
+        code: 0,
+        data: {
+            sessionId,
+            totalItems: allItems.length,
+            totalChunks: chunks.length,
+            orderCount: orders.length,
+            menuCount: menu.length,
+            memberCount: members.length,
+        },
+    }
+}
+
+async function restoreBatch(event, openid) {
+    const caller = await getMemberByOpenid(openid)
+    if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
+
+    const { sessionId, chunkIndex } = event
+    if (!sessionId || chunkIndex === undefined) return { code: 400, msg: 'missing sessionId or chunkIndex' }
+
+    const docId = `${sessionId}_${chunkIndex}`
+    const { data: chunkDoc } = await db.collection(COL.BACKUPS).doc(docId).get()
+    if (!chunkDoc) return { code: 404, msg: `chunk ${chunkIndex} not found` }
+
+    const items = chunkDoc.items || []
+    const now = db.serverDate()
+
+    await Promise.all(items.map(item => {
+        const { _id, ...rest } = item.data
+        const docData = item.col === COL.MEMBERS
+            ? { ...rest, joinedAt: now }
+            : { ...rest, createdAt: now, updatedAt: now }
+        return db.collection(item.col).doc(_id).set({
+            data: docData,
+        }).catch(() => db.collection(item.col).add({
+            data: docData,
+        }))
+    }))
+
+    await db.collection(COL.BACKUPS).doc(docId).remove()
+
+    return { code: 0, data: { chunkIndex, written: items.length } }
+}
+
+async function restoreFinish(event, openid) {
+    const caller = await getMemberByOpenid(openid)
+    if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
+
+    const { sessionId } = event
+    if (!sessionId) return { code: 400, msg: 'missing sessionId' }
+
+    const { data: leftovers } = await db.collection(COL.BACKUPS)
+        .where({ sessionId })
+        .limit(100)
+        .get()
+    for (const doc of leftovers) {
+        await db.collection(COL.BACKUPS).doc(doc._id).remove()
+    }
+
+    await touchAllTimestamps()
+
+    return { code: 0 }
 }
 
 async function getBackupList(event, openid) {
