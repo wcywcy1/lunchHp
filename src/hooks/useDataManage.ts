@@ -349,6 +349,18 @@ export function useDataManage() {
         }
     }
 
+    async function loadMembers() {
+        try {
+            const res = await menuAction('getMembers')
+            if (res.result.code === 0) {
+                store.members = res.result.data || []
+                setCache(CACHE_KEYS.MEMBERS, store.members)
+            }
+        } catch (e) {
+            console.error('loadMembers error:', e)
+        }
+    }
+
     async function manualBackup() {
         backingUp.value = true
         try {
@@ -403,7 +415,11 @@ export function useDataManage() {
             if (res.result.code === 0) {
                 uni.showToast({ title: '恢复成功', icon: 'success' })
                 showBackupDialog.value = false
-                await orderManage.loadData()
+                await Promise.all([
+                    orderManage.loadData(),
+                    loadMenuList(true),
+                    loadMembers(),
+                ])
             }
         } catch (e: any) {
             uni.showToast({ title: e.message || '恢复失败', icon: 'none' })
