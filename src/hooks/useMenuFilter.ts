@@ -74,6 +74,11 @@ export function useMenuFilter(
             if (result.length >= 9) break
             result.push(item)
         }
+        // 新账号无个人/大众常点时，回退显示全部可见菜品，避免空列表
+        if (result.length === 0) {
+            const fallback = [...visible].sort((a, b) => (Number(a.sortNo) || 0) - (Number(b.sortNo) || 0))
+            result.push(...fallback.slice(0, 9))
+        }
         recentItems.value = result.slice(0, 9)
     }
 
