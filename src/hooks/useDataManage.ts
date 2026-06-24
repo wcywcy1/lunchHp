@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue'
-import { useStore, saveSession, setCache, resetStore, clearAllCache, setActiveGroupId, getActiveGroupId, setStore } from '../services/store'
+import { useStore, saveSession, setCache, resetStore, clearAllCache, setActiveGroupId, getActiveGroupId, setStore, setStatsLoadTime } from '../services/store'
 import { menuAction, orderAction, backupAction } from '../services/repositories/baseRepository'
 import { resetInit, startInit } from '../services/appInit'
 import { ROLE } from '../constants/orderStatus'
@@ -423,7 +423,7 @@ export function useDataManage() {
             const { sessionId, totalChunks, totalItems } = prepareRes.result.data
 
             for (let i = 0; i < totalChunks; i++) {
-                restoreProgress.value = `恢复中 ${Math.min((i + 1) * 2000, totalItems)}/${totalItems}`
+                restoreProgress.value = `恢复中 ${Math.min((i + 1) * 1000, totalItems)}/${totalItems}`
                 const batchRes = await backupAction('restoreBatch', { sessionId, chunkIndex: i })
                 if (batchRes.result.code !== 0) {
                     uni.showToast({ title: batchRes.result.msg || `第${i + 1}批写入失败`, icon: 'none' })
@@ -440,6 +440,12 @@ export function useDataManage() {
 
             uni.showToast({ title: '恢复成功', icon: 'success' })
             showBackupDialog.value = false
+            setCache(CACHE_KEYS.MONTHLY_STATS, [])
+            setCache(CACHE_KEYS.MONTHLY_STATS_TIME, 0)
+            setStatsLoadTime(0)
+            store.recentTimestamp = null
+            store.menuTimestamp = null
+            store.membersTimestamp = null
             await Promise.all([
                 orderManage.loadData(),
                 loadMenuList(true),

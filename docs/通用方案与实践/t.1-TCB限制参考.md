@@ -1,0 +1,303 @@
+# TCB 云函数限制参考
+
+> **修改任何涉及云函数数据传输的代码前，必须对照此文件。违反限制会直接报错 `-501000 EXCEED_MAX_RESPONSE_SIZE`。**
+
+## 0. 优化核心原则
+
+> **TCB 不限制数据库的读写次数，只限制云函数的调用次数和响应体大小。因此优化时优先考虑：**
+>
+> 1. **尽量少调用云函数**：减少前端↔云函数的往返次数，批量操作优先在云函数内部完成
+> 2. **数据不经过前端中转**：备份、恢复、导出等批量操作应在云函数内完成读写，避免"云函数→前端→云函数"的往返
+> 3. **删除用 `.where().remove()`**：一次全删，不需要分批，TCB 无条数限制
+> 4. **写入用分批100条**：`collection.add({ data: batch })` 硬限100条
+> 5. **读取返回前端用 limit≤1500**：保证响应不超1MB
+> 6. **云函数内DB操作无1MB限制**：云函数内部可以自由读写DB，不受响应体大小限制
+
+## 1. 响应限制（云函数 → 前端）
+
+| 限制项 | 值 | 说明 |
+|--------|-----|------|
+| **云函数响应体大小** | **1MB (1048576 bytes)** | `callFunction` 返回值超过此大小直接报错，无法绕过 |
+| 云函数超时 | 20 秒 | 超时自动终止 |
+
+## 2. 请求限制（前端 → 云函数）
+
+| 限制项 | 值 | 说明 |
+|--------|-----|------|
+| **云函数请求体大小** | **1MB (1048576 bytes)** | 传入参数（包括 records 数组）超过此大小也会报错 |
+| 单次 `callFunction` 参数 | 无硬限制条数 | 但序列化后总大小受 1MB 限制 |
+
+## 3. 数据库限制
+
+| 限制项 | 值 | 说明 |
+|--------|-----|------|
+| **云函数内单次查询最大返回** | **1000 条** | `.limit()` 最大值 1000 |
+| 客户端单次查询最大返回 | 100 条 | 小程序端 `.limit()` 最大值 100 |
+| **单次批量插入** | **100 条** | `collection.add({ data: batch })` 最多 100 条 |
+| 单次批量删除 | **无硬限制，可一次删 3000+ 条** | 云函数内 `.where().remove()` 可一次清空，不受 100 条限制 |
+
+## 4. 关键推算
+
+### 每条记录约 300 字节（JSON 序列化后）
+
+| 记录数 | 预估大小 | 响应安全 | 请求安全 |
+|--------|---------|---------|---------|
+| 200 条 | ~60KB | 安全 | 安全 |
+| 500 条 | ~150KB | 安全 | 安全 |
+| 1000 条 | ~300KB | 安全 | 安全 |
+| 3000 条 | ~900KB | **接近极限** | **接近极限** |
+| 3500 条 | ~1.05MB | **超限** | **超限** |
+
+## 5. 安全策略（必须遵守）
+
+### 5.1 读取数据（云函数 → 前端）
+
+- **常规加载**：`loadRecords` 首批 `limit=500`（含 accounts/members 查询），立即渲染；后续 `limit=1500`（skipLookup=true）后台静默加载
+- **云函数 limit 上限**：1500（约450KB+开销，安全）
+- **全量拉取（备份/导出）**：`getAllRecords` 内部用 `limit=1500` 循环分页取全部，**禁止用 `limit=0`**
+- **云函数内部**：`FETCH_BATCH_SIZE = 1000`（云函数内 DB 读取不受 1MB 限制，但返回给前端受限制）
+- **TCB 不支持游标分页**：SDK 只有 `skip/limit`，没有 `startAfter`，3000条数据量下 skip 性能无问题
+
+### 5.2 写入数据（前端 → 云函数）
+
+- **单条写入**：`addRecord` / `updateRecord` / `deleteRecord` 无问题
+- **批量导入原则**：前端分批发送，云函数内部分批写入
+  - 前端每批不超过 2000 条，且序列化后不超过 800KB（安全阈值，避免超 1MB 限制）
+  - 云函数内部 `BATCH_SIZE = 100`，分批调用 `collection.add({ data: batch })` 写入
+  - 前端尽量少调云函数：一次发尽可能多的数据（≤800KB），由云函数内部拆分写入
+- **备份写入**：优先使用 `createBackupSimple`（云函数内部完成，1次调用）；旧 `createBackup` 前端每批 ≤ 200 条
+- **语音查询**：`SPEECH_QUERY_LIMIT = 100`
+
+### 5.3 删除数据（云函数内）
+
+- **批量删除无条数限制**：云函数内 `.where({ familyId }).remove()` 可一次删除 3000+ 条
+- **推荐模式**：需要覆盖写入时，先全删再分批插入（如备份恢复 `restoreBackup` 的做法）
+- **注意**：删除操作不可逆，务必确认 where 条件正确
+
+### 5.4 云函数内部操作（不经前端传输）
+
+- **云函数内部 DB 操作不受 1MB 限制**：读取、写入、删除都可以在云函数内完成，不经过前端传输
+- **优先在云函数内完成批量操作**：如 `createBackupSimple` 在云函数内读DB→删旧→写新→更新meta，只需1次云函数调用
+- **云函数内读取用 `fetchAll`**：内部循环分页取全部，单次 `.limit(1000)`
+- **云函数内写入仍受批量插入100条限制**：`collection.add({ data: batch })` 最多100条
+
+### 5.5 禁止事项
+
+1. **禁止** `getRecords(limit=0)` 一次返回全部记录 → 超 1MB
+2. **禁止** `createBackup` 一次传入全部 3000+ 条记录 → 请求体超 1MB
+3. **禁止** 云函数内自动拆分响应（已验证失败，limit=0 路径忽略 skip 参数）
+4. **禁止** 任何单次 `callFunction` 传入或返回超过 ~3000 条记录
+5. **禁止** 备份/恢复操作让数据经过前端中转 → 应在云函数内完成
+
+## 6. 已踩过的坑
+
+| 日期 | 问题 | 原因 | 修复 |
+|------|------|------|------|
+| 2026-06 | `getRecords(limit=0)` 返回 3000 条超 1MB | 云函数响应体限制 1MB | 前端改用 limit=200 分页 |
+| 2026-06 | `getAllRecords` 备份时超 1MB | limit=0 一次返回全部超 1MB | getAllRecords 改为前端 limit=200 循环分页 |
+| 2026-06 | 云函数内自动拆分响应失败 | limit=0 路径忽略 skip 参数 | 放弃自动拆分，用前端分页 |
+| 2026-06 | `createBackup` 一次传 3000 条超 1MB | 请求体也受 1MB 限制 | 改用 `createBackupSimple`，云函数内部完成 |
+| 2026-06 | 备份后恢复提示"备份数据不存在" | `backupCurrentRecords` 没写 `batchId`，但恢复时按 meta 中的旧 `batchId` 查询，匹配不到新记录 | 备份时必须写入 `batchId` 到记录和 meta，与 `writeBackup` 保持一致 |
+| 2026-06 | 删库显示"删除一共0条" | `batchDelete` 探测机制用 `limit(-1)` 不合法 | 去掉探测+分批，改为一次 `.where().remove()` |
+| 2026-06 | 备份30次云函数调用 | 数据经前端中转：取15次+传回15次 | 改用 `createBackupSimple`，云函数内部完成，1次调用 |
+| 2026-06 | 登录加载15次云函数调用 | limit=200太小，3000条需15次 | 首批500条立即渲染+后续1500条/批，降至3次 |
+
+## 8. 各操作云函数调用量明细（3000条数据）
+
+### 8.1 登录流程
+
+| 阶段 | 云函数 | Action | 调用次数 | 说明 |
+|------|--------|--------|----------|------|
+| 微信登录 | RevD_user | wxLogin | 1 | 获取openid+家庭+成员 |
+| 登录后加载科目 | RevD_record | getAccounts | 1 | store.loadAccounts() |
+| 跳转首页 onShow | RevD_user | getFamilyMembers | 0~1 | 有缓存则跳过（setMembers已标记_loaded） |
+| 跳转首页 onShow | RevD_record | getAccounts | 0 | 已缓存 |
+| 跳转首页 onShow | RevD_record | getRecords | 3 | 首批500+后续1500×2 |
+| **合计** | | | **4~5次** | |
+
+### 8.2 首页日常操作
+
+| 操作 | 云函数 | Action | 调用次数 | 说明 |
+|------|--------|--------|----------|------|
+| 首页 onShow（已缓存） | — | — | 0 | 5分钟内缓存命中 |
+| 首页 onShow（缓存过期） | RevD_user | getFamilyMembers | 1 | |
+| | RevD_record | getAccounts | 1 | |
+| | RevD_record | getRecords | 3 | 首批500+后续1500×2 |
+| 下拉刷新 | RevD_record | getDataTimestamp | 1 | 检查新鲜度 |
+| | RevD_user | getFamilyMembers | 1 | force=true |
+| | RevD_record | getAccounts | 1 | force=true |
+| 添加记录 | RevD_record | addRecord | 1 | |
+| 修改记录 | RevD_record | updateRecord | 1 | |
+| 删除记录 | RevD_record | deleteRecord | 1 | |
+
+### 8.3 筛选页（filter）
+
+| 操作 | 云函数 | Action | 调用次数 | 说明 |
+|------|--------|--------|----------|------|
+| onShow（已缓存） | — | — | 0 | |
+| onShow（缓存过期） | RevD_user | getFamilyMembers | 1 | |
+| | RevD_record | getAccounts | 1 | |
+| | RevD_record | getRecords | 3 | |
+| 下拉刷新 | RevD_record | getDataTimestamp | 1 | |
+| | RevD_user | getFamilyMembers | 1 | |
+| | RevD_record | getAccounts | 1 | |
+
+### 8.4 设置页操作
+
+| 操作 | 云函数 | Action | 调用次数 | 说明 |
+|------|--------|--------|----------|------|
+| 添加成员 | RevD_user | addMember | 1 | |
+| 删除成员 | RevD_user | deleteMember | 1 | |
+| 修改成员 | RevD_user | updateMember | 1 | |
+| 创建邀请码 | RevD_user | createInviteCode | 1 | |
+| 修改家庭名 | RevD_user | updateFamily | 1 | |
+| 删除家庭 | RevD_user | deleteFamily | 1 | |
+| 修改科目 | RevD_record | updateAccount | 1 | |
+| 添加科目 | RevD_record | addAccount | 1 | |
+| 删除科目 | RevD_record | deleteAccount | 1 | |
+| 科目改名同步 | RevD_record | renameAccount | 1 | |
+
+### 8.5 数据管理操作
+
+| 操作 | 云函数 | Action | 调用次数 | 说明 |
+|------|--------|--------|----------|------|
+| 一键备份 | RevD_record | getBackups | 1 | 获取备份列表 |
+| | RevD_record | createBackupSimple | 1 | 云函数内部完成 |
+| | **合计** | | **2次** | |
+| 恢复备份(settings) | RevD_record | getBackups | 1 | |
+| | RevD_record | restorePrepare | 1 | 全删当前记录 |
+| | RevD_record | restoreWriteBatch | N | 1000条/批 |
+| | RevD_record | getRecords | 3 | 恢复后刷新 |
+| | **合计** | | **5+N次** | |
+| 恢复备份(h5data) | RevD_record | getBackups | 1 | |
+| | RevD_record | restoreBackup | 1 | 云函数内部完成 |
+| | RevD_record | getRecords | 3 | 恢复后刷新 |
+| | **合计** | | **5次** | |
+| 批量录入 | RevD_record | batchCreateRecords | 1 | |
+| Excel导入 | RevD_record | importRecords | 1 | 云函数内自动分批 |
+| 检查重复 | RevD_record | checkDuplicates | 1 | |
+| 删库 | RevD_record | deleteBatch | 1 | .where().remove() |
+| 语音识别 | RevD_record | speechRecognize | 1 | |
+
+### 8.6 H5登录
+
+| 操作 | 云函数 | Action | 调用次数 | 说明 |
+|------|--------|--------|----------|------|
+| PIN码登录 | RevD_user | loginByPin | 1 | |
+| 加入家庭 | RevD_user | joinByInviteCode | 1 | |
+
+### 8.7 综合调用量对比（3000条数据）
+
+| 操作 | 旧版 | 当前版 | 说明 |
+|------|------|--------|------|
+| 登录→首页 | 65次 | 4~5次 | limit 50→500/1500，setMembers标记缓存 |
+| 首页onShow(缓存命中) | 3次 | 0次 | 5分钟缓存 |
+| 首页onShow(缓存过期) | 15次 | 5次 | getRecords 3次+members+accounts |
+| 添加/修改/删除1条 | 1次 | 1次 | 不变 |
+| 一键备份 | 31次(失败) | 2次 | 云函数内部完成 |
+| 恢复备份(h5data) | 1次 | 5次 | 云函数内部完成+刷新 |
+| 删库 | 1次(内部60次DB) | 1次(内部1次DB) | .where().remove() |
+
+### 加载策略：首批立即渲染
+
+```
+loadRecords 执行流程：
+第1次调用: limit=500, skip=0, skipLookup=false → 拿到500条 → 立即渲染首页
+第2次调用: limit=1500, skip=500, skipLookup=true → 后台静默加载
+第3次调用: limit=1500, skip=2000, skipLookup=true → 后台静默加载
+全部完成 → 更新缓存时间戳
+```
+
+用户感知：首次渲染从等15次调用缩短到等1次，体验大幅提升。
+
+## 7. 设计原则
+
+1. **数据不经过前端中转**：批量操作（备份、恢复、删库）应在云函数内部完成，避免"云函数→前端→云函数"的往返
+2. **删除用 `.where().remove()`**：一次全删，不需要分批，TCB 无条数限制
+3. **写入用分批100条**：`collection.add({ data: batch })` 硬限100条
+4. **读取返回前端用 limit≤1500**：首批500条立即渲染，后续1500条/批后台加载，保证响应不超1MB
+5. **备份/恢复的 `batchId` 必须一致**：备份记录和 meta 都要写 `batchId`，恢复时按 `batchId` 过滤
+6. **批量更新用云函数内循环 `doc().update()`**：TCB 无批量更新不同值的API，`.where().update()` 只能设相同值，不同值只能逐条 `doc().update()`，但应在云函数内部循环（无网络开销）
+7. **批量操作只更新1次 `dataTimestamp`**：避免循环内反复更新时间戳，循环结束后统一更新1次
+
+## 8.5 批量操作云函数/DB调用量对比（1000条数据）
+
+### 当前已优化的批量操作
+
+| 操作 | 云函数调用 | DB操作 | 说明 |
+|------|-----------|--------|------|
+| 批量删除 `batchDeleteByIds` | 1次 | 1次 `.where().remove()` + 1次删除日志 | 1次云函数替代旧版1000次 |
+| 批量编辑 `batchUpdateRecords` | 1次 | 1000次 `doc().update()` + 1次时间戳 | TCB无批量更新不同值API，云函数内循环无网络开销 |
+| 批量创建 `batchCreateRecords` | 1次 | 10次 `collection.add(100条)` + 1次时间戳 | 100条/批分批插入 |
+| Excel导入 `importRecords` | 1次 | 10次 `collection.add(100条)` + 覆盖+快照 | 自动分批，超3000条递归 |
+| 科目重命名 `renameAccount` | 1次 | 1次 `.where().update()` | 所有匹配记录设相同值，1次DB操作 |
+| 一键备份 `createBackupSimple` | 1次 | 全量读+1次全删+10次写入+1次meta | 云函数内部完成 |
+| 恢复备份 `restoreBackup` | 1次 | 1次全删+10次写入+1次时间戳 | 云函数内部完成 |
+
+### 优化前后对比（1000条）
+
+| 操作 | 优化前云函数 | 优化后云函数 | 优化前DB | 优化后DB |
+|------|------------|------------|---------|---------|
+| 批量删除 | 1000次 | **1次** | 1000次 | 1次 |
+| 批量编辑 | 1000次 | **1次** | 1000次 | 1000次(云函数内) |
+| 批量导入(settings) | 1000次 | **1次** | 1000次 | 10次 |
+
+## 9. 代码审查注意事项（供以后参考）
+
+### 9.1 已确认无问题的模式
+
+| 模式 | 位置 | 说明 |
+|------|------|------|
+| 单条增删改 | home/records/statistics/h5data/filter | 单条操作1次云函数，正常 |
+| 科目重命名 | settings → `renameAccount` | `.where({accountId}).update()` 1次DB，已最优 |
+| 增量同步 | `getRecordsIncremental` | 按 `updatedAt` 增量拉取，减少传输量 |
+| 备份恢复 | `restoreBackup` / `restoreWriteBatch` | 云函数内部完成，分批100条写入 |
+
+### 9.2 需要注意的潜在风险
+
+| 风险 | 位置 | 说明 | 建议 |
+|------|------|------|------|
+| **`batchUpdateRecords` 超时风险** | L1441-1481 | 1000条 `doc().update()` 串行执行，每条约10-30ms，总计可能10-30秒，接近20秒超时 | 若数据量超过500条，考虑分批调用或改为 `Promise.all` 并发（注意TCB并发限制） |
+| **`importRecords` 快照逐条读取** | L748-772 | 覆盖模式下逐条 `doc().get()` 读取原始数据做快照，N条覆盖=N次DB读取 | 大量覆盖时可能超时；可改为 `_.in(ids)` 批量读取 |
+| **`rollbackImport` 逐条恢复** | L854-876 | 逐条 `doc().update()` 恢复被覆盖记录 | 同 `batchUpdateRecords` 超时风险 |
+| **`batchDeleteByIds` 删除日志可能超100条** | L1425-1428 | `records_delete_log.add({ data: deleteLogs })` 一次写入，若ids>100会报错 | 应分批100条写入，与 `batchCreateRecords` 同理 |
+| **`getRecords` 重复 count 查询** | L260-268 | `countRes` 查询执行了2次（L260和L267），浪费1次DB调用 | 删除重复的 count 查询 |
+| **`fetchAll` skip 深度问题** | L61-71 | skip 值过大时性能下降（TCB底层是偏移扫描） | 当前数据量<10000条无问题；若数据量增长，考虑改用 `updatedAt` 游标分页 |
+| **`restoreBackup` 全量内存操作** | L1204-1236 | `fetchAll` 将所有备份记录加载到内存，再构建新记录数组 | 5000条以下安全；超大量时考虑流式处理（`restoreWriteBatch` 已实现分批） |
+| **`deleteRecord` 额外1次读取** | L391 | 删除前先 `doc().get()` 读取 familyId，再删除 | 可改为前端传入 familyId，省1次DB读取 |
+| **`updateRecord` 额外1次读取** | L379 | 更新后再 `doc().get()` 读取 familyId | 可改为前端传入 familyId，省1次DB读取 |
+
+### 9.3 TCB API 使用规则速查
+
+| 操作 | API | 限制 | 正确用法 |
+|------|-----|------|---------|
+| 批量插入 | `collection.add({ data: [] })` | **最多100条** | 分批100条循环插入 |
+| 单条更新 | `doc(id).update({ data })` | 无条数限制 | 云函数内循环，注意超时 |
+| 批量更新相同值 | `.where(condition).update({ data })` | 无条数限制 | 科目重命名等场景 |
+| 批量删除 | `.where(condition).remove()` | 无条数限制 | 1次调用删除全部 |
+| 单条查询 | `doc(id).get()` | 无条数限制 | — |
+| 条件查询 | `.where().limit(N).get()` | 云函数内limit≤1000 | `fetchAll` 循环分页 |
+| 条件计数 | `.where().count()` | 无条数限制 | — |
+
+### 9.4 批量写入标准做法
+
+> **云函数内写入永远固定 100 条一批，前端控制每次送多少条进来。**
+
+```
+前端控制每次送多少条 ──→ 云函数收到 N 条
+                              │
+                              └── 内部固定 100 条一批写入（BATCH_SIZE）
+                                  for (i=0; i<N; i+=100)
+                                      await Promise.all(100个并发写)
+```
+
+**原则：**
+- 云函数 `BATCH_SIZE = 100` 是 TCB 硬限，永远不动
+- 前端 `RESTORE_BATCH_SIZE` 控制每次调云函数送多少条，可按需调整（当前 1000）
+- 云函数不关心来了多少条，内部始终按 100 一批串行写完
+
+**适用场景：**
+- `restoreBatch`：前端分批调用，每批 1000 条，云函数内部 100 条一批写入
+- `restoreBackup`（单次调用路径）：前端一次调用，云函数内部 100 条一批写入
+- `importOrders`：同理
+- 任何需要批量写入 DB 的操作

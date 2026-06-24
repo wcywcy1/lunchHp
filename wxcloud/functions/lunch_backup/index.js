@@ -18,7 +18,7 @@ const ROLE = { CREATOR: 'creator', ADMIN: 'admin' }
 const AUTO_MAX = 8
 const MANUAL_MAX = 10
 const BATCH_SIZE = 100
-const RESTORE_BATCH_SIZE = 2000
+const RESTORE_BATCH_SIZE = 1000
 
 async function touchAllTimestamps() {
     const now = db.serverDate()
@@ -276,7 +276,13 @@ async function restoreBackup(event, openid) {
         }))
     }
 
-    await touchAllTimestamps()
+    await db.collection(COL.GROUPS).doc(GROUP_ID).update({
+        data: { ordersTimestamp: now, menuTimestamp: now, membersTimestamp: now, dataTimestamp: 0 },
+    }).catch(async () => {
+        await db.collection(COL.GROUPS).add({
+            data: { _id: GROUP_ID, ordersTimestamp: now, menuTimestamp: now, membersTimestamp: now, dataTimestamp: 0, createdAt: now },
+        })
+    })
 
     return { code: 0, data: { orderCount: orders.length, menuCount: menu.length, memberCount: members.length, timestampsUpdated: true } }
 }
@@ -356,17 +362,20 @@ async function restoreBatch(event, openid) {
     const items = chunkDoc.items || []
     const now = db.serverDate()
 
-    await Promise.all(items.map(item => {
-        const { _id, ...rest } = item.data
-        const docData = item.col === COL.MEMBERS
-            ? { ...rest, joinedAt: now }
-            : { ...rest, createdAt: now, updatedAt: now }
-        return db.collection(item.col).doc(_id).set({
-            data: docData,
-        }).catch(() => db.collection(item.col).add({
-            data: docData,
+    for (let i = 0; i < items.length; i += BATCH_SIZE) {
+        const batch = items.slice(i, i + BATCH_SIZE)
+        await Promise.all(batch.map(item => {
+            const { _id, ...rest } = item.data
+            const docData = item.col === COL.MEMBERS
+                ? { ...rest, joinedAt: now }
+                : { ...rest, createdAt: now, updatedAt: now }
+            return db.collection(item.col).doc(_id).set({
+                data: docData,
+            }).catch(() => db.collection(item.col).add({
+                data: docData,
+            }))
         }))
-    }))
+    }
 
     await db.collection(COL.BACKUPS).doc(docId).remove()
 
@@ -388,7 +397,14 @@ async function restoreFinish(event, openid) {
         await db.collection(COL.BACKUPS).doc(doc._id).remove()
     }
 
-    await touchAllTimestamps()
+    const now = db.serverDate()
+    await db.collection(COL.GROUPS).doc(GROUP_ID).update({
+        data: { ordersTimestamp: now, menuTimestamp: now, membersTimestamp: now, dataTimestamp: 0 },
+    }).catch(async () => {
+        await db.collection(COL.GROUPS).add({
+            data: { _id: GROUP_ID, ordersTimestamp: now, menuTimestamp: now, membersTimestamp: now, dataTimestamp: 0, createdAt: now },
+        })
+    })
 
     return { code: 0 }
 }
@@ -454,7 +470,14 @@ async function clearAllData(event, openid) {
     await db.collection(COL.MEMBERS).where({ groupId: GROUP_ID, role: _.neq('creator') }).remove()
     await db.collection(COL.MONTHLY_STATS).where({ groupId: GROUP_ID }).remove()
     await db.collection(COL.USER_STATS).where({ groupId: GROUP_ID }).remove()
-    await touchAllTimestamps()
+    const now = db.serverDate()
+    await db.collection(COL.GROUPS).doc(GROUP_ID).update({
+        data: { ordersTimestamp: now, menuTimestamp: now, membersTimestamp: now, dataTimestamp: 0 },
+    }).catch(async () => {
+        await db.collection(COL.GROUPS).add({
+            data: { _id: GROUP_ID, ordersTimestamp: now, menuTimestamp: now, membersTimestamp: now, dataTimestamp: 0, createdAt: now },
+        })
+    })
 
     return { code: 0 }
 }
