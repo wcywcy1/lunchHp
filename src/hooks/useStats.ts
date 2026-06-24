@@ -2,7 +2,7 @@ import { ref, computed, ComputedRef, Ref } from 'vue'
 import { useStore, getCache, setCache, getStatsLoadTime, setStatsLoadTime } from '../services/store'
 import { orderAction } from '../services/repositories/baseRepository'
 import { CACHE_KEYS, CACHE_TTL } from '../constants/cacheConfig'
-import { buildCsvLine, writeCsvWithBom, shareLocalFile, isPcPlatform } from '../utils/csv'
+import { buildCsvLine, writeCsvWithBom, shareLocalFile } from '../utils/csv'
 import type { MonthlyStat } from '../types'
 
 interface FilterState {

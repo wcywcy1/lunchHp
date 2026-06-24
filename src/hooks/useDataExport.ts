@@ -1,12 +1,9 @@
 import { ref } from 'vue'
-import { useStore, setCache } from '../services/store'
 import { menuAction, orderAction } from '../services/repositories/baseRepository'
-import { CACHE_KEYS } from '../constants/cacheConfig'
 import { buildCsvLine, writeCsvWithBom, shareLocalFile, shareOrSaveFile, isPcPlatform } from '../utils/csv'
 import { getTodayString } from '../utils/date'
 
 export function useDataExport() {
-    const store = useStore()
     const exporting = ref(false)
 
     async function downloadCloudFile(fileID: string, fileName?: string) {

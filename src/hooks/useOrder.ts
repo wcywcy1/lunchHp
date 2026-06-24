@@ -1,5 +1,5 @@
 import { ref, computed, ComputedRef, Ref } from 'vue'
-import { useStore, setCache, flushCache } from '../services/store'
+import { useStore, setCache } from '../services/store'
 import { menuAction, orderAction } from '../services/repositories/baseRepository'
 import { CACHE_KEYS } from '../constants/cacheConfig'
 import { getTodayString } from '../utils/date'

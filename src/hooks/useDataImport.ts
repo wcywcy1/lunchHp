@@ -26,92 +26,6 @@ function splitBatches<T>(records: T[]): T[][] {
     return batches
 }
 
-function parseCsvLine(line: string): string[] {
-    const result: string[] = []
-    let current = ''
-    let inQuotes = false
-    for (let i = 0; i < line.length; i++) {
-        const ch = line[i]
-        if (inQuotes) {
-            if (ch === '"') {
-                if (i + 1 < line.length && line[i + 1] === '"') {
-                    current += '"'
-                    i++
-                } else {
-                    inQuotes = false
-                }
-            } else {
-                current += ch
-            }
-        } else {
-            if (ch === '"') {
-                inQuotes = true
-            } else if (ch === ',') {
-                result.push(current)
-                current = ''
-            } else {
-                current += ch
-            }
-        }
-    }
-    result.push(current)
-    return result
-}
-
-function splitCsvLines(content: string): string[] {
-    const lines: string[] = []
-    let current = ''
-    let inQuotes = false
-    for (let i = 0; i < content.length; i++) {
-        const ch = content[i]
-        if (inQuotes) {
-            current += ch
-            if (ch === '"') {
-                if (i + 1 < content.length && content[i + 1] === '"') {
-                    i++
-                } else {
-                    inQuotes = false
-                }
-            }
-        } else {
-            if (ch === '"') {
-                inQuotes = true
-                current += ch
-            } else if (ch === '\r' || ch === '\n') {
-                if (ch === '\r' && i + 1 < content.length && content[i + 1] === '\n') {
-                    i++
-                }
-                if (current.trim()) lines.push(current)
-                current = ''
-            } else {
-                current += ch
-            }
-        }
-    }
-    if (current.trim()) lines.push(current)
-    return lines
-}
-
-function parseDate(val: string | number | undefined): string {
-    if (!val) return ''
-    if (typeof val === 'number') {
-        const epoch = new Date(Date.UTC(1899, 11, 30))
-        const d = new Date(epoch.getTime() + val * 86400000)
-        return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
-    }
-    const str = String(val).trim()
-    let m = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/)
-    if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`
-    m = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/)
-    if (m) return `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`
-    m = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2})$/)
-    if (m) {
-        const yr = Number(m[3]) + 2000
-        return `${yr}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`
-    }
-    return ''
-}
-
 const HEADER_ALIASES: Record<string, string[]> = {
     date: ['日期', 'date'],
     menuName: ['菜品', '菜品名', 'menuname', 'order', 'description'],
@@ -152,17 +66,6 @@ function mapHeader(header: string[], fields: string[]): Record<string, number> {
 export function useDataImport() {
     const store = useStore()
     const importing = ref(false)
-
-    async function parseXlsxViaCloud(filePath: string): Promise<string[][]> {
-        const cloudPath = `xlsx_import/${Date.now()}_${Math.random().toString(36).substr(2, 6)}.xlsx`
-        const uploadRes = await wx.cloud.uploadFile({ cloudPath, filePath })
-        const parseRes = await menuAction('parseXlsx', { fileID: uploadRes.fileID })
-        if (parseRes.result.code !== 0) {
-            throw new Error(parseRes.result.msg || 'xlsx解析失败')
-        }
-        try { await wx.cloud.deleteFile({ fileList: [uploadRes.fileID] }) } catch (e) { }
-        return parseRes.result.data.rows
-    }
 
     async function doImportXlsx(filePath: string, importType: 'orders' | 'menu' | 'members', loadData: () => Promise<void>) {
         const mode = await new Promise<'append' | 'rewrite' | ''>(resolve => {

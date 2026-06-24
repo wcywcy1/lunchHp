@@ -1,13 +1,10 @@
 import { ref, computed } from 'vue'
-import { useStore, setCache } from '../services/store'
 import { orderAction } from '../services/repositories/baseRepository'
 import { ORDER_STATUS } from '../constants/orderStatus'
-import { CACHE_KEYS } from '../constants/cacheConfig'
 import { useRealtimeWatch } from './useRealtimeWatch'
 import { getTodayString } from '../utils/date'
 
 export function useOrderManage() {
-    const store = useStore()
     const loading = ref(false)
     const pendingOrders = ref<any[]>([])
     const confirmedOrders = ref<any[]>([])

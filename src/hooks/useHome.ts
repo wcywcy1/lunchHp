@@ -1,6 +1,5 @@
 import { ref, computed } from 'vue'
-import { onShow, onHide } from '@dcloudio/uni-app'
-import { useStore, setStore, getCache, setCache, saveSession, setRecentLoadTime, flushCache } from '../services/store'
+import { useStore, setStore, setCache, saveSession, setRecentLoadTime } from '../services/store'
 import { menuAction, orderAction } from '../services/repositories/baseRepository'
 import { waitForInit } from '../services/appInit'
 import { CACHE_KEYS } from '../constants/cacheConfig'
