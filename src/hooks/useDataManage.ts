@@ -423,7 +423,7 @@ export function useDataManage() {
             const { sessionId, totalChunks, totalItems } = prepareRes.result.data
 
             for (let i = 0; i < totalChunks; i++) {
-                restoreProgress.value = `恢复中 ${Math.min((i + 1) * 500, totalItems)}/${totalItems}`
+                restoreProgress.value = `恢复中 ${Math.min((i + 1) * 2000, totalItems)}/${totalItems}`
                 const batchRes = await backupAction('restoreBatch', { sessionId, chunkIndex: i })
                 if (batchRes.result.code !== 0) {
                     uni.showToast({ title: batchRes.result.msg || `第${i + 1}批写入失败`, icon: 'none' })

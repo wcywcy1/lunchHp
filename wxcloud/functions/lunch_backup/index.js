@@ -18,7 +18,7 @@ const ROLE = { CREATOR: 'creator', ADMIN: 'admin' }
 const AUTO_MAX = 8
 const MANUAL_MAX = 10
 const BATCH_SIZE = 100
-const RESTORE_BATCH_SIZE = 500
+const RESTORE_BATCH_SIZE = 2000
 
 async function touchAllTimestamps() {
     const now = db.serverDate()
