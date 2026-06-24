@@ -388,6 +388,8 @@ export function useDataManage() {
                 selectedBackup.value = null
                 backupStep.value = 'list'
                 showBackupDialog.value = true
+            } else {
+                uni.showToast({ title: res.result.msg || '获取备份列表失败', icon: 'none' })
             }
         } catch (e: any) {
             uni.showToast({ title: e.message || '获取备份列表失败', icon: 'none' })
@@ -420,6 +422,8 @@ export function useDataManage() {
                     loadMenuList(true),
                     loadMembers(),
                 ])
+            } else {
+                uni.showToast({ title: res.result.msg || '恢复失败', icon: 'none' })
             }
         } catch (e: any) {
             uni.showToast({ title: e.message || '恢复失败', icon: 'none' })
