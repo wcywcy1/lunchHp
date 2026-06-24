@@ -4,7 +4,7 @@ import { menuAction, orderAction, backupAction } from '../services/repositories/
 import { resetInit, startInit } from '../services/appInit'
 import { ORDER_STATUS, ROLE } from '../constants/orderStatus'
 import { CACHE_KEYS } from '../constants/cacheConfig'
-import { buildCsvLine, writeCsvWithBom, isPcPlatform } from '../utils/csv'
+import { buildCsvLine, writeCsvWithBom, shareLocalFile, isPcPlatform } from '../utils/csv'
 import { getTodayString } from '../utils/date'
 import { useOrderManage } from './useOrderManage'
 import { useDataExport } from './useDataExport'
@@ -78,7 +78,7 @@ export function useDataManage() {
                     const fileName = `确认单_${group.supplier}_${getTodayString()}.csv`
                     const path = `${wx.env.USER_DATA_PATH}/${fileName}`
                     writeCsvWithBom(fs, path, lines.join('\r\n'))
-                    const shareRes = await dataExport.shareLocalFile(path, fileName)
+                    const shareRes = await shareLocalFile(path, fileName)
                     uni.showToast({ title: shareRes.success ? '分享成功' : (shareRes.cancelled ? '已取消' : '分享失败'), icon: shareRes.success ? 'success' : 'none' })
                 }
             } else {
@@ -95,7 +95,7 @@ export function useDataManage() {
                 const fileName = `确认单_全部_${getTodayString()}.csv`
                 const path = `${wx.env.USER_DATA_PATH}/${fileName}`
                 writeCsvWithBom(fs, path, lines.join('\r\n'))
-                const shareRes = await dataExport.shareLocalFile(path, fileName)
+                const shareRes = await shareLocalFile(path, fileName)
                 uni.showToast({ title: shareRes.success ? '分享成功' : (shareRes.cancelled ? '已取消' : '分享失败'), icon: shareRes.success ? 'success' : 'none' })
             }
             showDownloadDialog.value = false

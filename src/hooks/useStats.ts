@@ -2,7 +2,7 @@ import { ref, computed, ComputedRef, Ref } from 'vue'
 import { useStore, getCache, setCache, getStatsLoadTime, setStatsLoadTime } from '../services/store'
 import { orderAction } from '../services/repositories/baseRepository'
 import { CACHE_KEYS, CACHE_TTL } from '../constants/cacheConfig'
-import { buildCsvLine, writeCsvWithBom, shareOrSaveFile, isPcPlatform } from '../utils/csv'
+import { buildCsvLine, writeCsvWithBom, shareLocalFile, isPcPlatform } from '../utils/csv'
 import type { MonthlyStat } from '../types'
 
 interface FilterState {
@@ -269,41 +269,6 @@ export function useStats(): StatsReturn {
         }
     }
 
-    function shareStatsFile(filePath: string, fileName: string): Promise<void> {
-        return new Promise((resolve) => {
-            const fs = wx.getFileSystemManager()
-            const cleanup = () => { try { fs.unlinkSync(filePath) } catch {} }
-            // PC 端：直接保存到磁盘
-            if (isPcPlatform()) {
-                shareOrSaveFile(filePath, fileName).then(res => {
-                    cleanup()
-                    uni.showToast({ title: res.message, icon: res.success ? 'success' : 'none' })
-                    resolve()
-                })
-                return
-            }
-            // 移动端：弹窗确认后分享
-            uni.showModal({
-                title: '导出成功',
-                content: '是否分享到微信？',
-                confirmText: '分享',
-                cancelText: '取消',
-                success: (modalRes) => {
-                    if (!modalRes.confirm) {
-                        cleanup()
-                        resolve()
-                        return
-                    }
-                    shareOrSaveFile(filePath, fileName).then(res => {
-                        cleanup()
-                        uni.showToast({ title: res.message, icon: res.success ? 'success' : 'none' })
-                        resolve()
-                    })
-                },
-            })
-        })
-    }
-
     async function downloadMonthlyData() {
         if (filteredStats.value.length === 0) {
             uni.showToast({ title: '暂无数据', icon: 'none' })
@@ -325,7 +290,8 @@ export function useStats(): StatsReturn {
                 const fs = wx.getFileSystemManager()
                 const localPath = `${wx.env.USER_DATA_PATH}/${fileName}`
                 fs.saveFileSync(downloadRes.tempFilePath, localPath)
-                await shareStatsFile(localPath, fileName)
+                const shareRes = await shareLocalFile(localPath, fileName)
+                uni.showToast({ title: shareRes.message, icon: shareRes.success ? 'success' : 'none' })
             } else {
                 const csvLines = ['月份,总金额,订单数']
                 filteredStats.value.forEach(s => {
@@ -334,7 +300,8 @@ export function useStats(): StatsReturn {
                 const fs = wx.getFileSystemManager()
                 const path = `${wx.env.USER_DATA_PATH}/${fileName}`
                 writeCsvWithBom(fs, path, csvLines.join('\r\n'))
-                await shareStatsFile(path, fileName)
+                const shareRes = await shareLocalFile(path, fileName)
+                uni.showToast({ title: shareRes.message, icon: shareRes.success ? 'success' : 'none' })
             }
         } catch (e: any) {
             uni.showToast({ title: e.message || '下载失败', icon: 'none' })

@@ -171,3 +171,34 @@ export function shareOrSaveFile(filePath: string, fileName: string): Promise<Sha
         }
     })
 }
+
+export function shareLocalFile(filePath: string, fileName: string): Promise<ShareResult> {
+    return new Promise((resolve) => {
+        const fs = wx.getFileSystemManager()
+        const cleanup = () => { try { fs.unlinkSync(filePath) } catch {} }
+        if (isPcPlatform()) {
+            shareOrSaveFile(filePath, fileName).then(res => {
+                cleanup()
+                resolve(res)
+            })
+            return
+        }
+        uni.showModal({
+            title: '导出成功',
+            content: '是否分享到微信？',
+            confirmText: '分享',
+            cancelText: '取消',
+            success: (modalRes) => {
+                if (!modalRes.confirm) {
+                    cleanup()
+                    resolve({ success: false, message: '已取消', cancelled: true })
+                    return
+                }
+                shareOrSaveFile(filePath, fileName).then(res => {
+                    cleanup()
+                    resolve(res)
+                })
+            },
+        })
+    })
+}

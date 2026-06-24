@@ -2,41 +2,12 @@ import { ref } from 'vue'
 import { useStore, setCache } from '../services/store'
 import { menuAction, orderAction } from '../services/repositories/baseRepository'
 import { CACHE_KEYS } from '../constants/cacheConfig'
-import { buildCsvLine, writeCsvWithBom, shareOrSaveFile, isPcPlatform } from '../utils/csv'
+import { buildCsvLine, writeCsvWithBom, shareLocalFile, shareOrSaveFile, isPcPlatform } from '../utils/csv'
 import { getTodayString } from '../utils/date'
 
 export function useDataExport() {
     const store = useStore()
     const exporting = ref(false)
-
-    function shareLocalFile(filePath: string, fileName: string): Promise<{ success: boolean; message: string; cancelled?: boolean }> {
-        return new Promise((resolve) => {
-            if (isPcPlatform()) {
-                shareOrSaveFile(filePath, fileName).then(res => {
-                    try { wx.getFileSystemManager().unlinkSync(filePath) } catch {}
-                    resolve(res)
-                })
-                return
-            }
-            uni.showModal({
-                title: '导出成功',
-                content: '是否分享到微信？',
-                confirmText: '分享',
-                cancelText: '取消',
-                success: (modalRes) => {
-                    if (!modalRes.confirm) {
-                        try { wx.getFileSystemManager().unlinkSync(filePath) } catch {}
-                        resolve({ success: false, message: '已取消', cancelled: true })
-                        return
-                    }
-                    shareOrSaveFile(filePath, fileName).then(res => {
-                        try { wx.getFileSystemManager().unlinkSync(filePath) } catch {}
-                        resolve(res)
-                    })
-                },
-            })
-        })
-    }
 
     async function downloadCloudFile(fileID: string, fileName?: string) {
         return new Promise<void>((resolve, reject) => {
