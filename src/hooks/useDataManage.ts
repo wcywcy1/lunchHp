@@ -1120,6 +1120,7 @@ export function useDataManage() {
             if (res.result.code === 0) {
                 const d = res.result.data
                 let content = `扫描 ${d.totalOrders} 条订单\n修复成员关联 ${d.memberFixed} 条\n修复菜单关联 ${d.menuFixed} 条`
+                if (d.memberNameCollisions) content += `\n⚠ ${d.memberNameCollisions} 个姓名存在同名成员，已跳过`
                 if (d.memberNotFound) content += `\n⚠ ${d.memberNotFound} 条未找到对应成员`
                 if (d.menuNotFound) content += `\n⚠ ${d.menuNotFound} 条未找到对应餐品`
                 uni.showModal({ title: '重置完成', content, showCancel: false })

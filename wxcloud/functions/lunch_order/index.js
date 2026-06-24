@@ -1190,15 +1190,23 @@ async function rebuildOrderRelations(event, openid) {
 
     const allMembers = await fetchAll(db.collection(COL.MEMBERS), { groupId: GROUP_ID })
     const memberByName = {}
-    allMembers.forEach(m => { memberByName[m.name] = m._id })
+    const memberNameCollisions = new Set()
+    allMembers.forEach(m => {
+        if (memberByName[m.name]) {
+            memberNameCollisions.add(m.name)
+        } else {
+            memberByName[m.name] = m._id
+        }
+    })
+    for (const name of memberNameCollisions) {
+        delete memberByName[name]
+    }
 
     const allMenu = await fetchAll(db.collection(COL.MENU), { groupId: GROUP_ID })
     const menuByKey = {}
-    const menuByName = {}
     allMenu.forEach(it => {
         const key = (it.supplier || '') + '|' + it.name
         menuByKey[key] = it._id
-        if (!menuByName[it.name]) menuByName[it.name] = it._id
     })
 
     const allOrders = await fetchAll(db.collection(COL.ORDERS), { groupId: GROUP_ID })
@@ -1222,7 +1230,7 @@ async function rebuildOrderRelations(event, openid) {
         }
 
         const menuKey = (order.supplier || '') + '|' + order.menuName
-        const matchedMenuId = menuByKey[menuKey] || menuByName[order.menuName]
+        const matchedMenuId = menuByKey[menuKey]
         if (matchedMenuId && order.menuId !== matchedMenuId) {
             update.menuId = matchedMenuId
             menuFixed++
@@ -1234,11 +1242,21 @@ async function rebuildOrderRelations(event, openid) {
         if (changed) toUpdate.push({ orderId: order._id, update })
     }
 
-    for (let i = 0; i < toUpdate.length; i += 100) {
-        const batch = toUpdate.slice(i, i + 100)
-        await Promise.all(batch.map(u =>
-            db.collection(COL.ORDERS).doc(u.orderId).update({ data: u.update })
-        ))
+    const updateGroups = {}
+    for (const u of toUpdate) {
+        const key = JSON.stringify(u.update)
+        if (!updateGroups[key]) updateGroups[key] = { ids: [], update: u.update }
+        updateGroups[key].ids.push(u.orderId)
+    }
+    const IN_LIMIT = 500
+    for (const key of Object.keys(updateGroups)) {
+        const { ids, update } = updateGroups[key]
+        for (let i = 0; i < ids.length; i += IN_LIMIT) {
+            const batchIds = ids.slice(i, i + IN_LIMIT)
+            await db.collection(COL.ORDERS)
+                .where({ _id: _.in(batchIds), groupId: GROUP_ID })
+                .update({ data: update })
+        }
     }
 
     await db.collection(COL.USER_STATS).where({ groupId: GROUP_ID }).remove()
@@ -1252,6 +1270,7 @@ async function rebuildOrderRelations(event, openid) {
             menuFixed,
             memberNotFound,
             menuNotFound,
+            memberNameCollisions: memberNameCollisions.size,
             updated: toUpdate.length,
         }
     }
