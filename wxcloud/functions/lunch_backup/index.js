@@ -9,6 +9,7 @@ const COL = {
     MENU: 'lunch_menu',
     MEMBERS: 'lunch_members',
     BACKUPS: 'lunch_backups',
+    GROUPS: 'lunch_groups',
     MONTHLY_STATS: 'lunch_monthly_stats',
     USER_STATS: 'lunch_user_menu_stats',
 }
