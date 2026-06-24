@@ -3,16 +3,7 @@ import { useStore, getCache, setCache } from '../services/store'
 import { menuAction } from '../services/repositories/baseRepository'
 import { waitForInit } from '../services/appInit'
 import { CACHE_KEYS } from '../constants/cacheConfig'
-
-interface MenuItem {
-    _id: string
-    supplier: string
-    name: string
-    price: number
-    visible: boolean
-    sortNo: number
-    [key: string]: any
-}
+import type { MenuItem } from '../types'
 
 interface MenuReturn {
     menuList: ComputedRef<MenuItem[]>

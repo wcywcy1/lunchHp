@@ -3,17 +3,7 @@ import { useStore, getCache, setCache, getStatsLoadTime, setStatsLoadTime } from
 import { orderAction } from '../services/repositories/baseRepository'
 import { CACHE_KEYS, CACHE_TTL } from '../constants/cacheConfig'
 import { buildCsvLine, writeCsvWithBom, shareOrSaveFile, isPcPlatform } from '../utils/csv'
-
-interface MonthlyStat {
-    _id: string
-    year: number
-    month: number
-    totalAmount: number
-    orderCount: number
-    orderByMember: Record<string, number>
-    orderBySupplier: Record<string, number>
-    [key: string]: any
-}
+import type { MonthlyStat } from '../types'
 
 interface FilterState {
     year: number | null

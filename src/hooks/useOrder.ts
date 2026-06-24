@@ -3,22 +3,7 @@ import { useStore, setCache, flushCache } from '../services/store'
 import { menuAction, orderAction } from '../services/repositories/baseRepository'
 import { CACHE_KEYS } from '../constants/cacheConfig'
 import { getTodayString } from '../utils/date'
-
-interface MenuItem {
-    _id: string
-    name: string
-    supplier: string
-    price: number
-    [key: string]: any
-}
-
-interface MemberItem {
-    _id: string
-    name: string
-    nickName: string
-    isVirtual?: boolean
-    [key: string]: any
-}
+import type { MenuItem, MemberItem } from '../types'
 
 interface OrderReturn {
     selectedMenuId: Ref<string>

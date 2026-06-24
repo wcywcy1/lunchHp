@@ -1,13 +1,5 @@
 import { ref, computed, ComputedRef, Ref, watch } from 'vue'
-
-interface MenuItem {
-    _id: string
-    supplier: string
-    name: string
-    price: number
-    visible: boolean
-    [key: string]: any
-}
+import type { MenuItem } from '../types'
 
 // "常点"tab 的特殊标识值
 export const RECENT_TAB = '__recent__'

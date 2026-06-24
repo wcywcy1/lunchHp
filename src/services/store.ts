@@ -1,13 +1,7 @@
 import { reactive } from 'vue'
 import { CACHE_KEYS, getTTL } from '../constants/cacheConfig'
 import { GROUP_ID, ACTIVE_GROUP_ID_KEY } from '../constants/appConfig'
-
-interface JoinedGroup {
-    groupId: string
-    groupName: string
-    role: string
-    joinedAt: any
-}
+import type { JoinedGroup } from '../types'
 
 interface StoreState {
     member: any
