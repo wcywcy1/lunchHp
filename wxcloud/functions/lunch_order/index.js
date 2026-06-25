@@ -604,6 +604,7 @@ async function cancelOrder(event, openid) {
 
     const order = (await db.collection(COL.ORDERS).doc(orderId).get()).data
     if (!order) return { code: 404, msg: 'order not found' }
+    if (order.groupId && order.groupId !== GROUP_ID) return { code: 403, msg: 'not in current group' }
 
     await db.collection(COL.ORDERS).doc(orderId).update({
         data: { status: STATUS.CANCELLED, cancelRequested: false, cancelRejected: false, updatedAt: db.serverDate() },
@@ -664,6 +665,7 @@ async function requestCancelOrder(event, openid) {
 
     const order = (await db.collection(COL.ORDERS).doc(orderId).get()).data
     if (!order) return { code: 404, msg: 'order not found' }
+    if (order.groupId && order.groupId !== GROUP_ID) return { code: 403, msg: 'not in current group' }
     if (order.memberId !== caller._id) return { code: 403, msg: '只能申请取消自己的订单' }
     if (order.status !== STATUS.CONFIRMED) return { code: 400, msg: '只能对已确认订单申请取消' }
     if (order.cancelRequested) return { code: 409, msg: '已申请取消，请等待管理员处理' }
@@ -685,6 +687,7 @@ async function cancelMyOrder(event, openid) {
 
     const order = (await db.collection(COL.ORDERS).doc(orderId).get()).data
     if (!order) return { code: 404, msg: 'order not found' }
+    if (order.groupId && order.groupId !== GROUP_ID) return { code: 403, msg: 'not in current group' }
     if (order.memberId !== caller._id) return { code: 403, msg: '只能取消自己的订单' }
     if (order.status !== STATUS.PENDING) return { code: 400, msg: '只能取消待确认订单' }
 
@@ -716,6 +719,7 @@ async function rejectCancelRequest(event, openid) {
 
     const order = (await db.collection(COL.ORDERS).doc(orderId).get()).data
     if (!order) return { code: 404, msg: 'order not found' }
+    if (order.groupId && order.groupId !== GROUP_ID) return { code: 403, msg: 'not in current group' }
 
     await db.collection(COL.ORDERS).doc(orderId).update({
         data: { cancelRequested: false, cancelRejected: true, updatedAt: db.serverDate() },
@@ -735,6 +739,7 @@ async function updateOrder(event, openid) {
     const order = priceChanged
         ? (await db.collection(COL.ORDERS).doc(orderId).get()).data
         : null
+    if (priceChanged && order && order.groupId && order.groupId !== GROUP_ID) return { code: 403, msg: 'not in current group' }
 
     const update = { updatedAt: db.serverDate() }
     if (menuId !== undefined) update.menuId = menuId

@@ -362,6 +362,7 @@ async function updateMemberName(event, openid) {
 
     const target = (await db.collection(COL.MEMBERS).doc(memberId).get()).data
     if (!target) return { code: 404, msg: 'member not found' }
+    if (target.groupId && target.groupId !== GROUP_ID) return { code: 403, msg: 'not in current group' }
 
     const isSelf = target.openid === openid
     const isAdminOrCreator = checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)
@@ -460,6 +461,7 @@ async function linkVirtualMember(event, openid) {
 
     const virtual = (await db.collection(COL.MEMBERS).doc(virtualMemberId).get()).data
     if (!virtual || !virtual.isVirtual) return { code: 404, msg: 'virtual member not found' }
+    if (virtual.groupId && virtual.groupId !== GROUP_ID) return { code: 403, msg: 'not in current group' }
 
     const virtualName = virtual.name || virtual.nickName || ''
 
@@ -551,9 +553,11 @@ async function adminLinkVirtualMember(event, openid) {
 
     const virtual = (await db.collection(COL.MEMBERS).doc(virtualMemberId).get()).data
     if (!virtual || !virtual.isVirtual) return { code: 404, msg: '虚拟成员不存在' }
+    if (virtual.groupId && virtual.groupId !== GROUP_ID) return { code: 403, msg: 'not in current group' }
 
     const target = (await db.collection(COL.MEMBERS).doc(targetMemberId).get()).data
     if (!target) return { code: 404, msg: '目标成员不存在' }
+    if (target.groupId && target.groupId !== GROUP_ID) return { code: 403, msg: 'not in current group' }
     if (target.isVirtual) return { code: 400, msg: '目标成员必须为已登录微信成员' }
     if (!target.openid) return { code: 400, msg: '目标成员未绑定微信' }
 
@@ -661,6 +665,7 @@ async function deleteMember(event, openid) {
 
     const target = (await db.collection(COL.MEMBERS).doc(memberId).get()).data
     if (!target) return { code: 404, msg: 'member not found' }
+    if (target.groupId && target.groupId !== GROUP_ID) return { code: 403, msg: 'not in current group' }
     if (target.role === ROLE.CREATOR) return { code: 400, msg: 'cannot delete creator' }
 
     await writeAuditLog(openid, AUDIT_ACTION.MEMBER_DELETE, 'member', memberId, target, null, null)
@@ -678,6 +683,7 @@ async function setAdmin(event, openid) {
 
     const target = (await db.collection(COL.MEMBERS).doc(memberId).get()).data
     if (!target) return { code: 404, msg: 'member not found' }
+    if (target.groupId && target.groupId !== GROUP_ID) return { code: 403, msg: 'not in current group' }
     if (target.role === ROLE.CREATOR) return { code: 400, msg: 'cannot change creator role' }
 
     const newRole = isAdmin ? ROLE.ADMIN : ROLE.MEMBER
@@ -808,6 +814,7 @@ async function updateMenuItem(event, openid) {
     if (Object.keys(update).length === 0) return { code: 400, msg: 'nothing to update' }
 
     const oldItem = (await db.collection(COL.MENU).doc(menuId).get()).data
+    if (oldItem && oldItem.groupId && oldItem.groupId !== GROUP_ID) return { code: 403, msg: 'not in current group' }
     await db.collection(COL.MENU).doc(menuId).update({ data: update })
     await writeAuditLog(openid, AUDIT_ACTION.MENU_UPDATE, 'menu', menuId, oldItem, update, null)
     await updateGroupTimestamp('menuTimestamp')
@@ -823,6 +830,7 @@ async function deleteMenuItem(event, openid) {
 
     const oldItem = (await db.collection(COL.MENU).doc(menuId).get()).data
     if (!oldItem) return { code: 404, msg: 'menu item not found' }
+    if (oldItem.groupId && oldItem.groupId !== GROUP_ID) return { code: 403, msg: 'not in current group' }
     await writeAuditLog(openid, AUDIT_ACTION.MENU_DELETE, 'menu', menuId, oldItem, null, null)
     await db.collection(COL.MENU).doc(menuId).remove()
     await updateGroupTimestamp('menuTimestamp')
@@ -838,6 +846,7 @@ async function toggleVisible(event, openid) {
 
     const target = (await db.collection(COL.MENU).doc(menuId).get()).data
     if (!target) return { code: 404, msg: 'menu item not found' }
+    if (target.groupId && target.groupId !== GROUP_ID) return { code: 403, msg: 'not in current group' }
 
     // visible 为 undefined（老数据）时视为可见，与前端 visible !== false 判断一致
     const newVisible = target.visible === false

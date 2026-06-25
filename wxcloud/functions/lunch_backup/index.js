@@ -9,6 +9,7 @@ const COL = {
     MENU: 'lunch_menu',
     MEMBERS: 'lunch_members',
     BACKUPS: 'lunch_backups',
+    CHUNKS: 'lunch_restore_chunks',
     GROUPS: 'lunch_groups',
     MONTHLY_STATS: 'lunch_monthly_stats',
     USER_STATS: 'lunch_user_menu_stats',
@@ -114,6 +115,7 @@ async function doBackup(type, remark) {
     }
 
     const backup = {
+        groupId: GROUP_ID,
         type,
         createdAt: now,
         orderCount: orders.length,
@@ -149,7 +151,7 @@ async function doBackup(type, remark) {
 
 async function cleanupOldBackups(type, maxKeep) {
     const { data: all } = await db.collection(COL.BACKUPS)
-        .where({ type })
+        .where({ groupId: GROUP_ID, type })
         .orderBy('createdAt', 'desc')
         .limit(maxKeep + 5)
         .field({ _id: true, dataRef: true })
@@ -219,6 +221,7 @@ async function restoreBackup(event, openid) {
 
     const { data: backupDoc } = await db.collection(COL.BACKUPS).doc(backupId).get()
     if (!backupDoc) return { code: 404, msg: 'backup not found' }
+    if (backupDoc.groupId && backupDoc.groupId !== GROUP_ID) return { code: 403, msg: 'backup belongs to another group' }
 
     let backupDataStr
     if (backupDoc.dataRef) {
@@ -298,6 +301,7 @@ async function restorePrepare(event, openid) {
 
     const { data: backupDoc } = await db.collection(COL.BACKUPS).doc(backupId).get()
     if (!backupDoc) return { code: 404, msg: 'backup not found' }
+    if (backupDoc.groupId && backupDoc.groupId !== GROUP_ID) return { code: 403, msg: 'backup belongs to another group' }
 
     let backupDataStr
     if (backupDoc.dataRef) {
@@ -330,7 +334,7 @@ async function restorePrepare(event, openid) {
     }
 
     for (let i = 0; i < chunks.length; i++) {
-        await db.collection(COL.BACKUPS).doc(`${sessionId}_${i}`).set({
+        await db.collection(COL.CHUNKS).doc(`${sessionId}_${i}`).set({
             data: { sessionId, chunkIndex: i, items: chunks[i], createdAt: db.serverDate() },
         })
     }
@@ -356,7 +360,7 @@ async function restoreBatch(event, openid) {
     if (!sessionId || chunkIndex === undefined) return { code: 400, msg: 'missing sessionId or chunkIndex' }
 
     const docId = `${sessionId}_${chunkIndex}`
-    const { data: chunkDoc } = await db.collection(COL.BACKUPS).doc(docId).get()
+    const { data: chunkDoc } = await db.collection(COL.CHUNKS).doc(docId).get()
     if (!chunkDoc) return { code: 404, msg: `chunk ${chunkIndex} not found` }
 
     const items = chunkDoc.items || []
@@ -377,7 +381,7 @@ async function restoreBatch(event, openid) {
         }))
     }
 
-    await db.collection(COL.BACKUPS).doc(docId).remove()
+    await db.collection(COL.CHUNKS).doc(docId).remove()
 
     return { code: 0, data: { chunkIndex, written: items.length } }
 }
@@ -389,12 +393,12 @@ async function restoreFinish(event, openid) {
     const { sessionId } = event
     if (!sessionId) return { code: 400, msg: 'missing sessionId' }
 
-    const { data: leftovers } = await db.collection(COL.BACKUPS)
+    const { data: leftovers } = await db.collection(COL.CHUNKS)
         .where({ sessionId })
         .limit(100)
         .get()
     for (const doc of leftovers) {
-        await db.collection(COL.BACKUPS).doc(doc._id).remove()
+        await db.collection(COL.CHUNKS).doc(doc._id).remove()
     }
 
     const now = db.serverDate()
@@ -413,11 +417,38 @@ async function getBackupList(event, openid) {
     const caller = await getMemberByOpenid(openid)
     if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
 
-    const { data } = await db.collection(COL.BACKUPS)
+    const { data: oldChunks } = await db.collection(COL.BACKUPS)
+        .where({ sessionId: _.exists(true), type: _.exists(false) })
+        .limit(50)
+        .field({ _id: true })
+        .get()
+    for (const chunk of oldChunks) {
+        await db.collection(COL.BACKUPS).doc(chunk._id).remove()
+    }
+
+    const { data: withGroup } = await db.collection(COL.BACKUPS)
+        .where({ groupId: GROUP_ID, type: _.in(['auto', 'manual']) })
         .orderBy('createdAt', 'desc')
         .limit(50)
         .field({ data: false })
         .get()
+
+    const { data: withoutGroup } = await db.collection(COL.BACKUPS)
+        .where({ groupId: _.exists(false), type: _.in(['auto', 'manual']) })
+        .orderBy('createdAt', 'desc')
+        .limit(50)
+        .field({ data: false })
+        .get()
+
+    const seen = new Set()
+    const data = []
+    for (const item of [...withGroup, ...withoutGroup]) {
+        if (!seen.has(item._id)) {
+            seen.add(item._id)
+            data.push(item)
+        }
+    }
+    data.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
 
     return { code: 0, data }
 }
@@ -430,7 +461,9 @@ async function deleteBackup(event, openid) {
     if (!backupId) return { code: 400, msg: 'missing backupId' }
 
     const { data: doc } = await db.collection(COL.BACKUPS).doc(backupId).get().catch(() => ({ data: null }))
-    if (doc && doc.dataRef) {
+    if (!doc) return { code: 404, msg: 'backup not found' }
+    if (doc.groupId && doc.groupId !== GROUP_ID) return { code: 403, msg: 'backup belongs to another group' }
+    if (doc.dataRef) {
         try { await cloud.deleteFile({ fileList: [doc.dataRef] }) } catch (e) { }
     }
 

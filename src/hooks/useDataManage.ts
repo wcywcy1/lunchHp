@@ -487,35 +487,42 @@ export function useDataManage() {
     async function switchGroup() {
         const target = targetGroupId.value.trim()
         if (!target) {
-            uni.showToast({ title: '请输入目标组ID', icon: 'none' })
+            uni.showToast({ title: '请输入组织名称', icon: 'none' })
             return
         }
-        if (target === currentGroupId.value) {
-            uni.showToast({ title: '已是当前组', icon: 'none' })
-            return
-        }
-        const { confirm } = await uni.showModal({
-            title: '切换组织',
-            content: `将切换到组织「${target}」，本地缓存会清空并重新初始化。确定？`,
-        })
-        if (!confirm) return
         switchingGroup.value = true
         store.isSwitchingGroup = true
         try {
+            const joinRes = await menuAction('joinGroupByName', { groupName: target })
+            if (!joinRes || !joinRes.result || joinRes.result.code !== 0) {
+                uni.showToast({ title: joinRes?.result?.msg || '未找到该组织', icon: 'none' })
+                return
+            }
+            const groupId = joinRes.result.data.groupId
+            const groupName = joinRes.result.data.groupName
+            if (groupId === currentGroupId.value) {
+                uni.showToast({ title: '已是当前组', icon: 'none' })
+                return
+            }
+            const { confirm } = await uni.showModal({
+                title: '切换组织',
+                content: `将切换到组织「${groupName}」，本地缓存会清空并重新初始化。确定？`,
+            })
+            if (!confirm) return
             orderManage.stopRealtimeWatch()
             clearAllCache()
             resetStore()
-            setActiveGroupId(target)
+            setActiveGroupId(groupId)
             resetInit()
             await startInit()
-            const joinRes = await menuAction('joinGroup', { nickName: '', name: '' })
-            if (joinRes.result.code === 0) {
-                const { member } = joinRes.result.data
-                setStore({ member, role: member.role, groupId: target })
-                saveSession({ groupId: target, role: member.role, member })
+            const res = await menuAction('joinGroup', { nickName: '', name: '' })
+            if (res && res.result && res.result.code === 0) {
+                const { member } = res.result.data
+                setStore({ member, role: member.role, groupId, groupName })
+                saveSession({ groupId, role: member.role, member, groupName })
             }
             targetGroupId.value = ''
-            uni.showToast({ title: '已切换组织', icon: 'success' })
+            uni.showToast({ title: `已切换到「${groupName}」`, icon: 'success' })
             setTimeout(() => {
                 uni.switchTab({ url: '/pages/home/index' })
             }, 800)
@@ -528,7 +535,7 @@ export function useDataManage() {
     }
 
     function resetToDefaultGroup() {
-        targetGroupId.value = 'lunch_hp'
+        targetGroupId.value = ''
     }
 
     function openNoticeSendDialog() {
