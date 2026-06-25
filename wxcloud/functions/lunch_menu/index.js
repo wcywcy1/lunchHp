@@ -107,6 +107,9 @@ exports.main = async (event, context) => {
         linkVirtualMember,
         adminLinkVirtualMember,
         updateMemberProfile,
+        getPendingMembers,
+        approveJoin,
+        rejectJoin,
         deleteMember,
         getMenuList,
         addMenuItem,
@@ -363,6 +366,43 @@ async function getMembers(event, openid) {
         .orderBy('joinedAt', 'asc')
         .get()
     return { code: 0, data }
+}
+
+async function getPendingMembers(event, openid) {
+    const caller = await getMemberByOpenid(openid)
+    if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
+    const { data } = await db.collection(COL.MEMBERS)
+        .where({ groupId: GROUP_ID, status: 'pending' })
+        .orderBy('joinedAt', 'asc')
+        .get()
+    return { code: 0, data }
+}
+
+async function approveJoin(event, openid) {
+    const { memberId } = event
+    if (!memberId) return { code: 400, msg: 'missing memberId' }
+    const caller = await getMemberByOpenid(openid)
+    if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
+    const target = (await db.collection(COL.MEMBERS).doc(memberId).get()).data
+    if (!target) return { code: 404, msg: 'member not found' }
+    if (target.groupId && target.groupId !== GROUP_ID) return { code: 403, msg: 'not in current group' }
+    if (target.status !== 'pending') return { code: 400, msg: 'member is not pending' }
+    await db.collection(COL.MEMBERS).doc(memberId).update({ data: { status: 'active' } })
+    await updateGroupTimestamp('membersTimestamp')
+    return { code: 0 }
+}
+
+async function rejectJoin(event, openid) {
+    const { memberId } = event
+    if (!memberId) return { code: 400, msg: 'missing memberId' }
+    const caller = await getMemberByOpenid(openid)
+    if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
+    const target = (await db.collection(COL.MEMBERS).doc(memberId).get()).data
+    if (!target) return { code: 404, msg: 'member not found' }
+    if (target.groupId && target.groupId !== GROUP_ID) return { code: 403, msg: 'not in current group' }
+    if (target.status !== 'pending') return { code: 400, msg: 'member is not pending' }
+    await db.collection(COL.MEMBERS).doc(memberId).remove()
+    return { code: 0 }
 }
 
 async function updateMemberName(event, openid) {
