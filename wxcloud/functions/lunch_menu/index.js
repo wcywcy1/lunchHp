@@ -150,6 +150,8 @@ async function updateGroupTimestamp(field) {
 }
 
 async function getDataTimestamps(event, openid) {
+    const caller = await getMemberByOpenid(openid)
+    if (!caller) return { code: 403, msg: 'member only' }
     const { data } = await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => ({ data: {} }))
     return {
         code: 0,
