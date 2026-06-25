@@ -21,6 +21,22 @@ const MANUAL_MAX = 10
 const BATCH_SIZE = 100
 const RESTORE_BATCH_SIZE = 1000
 
+let _collectionsEnsured = false
+async function ensureCollections() {
+    if (_collectionsEnsured) return
+    const required = [COL.CHUNKS]
+    for (const name of required) {
+        try {
+            await db.createCollection(name)
+        } catch (e) {
+            if (!e.message || !e.message.includes('already exists')) {
+                console.warn(`createCollection ${name}:`, e.message)
+            }
+        }
+    }
+    _collectionsEnsured = true
+}
+
 async function touchAllTimestamps() {
     const now = db.serverDate()
     await db.collection(COL.GROUPS).doc(GROUP_ID).update({
@@ -291,6 +307,7 @@ async function restoreBackup(event, openid) {
 }
 
 async function restorePrepare(event, openid) {
+    await ensureCollections()
     const caller = await getMemberByOpenid(openid)
     if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
 
