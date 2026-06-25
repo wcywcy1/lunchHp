@@ -462,9 +462,22 @@ export function useDataManage() {
     }
 
     async function rebuildRelations() {
+        const nameCount = {} as Record<string, number>
+        for (const m of store.members || []) {
+            nameCount[m.name] = (nameCount[m.name] || 0) + 1
+        }
+        const dupNames = Object.entries(nameCount).filter(([, c]) => c > 1).map(([n]) => n)
+        if (dupNames.length > 0) {
+            uni.showModal({
+                title: '存在同名成员',
+                content: `检测到重复姓名：${dupNames.join('、')}。同名成员的订单无法正确关联，请先在成员管理中合并或改名后再操作。`,
+                showCancel: false,
+            })
+            return
+        }
         const { confirm } = await uni.showModal({
             title: '重置订单关联',
-            content: '将根据成员姓名和餐品名称重新匹配所有订单的内部关联，并清除个人点餐统计（下次点餐自动重建）。确认？',
+            content: '将根据成员姓名和餐品名称重新匹配所有订单的内部关联，并永久删除个人点餐统计（下次点餐自动重建，历史统计不可恢复）。确认？',
         })
         if (!confirm) return
         rebuilding.value = true
@@ -474,8 +487,10 @@ export function useDataManage() {
                 const d = res.result.data
                 let content = `扫描 ${d.totalOrders} 条订单\n修复成员关联 ${d.memberFixed} 条\n修复菜单关联 ${d.menuFixed} 条`
                 if (d.memberNameCollisions) content += `\n⚠ ${d.memberNameCollisions} 个姓名存在同名成员，已跳过`
+                if (d.menuKeyCollisions) content += `\n⚠ ${d.menuKeyCollisions} 个餐品存在同名，已跳过`
                 if (d.memberNotFound) content += `\n⚠ ${d.memberNotFound} 条未找到对应成员`
                 if (d.menuNotFound) content += `\n⚠ ${d.menuNotFound} 条未找到对应餐品`
+                content += '\n如遇中断可重新执行，不会重复修改'
                 uni.showModal({ title: '重置完成', content, showCancel: false })
                 await orderManage.loadData()
             }

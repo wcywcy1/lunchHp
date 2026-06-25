@@ -1207,10 +1207,12 @@ async function rebuildOrderRelations(event, openid) {
     const memberByName = {}
     const memberNameCollisions = new Set()
     allMembers.forEach(m => {
-        if (memberByName[m.name]) {
-            memberNameCollisions.add(m.name)
+        const name = (m.name || '').trim()
+        if (!name) return
+        if (memberByName[name]) {
+            memberNameCollisions.add(name)
         } else {
-            memberByName[m.name] = m._id
+            memberByName[name] = m._id
         }
     })
     for (const name of memberNameCollisions) {
@@ -1219,12 +1221,23 @@ async function rebuildOrderRelations(event, openid) {
 
     const allMenu = await fetchAll(db.collection(COL.MENU), { groupId: GROUP_ID })
     const menuByKey = {}
+    const menuKeyCollisions = new Set()
     allMenu.forEach(it => {
-        const key = (it.supplier || '') + '|' + it.name
-        menuByKey[key] = it._id
+        const key = ((it.supplier || '').trim()) + '|' + ((it.name || '').trim())
+        if (menuByKey[key]) {
+            menuKeyCollisions.add(key)
+        } else {
+            menuByKey[key] = it._id
+        }
     })
+    for (const key of menuKeyCollisions) {
+        delete menuByKey[key]
+    }
 
     const allOrders = await fetchAll(db.collection(COL.ORDERS), { groupId: GROUP_ID })
+    if (allOrders.length > 50000) {
+        return { code: 400, msg: `订单量过大（${allOrders.length}条），请联系管理员分批处理` }
+    }
     const toUpdate = []
     let memberFixed = 0
     let menuFixed = 0
@@ -1235,22 +1248,23 @@ async function rebuildOrderRelations(event, openid) {
         const update = {}
         let changed = false
 
-        const matchedMemberId = memberByName[order.memberName]
+        const memberName = (order.memberName || '').trim()
+        const matchedMemberId = memberByName[memberName]
         if (matchedMemberId && order.memberId !== matchedMemberId) {
             update.memberId = matchedMemberId
             memberFixed++
             changed = true
-        } else if (!matchedMemberId && order.memberName) {
+        } else if (!matchedMemberId && memberName) {
             memberNotFound++
         }
 
-        const menuKey = (order.supplier || '') + '|' + order.menuName
+        const menuKey = ((order.supplier || '').trim()) + '|' + ((order.menuName || '').trim())
         const matchedMenuId = menuByKey[menuKey]
         if (matchedMenuId && order.menuId !== matchedMenuId) {
             update.menuId = matchedMenuId
             menuFixed++
             changed = true
-        } else if (!matchedMenuId && order.menuName) {
+        } else if (!matchedMenuId && (order.menuName || '').trim()) {
             menuNotFound++
         }
 
@@ -1286,6 +1300,7 @@ async function rebuildOrderRelations(event, openid) {
             memberNotFound,
             menuNotFound,
             memberNameCollisions: memberNameCollisions.size,
+            menuKeyCollisions: menuKeyCollisions.size,
             updated: toUpdate.length,
         }
     }
