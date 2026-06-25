@@ -498,7 +498,7 @@ async function _autoCancelExpiredPending() {
     for (let i = 0; i < expired.length; i += BATCH_SIZE) {
         const chunk = expired.slice(i, i + BATCH_SIZE)
         await db.collection(COL.ORDERS)
-            .where({ _id: _.in(chunk.map(o => o._id)) })
+            .where({ _id: _.in(chunk.map(o => o._id)), groupId: GROUP_ID })
             .update({ data: { status: STATUS.CANCELLED, updatedAt: now2 } })
     }
 
