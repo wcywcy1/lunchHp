@@ -63,6 +63,7 @@ async function getMemberByOpenid(openid) {
 
 function checkRole(member, ...allowed) {
     if (!member) return false
+    if (member.status === 'pending') return false
     return allowed.includes(member.role)
 }
 
