@@ -974,7 +974,9 @@ async function batchToggleVisibleBySupplier(event, openid) {
     return { code: 0, data: { supplier, visible: newVisible, count: items.length } }
 }
 
-async function parseXlsx(event) {
+async function parseXlsx(event, openid) {
+    const caller = await getMemberByOpenid(openid)
+    if (!caller) return { code: 403, msg: 'member only' }
     if (!XLSX) return { code: 500, msg: 'xlsx库未安装' }
     const { fileID } = event
     if (!fileID) return { code: 400, msg: 'missing fileID' }
@@ -1003,6 +1005,8 @@ async function parseXlsx(event) {
 }
 
 async function parseCsv(event, openid) {
+    const caller = await getMemberByOpenid(openid)
+    if (!caller) return { code: 403, msg: 'member only' }
     const { fileID } = event
     if (!fileID) return { code: 400, msg: 'missing fileID' }
 
