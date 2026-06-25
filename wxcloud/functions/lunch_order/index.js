@@ -1331,7 +1331,7 @@ async function rebuildOrderRelations(event, openid) {
     }
 
     await db.collection(COL.USER_STATS).where({ groupId: GROUP_ID }).remove()
-    await _updateOrdersTimestamp()
+    await _touchAllTimestamps()
 
     return {
         code: 0,
