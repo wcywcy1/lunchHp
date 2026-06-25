@@ -290,6 +290,9 @@ async function joinGroupByName(event, openid) {
         return { code: 0, data: { member: existing.data[0], groupId: targetGroupId, groupName: name, alreadyJoined: true } }
     }
 
+    // [DEPRECATED] lunch_hp 自动通过仅为兼容旧版客户端(a45713c0)，新版本上线后删除
+    const autoApprove = targetGroupId === 'lunch_hp'
+
     const now = db.serverDate()
     const member = {
         groupId: targetGroupId,
@@ -300,6 +303,7 @@ async function joinGroupByName(event, openid) {
         role: ROLE.MEMBER,
         isVirtual: false,
         privacyAgreed: false,
+        status: autoApprove ? 'active' : 'pending',
         joinedAt: now,
     }
     const { _id } = await db.collection(COL.MEMBERS).add({ data: member })
@@ -321,6 +325,9 @@ async function joinGroup(event, openid) {
             .get()).data[0] || null
         : null
 
+    // [DEPRECATED] lunch_hp 自动通过仅为兼容旧版客户端(a45713c0)，新版本上线后删除
+    const autoApprove = GROUP_ID === 'lunch_hp'
+
     const now = db.serverDate()
     const member = {
         groupId: GROUP_ID,
@@ -331,16 +338,19 @@ async function joinGroup(event, openid) {
         role: ROLE.MEMBER,
         isVirtual: false,
         privacyAgreed: false,
+        status: autoApprove ? 'active' : 'pending',
         joinedAt: now,
     }
 
     const { _id } = await db.collection(COL.MEMBERS).add({ data: member })
     member._id = _id
 
+    // [DEPRECATED] creator 自动提升仅为兼容旧版客户端(a45713c0)，新版本上线后删除
     const groupData = (await db.collection(COL.GROUPS).doc(GROUP_ID).get()).data
     if (groupData && groupData.creatorId === openid) {
-        await db.collection(COL.MEMBERS).doc(_id).update({ data: { role: ROLE.CREATOR } })
+        await db.collection(COL.MEMBERS).doc(_id).update({ data: { role: ROLE.CREATOR, status: 'active' } })
         member.role = ROLE.CREATOR
+        member.status = 'active'
     }
 
     await updateGroupTimestamp('membersTimestamp')
