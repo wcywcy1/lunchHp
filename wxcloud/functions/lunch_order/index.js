@@ -49,11 +49,14 @@ async function writeAuditLog(openid, action, targetType, targetId, oldValue, new
 
 async function getMemberByOpenid(openid) {
     const { data } = await db.collection(COL.MEMBERS)
-        .where({ groupId: GROUP_ID, openid }).get()
+        .where({ groupId: GROUP_ID, openid, status: _.neq('rejected') }).get()
     if (data[0]) return data[0]
-    const groupData = (await db.collection(COL.GROUPS).doc(GROUP_ID).get()).data
-    if (groupData && groupData.creatorId === openid) {
-        return { _id: 'recovered', groupId: GROUP_ID, openid, role: ROLE.CREATOR, name: 'creator' }
+    // [DEPRECATED] recovered 后门仅为兼容旧版客户端(a45713c0)，新版本上线后删除此块
+    if (GROUP_ID === 'lunch_hp') {
+        const groupData = (await db.collection(COL.GROUPS).doc(GROUP_ID).get()).data
+        if (groupData && groupData.creatorId === openid) {
+            return { _id: 'recovered', groupId: GROUP_ID, openid, role: ROLE.CREATOR, name: 'creator' }
+        }
     }
     return null
 }
