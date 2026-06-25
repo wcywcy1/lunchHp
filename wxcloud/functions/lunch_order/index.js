@@ -105,6 +105,7 @@ exports.main = async (event, context) => {
     const { OPENID } = cloud.getWXContext()
     const { action } = event
     // 从前端传入 groupId，回退默认值，实现多组织切换
+    // [DEPRECATED] 默认值 'lunch_hp' 仅为兼容旧版客户端(a45713c0)，新版本上线后改为必传
     GROUP_ID = event.groupId || 'lunch_hp'
 
     const handlers = {
