@@ -1741,8 +1741,67 @@ async function _importMenuFromRows(rows, mode) {
 
     if (items.length === 0) return { code: 400, msg: '无有效数据' }
 
+    const now = db.serverDate()
+
     if (mode === 'rewrite') {
-        await db.collection(COL.MENU).where({ groupId: GROUP_ID }).remove()
+        const allExisting = await fetchAll(db.collection(COL.MENU), { groupId: GROUP_ID })
+        const existingByKey = {}
+        allExisting.forEach(it => {
+            const key = ((it.supplier || '').trim()) + '|' + ((it.name || '').trim())
+            existingByKey[key] = it
+        })
+
+        const { data: topSort } = await db.collection(COL.MENU)
+            .where({ groupId: GROUP_ID })
+            .orderBy('sortNo', 'desc')
+            .limit(1)
+            .get()
+        let sortNo = topSort.length > 0 ? topSort[0].sortNo : 0
+
+        const importKeys = new Set()
+        let updated = 0
+        let inserted = 0
+
+        for (const it of items) {
+            if (!it.supplier || !it.name) continue
+            const key = (it.supplier.trim()) + '|' + (it.name.trim())
+            importKeys.add(key)
+            const existing = existingByKey[key]
+            if (existing) {
+                await db.collection(COL.MENU).doc(existing._id).update({
+                    data: {
+                        price: Number(it.price) || 0,
+                        visible: it.visible !== false,
+                        updatedAt: now,
+                    },
+                })
+                updated++
+            } else {
+                sortNo += 10
+                await db.collection(COL.MENU).add({
+                    data: {
+                        groupId: GROUP_ID,
+                        sortNo,
+                        supplier: it.supplier,
+                        name: it.name,
+                        price: Number(it.price) || 0,
+                        photo: '',
+                        visible: it.visible !== false,
+                        createdAt: now,
+                    },
+                })
+                inserted++
+            }
+        }
+
+        const toRemoveIds = allExisting
+            .filter(it => !importKeys.has(((it.supplier || '').trim()) + '|' + ((it.name || '').trim())))
+            .map(it => it._id)
+        for (let i = 0; i < toRemoveIds.length; i += 500) {
+            await db.collection(COL.MENU).where({ _id: _.in(toRemoveIds.slice(i, i + 500)) }).remove()
+        }
+
+        return { code: 0, data: { count: inserted, updated, removed: toRemoveIds.length } }
     }
 
     const { data: existing } = await db.collection(COL.MENU)
@@ -1752,7 +1811,6 @@ async function _importMenuFromRows(rows, mode) {
         .get()
     let sortNo = existing.length > 0 ? existing[0].sortNo : 0
 
-    const now = db.serverDate()
     const batch = items.filter(it => it.supplier && it.name).map(it => ({
         groupId: GROUP_ID,
         sortNo: sortNo += 10,
@@ -1797,12 +1855,64 @@ async function _importMembersFromRows(rows, mode) {
 
     if (members.length === 0) return { code: 400, msg: '无有效数据' }
 
+    const now = db.serverDate()
+
     if (mode === 'rewrite') {
         const { OPENID } = cloud.getWXContext()
-        await db.collection(COL.MEMBERS).where({ groupId: GROUP_ID, openid: _.neq(OPENID) }).remove()
+        const allExisting = await fetchAll(db.collection(COL.MEMBERS), { groupId: GROUP_ID })
+        const existingByName = {}
+        allExisting.forEach(m => {
+            const name = (m.name || '').trim()
+            if (name) existingByName[name] = m
+        })
+
+        const importNames = new Set()
+        let updated = 0
+        let inserted = 0
+
+        for (const m of members) {
+            if (!m.name || !m.name.trim()) continue
+            const name = m.name.trim()
+            importNames.add(name)
+            const existing = existingByName[name]
+            if (existing) {
+                await db.collection(COL.MEMBERS).doc(existing._id).update({
+                    data: {
+                        nickName: m.nickName || existing.nickName || '',
+                        role: m.role || existing.role || ROLE.MEMBER,
+                        isVirtual: m.isVirtual !== undefined ? m.isVirtual : existing.isVirtual,
+                        updatedAt: now,
+                    },
+                })
+                updated++
+            } else {
+                await db.collection(COL.MEMBERS).add({
+                    data: {
+                        groupId: GROUP_ID,
+                        name,
+                        nickName: m.nickName || '',
+                        avatar: '',
+                        openid: '',
+                        role: m.role || ROLE.MEMBER,
+                        isVirtual: m.isVirtual !== undefined ? m.isVirtual : true,
+                        privacyAgreed: false,
+                        joinedAt: now,
+                    },
+                })
+                inserted++
+            }
+        }
+
+        const toRemoveIds = allExisting
+            .filter(it => !importNames.has((it.name || '').trim()) && it.openid !== OPENID)
+            .map(it => it._id)
+        for (let i = 0; i < toRemoveIds.length; i += 500) {
+            await db.collection(COL.MEMBERS).where({ _id: _.in(toRemoveIds.slice(i, i + 500)) }).remove()
+        }
+
+        return { code: 0, data: { count: inserted, updated, removed: toRemoveIds.length } }
     }
 
-    const now = db.serverDate()
     const batch = members.filter(m => m.name && m.name.trim()).map(m => ({
         groupId: GROUP_ID,
         name: m.name.trim(),
