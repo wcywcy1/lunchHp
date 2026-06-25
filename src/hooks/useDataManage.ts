@@ -485,7 +485,10 @@ export function useDataManage() {
             const res = await orderAction('rebuildOrderRelations')
             if (res.result.code === 0) {
                 const d = res.result.data
-                let content = `扫描 ${d.totalOrders} 条订单\n修复成员关联 ${d.memberFixed} 条\n修复菜单关联 ${d.menuFixed} 条`
+                let content = `扫描 ${d.totalOrders} 条订单`
+                if (d.supplierFilled) content += `\n回填供应商 ${d.supplierFilled} 条`
+                if (d.supplierAmbiguous) content += `\n⚠ ${d.supplierAmbiguous} 条菜名跨供应商，无法回填`
+                content += `\n修复成员关联 ${d.memberFixed} 条\n修复菜单关联 ${d.menuFixed} 条`
                 if (d.memberNameCollisions) content += `\n⚠ ${d.memberNameCollisions} 个姓名存在同名成员，已跳过`
                 if (d.menuKeyCollisions) content += `\n⚠ ${d.menuKeyCollisions} 个餐品存在同名，已跳过`
                 if (d.memberNotFound) content += `\n⚠ ${d.memberNotFound} 条未找到对应成员`
