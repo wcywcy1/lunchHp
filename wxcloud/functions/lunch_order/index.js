@@ -212,27 +212,33 @@ async function getInitData(event, openid) {
             // 检查是否是组织创建者
             const creatorMatch = groupData && groupData.creatorId === openid
             if (creatorMatch) {
-                currentMember = { _id: 'recovered', groupId: GROUP_ID, openid, role: ROLE.CREATOR, name: 'creator' }
-                memberRole = ROLE.CREATOR
-            } else if (openid) {
-                // 新成员: 自动加入（与 joinGroup 行为一致）
-                const now2 = db.serverDate()
-                const newMember = {
-                    groupId: GROUP_ID,
-                    openid,
-                    name: '',
-                    nickName: '',
-                    avatar: '',
-                    role: ROLE.MEMBER,
-                    isVirtual: false,
-                    privacyAgreed: false,
-                    joinedAt: now2,
+                // [DEPRECATED] recovered 后门仅为兼容旧版客户端(a45713c0)，新版本上线后删除此块
+                if (GROUP_ID === 'lunch_hp') {
+                    currentMember = { _id: 'recovered', groupId: GROUP_ID, openid, role: ROLE.CREATOR, name: 'creator' }
+                    memberRole = ROLE.CREATOR
                 }
-                const addRes = await db.collection(COL.MEMBERS).add({ data: newMember })
-                currentMember = { ...newMember, _id: addRes._id }
-                membersResult.data.push(currentMember)
-                isNew = true
-                await _touchMenuAndMembersTimestamp()
+            } else if (openid) {
+                // [DEPRECATED] 以下自动加入逻辑仅为兼容旧版客户端(a45713c0)，新版本上线后删除此块
+                if (GROUP_ID === 'lunch_hp') {
+                    const now2 = db.serverDate()
+                    const newMember = {
+                        groupId: GROUP_ID,
+                        openid,
+                        name: '',
+                        nickName: '',
+                        avatar: '',
+                        role: ROLE.MEMBER,
+                        isVirtual: false,
+                        privacyAgreed: false,
+                        joinedAt: now2,
+                    }
+                    const addRes = await db.collection(COL.MEMBERS).add({ data: newMember })
+                    currentMember = { ...newMember, _id: addRes._id }
+                    membersResult.data.push(currentMember)
+                    isNew = true
+                    await _touchMenuAndMembersTimestamp()
+                }
+                // 新版行为：非成员返回 null，前端引导加入/创建
             }
         }
     } catch (e) {
