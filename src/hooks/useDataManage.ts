@@ -222,7 +222,7 @@ export function useDataManage() {
         const targetName = target?.name || target?.nickName || '未命名'
         const { confirm } = await uni.showModal({
             title: '确认关联',
-            content: `将微信成员「${targetName}」的订单和统计转移到「${virtualName}」，保留「${virtualName}」并挂上微信账号，「${targetName}」记录将被删除。确定？`,
+            content: `将虚拟成员「${virtualName}」的订单和统计转移到微信成员「${targetName}」，保留「${targetName}」，虚拟成员记录将被删除。确定？`,
         })
         if (!confirm) return
         merging.value = true
@@ -233,8 +233,10 @@ export function useDataManage() {
             })
             if (res.result.code === 0) {
                 const { member: mergedMember, mergedOrders } = res.result.data
-                store.members = store.members.filter((m: any) => m._id !== mergeTargetId.value)
-                if (store.member?._id === mergeTargetId.value) {
+                store.members = store.members.filter((m: any) => m._id !== mergingMember.value._id)
+                const idx = store.members.findIndex((m: any) => m._id === mergedMember._id)
+                if (idx >= 0) store.members[idx] = mergedMember
+                if (store.member?._id === mergedMember._id) {
                     setStore({ member: mergedMember, role: mergedMember.role })
                     saveSession({ groupId: mergedMember.groupId, role: mergedMember.role, member: mergedMember })
                 }

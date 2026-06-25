@@ -448,6 +448,9 @@ export function useHome() {
                 const { member } = res.result.data
                 setStore({ member, role: member.role })
                 saveSession({ groupId: member.groupId, role: member.role, member })
+                store.members = store.members.filter((m: any) => m._id !== selectedVirtualId.value)
+                const idx = store.members.findIndex((m: any) => m._id === member._id)
+                if (idx >= 0) store.members[idx] = member
                 showLinkDialog.value = false
                 showNameDialog.value = false
                 uni.showToast({ title: '关联成功', icon: 'success' })

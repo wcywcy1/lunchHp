@@ -135,7 +135,7 @@
       <view class="edit-modal merge-modal" @tap.stop>
         <text class="modal-title">关联微信账号</text>
         <view class="merge-info">
-          <text class="merge-desc">将下方选中的已登录微信成员的订单和统计转移到「{{ mergingMember?.name || mergingMember?.nickName || '未命名' }}」，保留该虚拟成员并挂上微信账号，微信成员记录将被删除。</text>
+          <text class="merge-desc">将虚拟成员「{{ mergingMember?.name || mergingMember?.nickName || '未命名' }}」的订单和统计转移到下方选中的微信成员，保留微信成员，虚拟成员记录将被删除。</text>
         </view>
         <text class="merge-section-title">选择目标微信成员</text>
         <scroll-view scroll-y class="merge-target-scroll">
