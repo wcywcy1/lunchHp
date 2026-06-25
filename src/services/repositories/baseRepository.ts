@@ -1,10 +1,13 @@
-import { CLOUD_FUNCTIONS, GROUP_ID } from '../../constants/appConfig'
-import { useStore } from '../store'
+import { CLOUD_FUNCTIONS } from '../../constants/appConfig'
+import { useStore, getActiveGroupId } from '../store'
 
 export function cloudAction(cloudFuncName: string, action: string, data: Record<string, any> = {}) {
-    // 自动注入当前激活组ID，云函数据此隔离数据
     const store = useStore()
-    const groupId = store.groupId || GROUP_ID
+    const groupId = store.groupId || getActiveGroupId()
+    if (!groupId) {
+        uni.reLaunch({ url: '/pages/group-select/index' })
+        return Promise.reject(new Error('groupId missing'))
+    }
     return wx.cloud.callFunction({
         name: cloudFuncName,
         data: {

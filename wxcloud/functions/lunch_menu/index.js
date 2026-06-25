@@ -92,9 +92,8 @@ async function fetchAll(collection, where) {
 exports.main = async (event, context) => {
     const { OPENID } = cloud.getWXContext()
     const { action } = event
-    // 从前端传入 groupId，回退默认值，实现多组织切换
-    // [DEPRECATED] 默认值 'lunch_hp' 仅为兼容旧版客户端(a45713c0)，新版本上线后改为必传
-    GROUP_ID = event.groupId || 'lunch_hp'
+    GROUP_ID = event.groupId
+    if (!GROUP_ID) return { code: 400, msg: 'missing groupId' }
 
     const handlers = {
         initGroup,
@@ -222,13 +221,12 @@ async function createGroup(event, openid) {
     const suffix = Math.random().toString(36).substr(2, 4)
     const newGroupId = `lunch_${ts}_${suffix}`
 
-    const now = db.serverDate()
     const group = {
         _id: newGroupId,
         name,
         creatorId: openid,
         qrcode: '',
-        createdAt: now,
+        createdAt: db.serverDate(),
     }
     await db.collection(COL.GROUPS).add({ data: group })
 
@@ -242,7 +240,8 @@ async function createGroup(event, openid) {
         role: ROLE.CREATOR,
         isVirtual: false,
         privacyAgreed: false,
-        joinedAt: now,
+        status: 'active',
+        joinedAt: db.serverDate(),
     }
     const { _id } = await db.collection(COL.MEMBERS).add({ data: member })
     member._id = _id
