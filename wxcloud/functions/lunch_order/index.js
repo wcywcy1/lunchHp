@@ -1,4 +1,4 @@
-const cloud = require('wx-server-sdk')
+﻿const cloud = require('wx-server-sdk')
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 const _ = db.command
@@ -1222,12 +1222,20 @@ async function rebuildOrderRelations(event, openid) {
     const allMenu = await fetchAll(db.collection(COL.MENU), { groupId: GROUP_ID })
     const menuByKey = {}
     const menuKeyCollisions = new Set()
+    const menuById = {}
+    const menuByName = {}
     allMenu.forEach(it => {
+        menuById[it._id] = it
         const key = ((it.supplier || '').trim()) + '|' + ((it.name || '').trim())
         if (menuByKey[key]) {
             menuKeyCollisions.add(key)
         } else {
             menuByKey[key] = it._id
+        }
+        const name = (it.name || '').trim()
+        if (name) {
+            if (!menuByName[name]) menuByName[name] = []
+            menuByName[name].push(it)
         }
     })
     for (const key of menuKeyCollisions) {
@@ -1238,15 +1246,49 @@ async function rebuildOrderRelations(event, openid) {
     if (allOrders.length > 50000) {
         return { code: 400, msg: `订单量过大（${allOrders.length}条），请联系管理员分批处理` }
     }
+
+    let supplierFilled = 0
+    let supplierAmbiguous = 0
+    const ordersNeedSupplier = new Set()
+    for (const order of allOrders) {
+        if ((order.supplier || '').trim()) continue
+        let matchedSupplier = ''
+        const menuDoc = menuById[order.menuId]
+        if (menuDoc && (menuDoc.supplier || '').trim()) {
+            matchedSupplier = menuDoc.supplier.trim()
+        } else {
+            const mn = (order.menuName || '').trim()
+            const candidates = menuByName[mn]
+            if (candidates && candidates.length === 1 && (candidates[0].supplier || '').trim()) {
+                matchedSupplier = candidates[0].supplier.trim()
+            } else if (candidates && candidates.length > 1) {
+                supplierAmbiguous++
+                continue
+            }
+        }
+        if (matchedSupplier) {
+            order.supplier = matchedSupplier
+            supplierFilled++
+            ordersNeedSupplier.add(order._id)
+        }
+    }
+
     const toUpdate = []
     let memberFixed = 0
     let menuFixed = 0
     let memberNotFound = 0
     let menuNotFound = 0
+    let supplierUpdated = 0
 
     for (const order of allOrders) {
         const update = {}
         let changed = false
+
+        if (ordersNeedSupplier.has(order._id)) {
+            update.supplier = order.supplier
+            supplierUpdated++
+            changed = true
+        }
 
         const memberName = (order.memberName || '').trim()
         const matchedMemberId = memberByName[memberName]
@@ -1295,6 +1337,9 @@ async function rebuildOrderRelations(event, openid) {
         code: 0,
         data: {
             totalOrders: allOrders.length,
+            supplierFilled,
+            supplierAmbiguous,
+            supplierUpdated,
             memberFixed,
             menuFixed,
             memberNotFound,
