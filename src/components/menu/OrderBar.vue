@@ -177,7 +177,7 @@ watch(() => props.showAddMember, (val) => {
   justify-content: space-between;
   align-items: center;
   padding: 8rpx 0 8rpx 16rpx;
-  border-left: 6rpx solid #1976d2;
+  border-left: 6rpx solid #2e7d32;
 }
 .selected-name {
   font-size: 28rpx;
@@ -218,6 +218,9 @@ watch(() => props.showAddMember, (val) => {
 }
 .submit-btn.disabled {
   background: #ccc;
+}
+.voice-btn {
+  background: #ff9800;
 }
 .voice-btn.recording {
   background: #e65100;
