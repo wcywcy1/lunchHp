@@ -14,6 +14,9 @@ const COL = {
     ORDERS: 'lunch_orders',
     USER_STATS: 'lunch_user_menu_stats',
     AUDIT_LOGS: 'lunch_audit_logs',
+    BACKUPS: 'lunch_backups',
+    MONTHLY_STATS: 'lunch_monthly_stats',
+    CHUNKS: 'lunch_restore_chunks',
 }
 const ROLE = { CREATOR: 'creator', ADMIN: 'admin', MEMBER: 'member' }
 
@@ -112,6 +115,8 @@ exports.main = async (event, context) => {
         approveJoin,
         rejectJoin,
         deleteMember,
+        leaveGroup,
+        deleteGroup,
         getMenuList,
         addMenuItem,
         importMenuItems,
@@ -1076,5 +1081,38 @@ async function clearNotice(event, openid) {
         }
     })
 
+    return { code: 0 }
+}
+
+async function leaveGroup(event, openid) {
+    const caller = await getMemberByOpenid(openid)
+    if (!caller) return { code: 404, msg: 'member not found' }
+    if (caller.role === ROLE.CREATOR) return { code: 400, msg: 'creator cannot leave, use deleteGroup instead' }
+
+    await writeAuditLog(openid, AUDIT_ACTION.MEMBER_DELETE, 'member', caller._id, caller, null, null)
+    await db.collection(COL.MEMBERS).doc(caller._id).remove()
+    await updateGroupTimestamp('membersTimestamp')
+    return { code: 0 }
+}
+
+async function deleteGroup(event, openid) {
+    const caller = await getMemberByOpenid(openid)
+    if (!checkRole(caller, ROLE.CREATOR)) return { code: 403, msg: 'creator only' }
+
+    const backups = await fetchAll(db.collection(COL.BACKUPS), { groupId: GROUP_ID })
+    const cloudFiles = backups.filter(b => b.dataRef).map(b => b.dataRef)
+    if (cloudFiles.length > 0) {
+        try { await cloud.deleteFile({ fileList: cloudFiles }) } catch (e) { console.error('deleteBackupFiles error:', e) }
+    }
+
+    await db.collection(COL.ORDERS).where({ groupId: GROUP_ID }).remove()
+    await db.collection(COL.MENU).where({ groupId: GROUP_ID }).remove()
+    await db.collection(COL.MEMBERS).where({ groupId: GROUP_ID }).remove()
+    await db.collection(COL.USER_STATS).where({ groupId: GROUP_ID }).remove()
+    await db.collection(COL.AUDIT_LOGS).where({ groupId: GROUP_ID }).remove()
+    await db.collection(COL.MONTHLY_STATS).where({ groupId: GROUP_ID }).remove()
+    await db.collection(COL.BACKUPS).where({ groupId: GROUP_ID }).remove()
+    await db.collection(COL.CHUNKS).where({ groupId: GROUP_ID }).remove()
+    await db.collection(COL.GROUPS).doc(GROUP_ID).remove()
     return { code: 0 }
 }

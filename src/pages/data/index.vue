@@ -98,7 +98,7 @@
         @restore="openBackupDialog"
       />
 
-      <DangerZone @delete-data="clearAllData" />
+      <DangerZone @delete-data="clearAllData" @delete-account="deleteAccount" />
     </scroll-view>
 
     <DownloadDialog
@@ -394,6 +394,7 @@ const {
   removeAdminRole,
   deleteMember,
   clearAllData,
+  deleteAccount,
   openMergeDialog,
   mergeWithWechat,
   openMenuAdd,

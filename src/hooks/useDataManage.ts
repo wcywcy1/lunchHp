@@ -204,6 +204,34 @@ export function useDataManage() {
         }
     }
 
+    async function deleteAccount() {
+        const isCreator = store.role === 'creator'
+        const label = isCreator ? '删除组织' : '退出组织'
+        const content = isCreator
+            ? '将永久删除本组织及所有数据，不可恢复，确定？'
+            : '将退出当前组织，你的历史订单数据保留但不再可见，确定？'
+        const { confirm: c1 } = await uni.showModal({ title: `⚠️ ${label}`, content })
+        if (!c1) return
+        const { confirm: c2 } = await uni.showModal({
+            title: '二次确认',
+            content: isCreator ? '组织删除后不可恢复，是否已备份？' : `确定${label}？`,
+        })
+        if (!c2) return
+        try {
+            const action = isCreator ? 'deleteGroup' : 'leaveGroup'
+            await menuAction(action)
+            orderManage.stopRealtimeWatch()
+            clearAllCache()
+            resetStore()
+            uni.showToast({ title: isCreator ? '组织已删除' : '已退出组织', icon: 'success' })
+            setTimeout(() => {
+                uni.reLaunch({ url: '/pages/group-select/index' })
+            }, 800)
+        } catch (e: any) {
+            uni.showToast({ title: e.message || '操作失败', icon: 'none' })
+        }
+    }
+
     function openMergeDialog(member: any) {
         mergingMember.value = member
         mergeTargetId.value = ''
@@ -667,6 +695,7 @@ export function useDataManage() {
         removeAdminRole,
         deleteMember,
         clearAllData,
+        deleteAccount,
         openMergeDialog,
         mergeWithWechat,
         openMenuAdd,
