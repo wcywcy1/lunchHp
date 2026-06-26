@@ -48,10 +48,11 @@
               opacity: getBarOpacity(i),
               background: getBarColor(),
               borderRadius: '4rpx'
-            }"></view>
+            }"
+          />
         </view>
         <view v-else class="voice-wave-wrap">
-          <view class="voice-pulse"></view>
+          <view class="voice-pulse" />
         </view>
         <text class="voice-tip">{{ voiceState === 'recognizing' ? '请稍候' : '点击结束录音' }}</text>
       </view>
@@ -80,7 +81,7 @@
     <view v-if="showAddMember" class="member-picker-mask" @tap="$emit('close-add')">
       <view class="add-member-modal" :style="addModalStyle" @tap.stop>
         <text class="modal-title">新增同事</text>
-        <input class="add-input" v-model="localMemberName" placeholder="输入姓名" @keyboardheightchange="onKeyboardHeightChange" />
+        <input v-model="localMemberName" class="add-input" placeholder="输入姓名" @keyboardheightchange="onKeyboardHeightChange">
         <view class="modal-btns">
           <view class="modal-btn cancel" @tap="$emit('close-add')"><text>取消</text></view>
           <view class="modal-btn confirm" @tap="$emit('add-virtual', localMemberName)"><text>添加</text></view>
@@ -133,7 +134,7 @@ function getBarColor(): string {
   return '#1976d2'
 }
 
-const emit = defineEmits<{
+defineEmits<{
   (e: 'switch-self'): void
   (e: 'switch-help'): void
   (e: 'submit'): void

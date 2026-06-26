@@ -25,22 +25,30 @@
             v-if="member.role !== 'creator'"
             class="action-btn edit"
             @tap="$emit('edit-name', member)"
-          >✏️</text>
+          >
+            ✏️
+          </text>
           <text
             v-if="member.role !== 'creator'"
             class="action-btn delete"
             @tap="$emit('delete-member', member)"
-          >🗑️</text>
+          >
+            🗑️
+          </text>
           <text
             v-if="isCreator && member.role === 'member'"
             class="action-btn set-admin"
             @tap="$emit('set-admin', member._id)"
-          >设管</text>
+          >
+            设管
+          </text>
           <text
             v-if="isCreator && member.role === 'admin'"
             class="action-btn remove-admin"
             @tap="$emit('remove-admin', member._id)"
-          >撤管</text>
+          >
+            撤管
+          </text>
         </view>
       </view>
     </template>

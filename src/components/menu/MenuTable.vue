@@ -26,7 +26,7 @@
         <text class="group-name">{{ group.supplier }}</text>
       </view>
       <view
-        v-for="(item, idx) in group.items"
+        v-for="item in group.items"
         :key="item._id"
         :class="['table-row', selectedMenuId === item._id ? 'selected' : '']"
         @tap="onSelect(item._id)"

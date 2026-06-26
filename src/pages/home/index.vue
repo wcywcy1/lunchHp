@@ -36,7 +36,7 @@
       @close-link="showLinkDialog = false"
       @select-virtual="selectVirtual"
       @confirm-link="linkVirtualMember"
-      @update:newName="editingName = $event"
+      @update:new-name="editingName = $event"
       @choose-avatar="onChooseAvatar"
     />
 
@@ -65,12 +65,12 @@
         </view>
         <text class="welcome-tip">请输入你的姓名（选填）</text>
         <input
-          class="welcome-input"
           v-model="editingName"
+          class="welcome-input"
           placeholder="可点键盘上方使用微信昵称"
           type="nickname"
           @keyboardheightchange="onWelcomeKeyboard"
-        />
+        >
         <view class="modal-actions">
           <view class="modal-btn cancel" @tap="skipWelcome"><text>跳过</text></view>
           <view class="modal-btn confirm" @tap="saveName"><text>确认</text></view>
@@ -94,7 +94,6 @@ import { useHome } from '../../hooks/useHome'
 import { useModalKeyboardAvoid } from '../../hooks/useModalKeyboardAvoid'
 
 const {
-  loading,
   memberLoading,
   displayName,
   todayDate,

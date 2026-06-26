@@ -20,11 +20,11 @@
         <input
           class="form-input"
           :value="newName"
-          @input="onInput"
           placeholder="输入姓名，可点键盘上方使用微信昵称"
           type="nickname"
+          @input="onInput"
           @keyboardheightchange="onKeyboardHeightChange"
-        />
+        >
       </view>
       <view class="modal-actions">
         <view class="modal-btn cancel" @tap="$emit('close')"><text>取消</text></view>
@@ -32,9 +32,9 @@
       </view>
       <view v-if="hasVirtualMembers" class="link-section">
         <view class="link-divider">
-          <view class="divider-line"></view>
+          <view class="divider-line" />
           <text class="divider-text">或</text>
-          <view class="divider-line"></view>
+          <view class="divider-line" />
         </view>
         <view class="link-btn" @tap="$emit('open-link')">
           <text class="link-text">🔗 关联已有记录</text>

@@ -61,7 +61,6 @@ const {
   loading,
   filter,
   showFilter,
-  filteredStats,
   totalAmount,
   totalCount,
   yearOptions,
@@ -79,7 +78,6 @@ const {
   resetFilter,
   openFilter,
   closeFilter,
-  searchDetail,
   loadMoreDetail,
   downloadMonthlyData,
 } = useStats()

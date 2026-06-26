@@ -7,14 +7,14 @@
           :class="['radio-item', mode === 'supplier' ? 'active' : '']"
           @tap="$emit('update:mode', 'supplier')"
         >
-          <view :class="['radio-dot', mode === 'supplier' ? 'checked' : '']"></view>
+          <view :class="['radio-dot', mode === 'supplier' ? 'checked' : '']" />
           <text class="radio-label">按供应商分别下载</text>
         </view>
         <view
           :class="['radio-item', mode === 'all' ? 'active' : '']"
           @tap="$emit('update:mode', 'all')"
         >
-          <view :class="['radio-dot', mode === 'all' ? 'checked' : '']"></view>
+          <view :class="['radio-dot', mode === 'all' ? 'checked' : '']" />
           <text class="radio-label">一并下载</text>
         </view>
       </view>

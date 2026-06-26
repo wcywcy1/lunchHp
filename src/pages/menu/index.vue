@@ -64,7 +64,7 @@ import OrderBar from '../../components/menu/OrderBar.vue'
 import CustomTabBar from '../../components/CustomTabBar/CustomTabBar.vue'
 
 const store = useStore()
-const { menuList, visibleItems, hiddenItems, loading, loadMenu, checkFreshness } = useMenu()
+const { menuList, loadMenu, checkFreshness } = useMenu()
 
 // 帮他人点餐时，"最近点过"按被帮人的频率排；self 模式用 menu 自带的当前用户统计
 const statsOverride = ref<Record<string, { count: number; lastAt: any }>>({})

@@ -119,7 +119,7 @@
         </view>
         <view class="form-item">
           <text class="form-label">新姓名</text>
-          <input class="form-input" v-model="editingName" placeholder="输入姓名" @keyboardheightchange="onNameEditKeyboard" />
+          <input v-model="editingName" class="form-input" placeholder="输入姓名" @keyboardheightchange="onNameEditKeyboard">
         </view>
         <view v-if="editingMember?.isVirtual" class="merge-section" @tap="openMergeDialog(editingMember)">
           <text class="merge-btn">🔗 关联微信账号</text>
@@ -172,15 +172,15 @@
         <text class="modal-title">{{ isMenuEdit ? '编辑菜品' : '添加菜品' }}</text>
         <view class="form-item">
           <text class="form-label">供应商</text>
-          <input class="form-input" v-model="menuEditForm.supplier" placeholder="如：享德来" @keyboardheightchange="onMenuEditKeyboard" />
+          <input v-model="menuEditForm.supplier" class="form-input" placeholder="如：享德来" @keyboardheightchange="onMenuEditKeyboard">
         </view>
         <view class="form-item">
           <text class="form-label">餐品名</text>
-          <input class="form-input" v-model="menuEditForm.name" placeholder="如：雞腿飯" @keyboardheightchange="onMenuEditKeyboard" />
+          <input v-model="menuEditForm.name" class="form-input" placeholder="如：雞腿飯" @keyboardheightchange="onMenuEditKeyboard">
         </view>
         <view class="form-item">
           <text class="form-label">价格</text>
-          <input class="form-input" v-model="menuEditForm.price" type="digit" placeholder="如：27" @keyboardheightchange="onMenuEditKeyboard" />
+          <input v-model="menuEditForm.price" class="form-input" type="digit" placeholder="如：27" @keyboardheightchange="onMenuEditKeyboard">
         </view>
         <view class="modal-actions">
           <view class="modal-btn cancel" @tap="showMenuEditModal = false"><text>取消</text></view>
@@ -289,7 +289,7 @@
         <text class="notice-send-hint">通知将实时推送给所有在线成员，今天0点过期</text>
         <view class="form-item">
           <text class="form-label">内容</text>
-          <input class="form-input" v-model="noticeInput" placeholder="如：已停止接单，电话联系" @keyboardheightchange="onNoticeSendKeyboard" />
+          <input v-model="noticeInput" class="form-input" placeholder="如：已停止接单，电话联系" @keyboardheightchange="onNoticeSendKeyboard">
         </view>
         <view class="modal-actions">
           <view class="modal-btn cancel" @tap="showNoticeSendDialog = false"><text>取消</text></view>
@@ -326,10 +326,8 @@ const { isAdmin, isCreator } = useAuth()
 let lastDataLoadTime = 0
 const DATA_THROTTLE_MS = 30 * 1000
 const {
-  loading,
   pendingOrders,
   confirmedOrders,
-  confirmedBySupplier,
   selectedIds,
   isAllSelected,
   confirming,
@@ -346,7 +344,6 @@ const {
   importing,
   showBackupDialog,
   backupList,
-  selectedBackupId,
   restoring,
   restoreProgress,
   backupStep,

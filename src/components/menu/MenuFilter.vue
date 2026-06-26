@@ -23,7 +23,7 @@
           placeholder-class="search-placeholder"
           @input="onSearchInput"
           @confirm="onSearchConfirm"
-        />
+        >
         <text v-if="keyword" class="search-clear" @tap="$emit('clear-keyword')">×</text>
       </view>
     </view>
@@ -31,9 +31,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
 
-const props = defineProps<{
+defineProps<{
   selectedSupplier: string
   selectedMenuName: string
   keyword: string
@@ -48,20 +47,8 @@ const emit = defineEmits<{
   (e: 'keyword-change', val: string): void
 }>()
 
-const menuNameDisplayOptions = computed(() =>
-  props.menuNameOptions.map(s => s || '全部')
-)
-const menuNameIndex = computed(() =>
-  props.menuNameOptions.indexOf(props.selectedMenuName)
-)
-
 function onSupplierTap(val: string) {
   emit('supplier-change', val)
-}
-
-function onMenuNamePick(e: any) {
-  const idx = e.detail.value
-  emit('menu-name-change', props.menuNameOptions[idx] || '')
 }
 
 function onSearchInput(e: any) {

@@ -6,7 +6,7 @@
     </view>
 
     <!-- 已加入的组列表 -->
-    <view class="section" v-if="joinedGroups.length > 0">
+    <view v-if="joinedGroups.length > 0" class="section">
       <text class="section-title">我的组织</text>
       <view
         v-for="g in joinedGroups"
@@ -34,7 +34,7 @@
           class="text-input"
           confirm-type="done"
           maxlength="20"
-        />
+        >
         <button class="btn-primary" :disabled="loading" @tap="onJoin">加入</button>
       </view>
       <text class="hint">请向组织创建者询问组织名称，输入正确的名称即可加入</text>
@@ -50,7 +50,7 @@
           class="text-input"
           confirm-type="done"
           maxlength="20"
-        />
+        >
         <button class="btn-primary" :disabled="loading" @tap="onCreate">创建</button>
       </view>
       <text class="hint">组织名称不能与已有组织重名</text>
@@ -87,7 +87,7 @@ async function loadJoinedGroups() {
       joinedGroups.value = res.result.data || []
       setStore({ joinedGroups: res.result.data || [] })
     }
-  } catch (e) {
+  } catch {
     uni.showToast({ title: '加载组织列表失败', icon: 'none' })
   } finally {
     loading.value = false
@@ -160,7 +160,7 @@ async function onCreate() {
       uni.showToast({ title: res?.result?.msg || '创建失败', icon: 'none' })
       return
     }
-    const { groupId, groupName, member } = res.result.data
+    const { groupId, groupName } = res.result.data
     await switchToGroup(groupId, groupName)
     uni.showToast({ title: `已创建「${groupName}」`, icon: 'success' })
     setTimeout(() => uni.switchTab({ url: '/pages/home/index' }), 800)
