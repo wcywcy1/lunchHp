@@ -157,7 +157,14 @@ onMounted(() => {
 })
 
 onShow(() => {
-  // 上次点餐成功后，进入餐单页时清空筛选，回到初始状态（"常点"tab，无关键词）
+  if (!isOrderAllowed.value) {
+    uni.showModal({
+      title: '点餐已截止',
+      content: '今日点餐已截止，如需点餐请联系管理员',
+      showCancel: false,
+      confirmText: '我知道了',
+    })
+  }
   if (orderJustSucceeded.value) {
     orderJustSucceeded.value = false
     resetFilter()
