@@ -34,6 +34,7 @@
       :memberList="memberList"
       :voiceState="voiceState"
       :voiceVolume="voiceVolume"
+      :orderDisabled="!isOrderAllowed"
       @switch-self="switchToSelf"
       @switch-help="switchToHelp"
       @submit="submitOrder"
@@ -98,6 +99,7 @@ const {
   showAddMember,
   memberList,
   orderJustSucceeded,
+  isOrderAllowed,
   selectMenuItem,
   switchToSelf,
   switchToHelp,

@@ -23,7 +23,14 @@
     </view>
 
     <view
-      v-if="!selectedMenuItem"
+      v-if="orderDisabled"
+      class="submit-btn disabled deadline-hint"
+    >
+      <text>今日点餐已截止</text>
+      <text class="deadline-sub">如需点餐请联系管理员</text>
+    </view>
+    <view
+      v-else-if="!selectedMenuItem"
       :class="['submit-btn', 'voice-btn', voiceState !== 'idle' ? 'recording' : '']"
       @tap="$emit('voice-toggle')"
     >
@@ -105,6 +112,7 @@ const props = defineProps<{
   memberList: any[]
   voiceState: string
   voiceVolume?: number
+  orderDisabled?: boolean
 }>()
 
 // 音量条高度/透明度因子：中间条最高，两侧递减，形成波形效果
@@ -217,6 +225,18 @@ watch(() => props.showAddMember, (val) => {
 }
 .submit-btn.disabled {
   background: #ccc;
+}
+.deadline-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4rpx;
+  padding: 20rpx 0;
+}
+.deadline-sub {
+  font-size: 22rpx;
+  font-weight: normal;
+  opacity: 0.8;
 }
 .voice-btn.recording {
   background: #e65100;

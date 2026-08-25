@@ -2,7 +2,8 @@ import { ref, computed, ComputedRef, Ref } from 'vue'
 import { useStore, setCache, flushCache } from '../services/store'
 import { menuAction, orderAction } from '../services/repositories/baseRepository'
 import { CACHE_KEYS } from '../constants/cacheConfig'
-import { getTodayString } from '../utils/date'
+import { getTodayString, getNow } from '../utils/date'
+import { useAuth } from './useAuth'
 
 interface MenuItem {
     _id: string
@@ -31,6 +32,7 @@ interface OrderReturn {
     showAddMember: Ref<boolean>
     memberList: ComputedRef<MemberItem[]>
     orderJustSucceeded: Ref<boolean>
+    isOrderAllowed: ComputedRef<boolean>
     selectMenuItem: (menuId: string) => void
     switchToSelf: () => void
     switchToHelp: () => void
@@ -45,6 +47,7 @@ const orderJustSucceeded = ref(false)
 
 export function useOrder(): OrderReturn {
     const store = useStore()
+    const { isAdmin } = useAuth()
     const selectedMenuId = ref('')
     const orderFor = ref('self')
     const orderForMemberId = ref('')
@@ -77,6 +80,11 @@ export function useOrder(): OrderReturn {
         }
         const target = memberList.value.find((m: MemberItem) => m._id === orderForMemberId.value)
         return target ? (target.name || target.nickName || '') : ''
+    })
+
+    const isOrderAllowed = computed(() => {
+        if (isAdmin.value) return true
+        return getNow().getHours() < 10
     })
 
     function selectMenuItem(menuId: string) {
@@ -125,6 +133,10 @@ export function useOrder(): OrderReturn {
     }
 
     async function submitOrder() {
+        if (!isOrderAllowed.value) {
+            uni.showToast({ title: '今日点餐已截止，如需点餐请联系管理员', icon: 'none', duration: 2500 })
+            return
+        }
         if (!selectedMenuId.value) {
             uni.showToast({ title: '请选择菜品', icon: 'none' })
             return
@@ -229,6 +241,7 @@ export function useOrder(): OrderReturn {
         showAddMember,
         memberList,
         orderJustSucceeded,
+        isOrderAllowed,
         selectMenuItem,
         switchToSelf,
         switchToHelp,
