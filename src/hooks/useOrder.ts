@@ -2,7 +2,7 @@ import { ref, computed, ComputedRef, Ref } from 'vue'
 import { useStore, setCache, flushCache } from '../services/store'
 import { menuAction, orderAction } from '../services/repositories/baseRepository'
 import { CACHE_KEYS } from '../constants/cacheConfig'
-import { getTodayString, getNow } from '../utils/date'
+import { getTodayString } from '../utils/date'
 import { useAuth } from './useAuth'
 
 interface MenuItem {
@@ -84,7 +84,7 @@ export function useOrder(): OrderReturn {
 
     const isOrderAllowed = computed(() => {
         if (isAdmin.value) return true
-        return getNow().getHours() < 10
+        return new Date().getHours() < 10
     })
 
     function selectMenuItem(menuId: string) {
