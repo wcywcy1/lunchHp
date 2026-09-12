@@ -25,7 +25,21 @@ async function getMemberByOpenid(openid) {
     if (data[0]) return data[0]
     const groupData = (await db.collection(COL.GROUPS).doc(GROUP_ID).get()).data
     if (groupData && groupData.creatorId === openid) {
-        return { _id: 'recovered', groupId: GROUP_ID, openid, role: ROLE.CREATOR, name: 'creator' }
+        // 创建者无真实 member 记录时真实落库，避免幽灵用户
+        const now = db.serverDate()
+        const member = {
+            groupId: GROUP_ID,
+            openid,
+            name: '',
+            nickName: '',
+            avatar: '',
+            role: ROLE.CREATOR,
+            isVirtual: false,
+            privacyAgreed: false,
+            joinedAt: now,
+        }
+        const { _id } = await db.collection(COL.MEMBERS).add({ data: member })
+        return { ...member, _id }
     }
     return null
 }
