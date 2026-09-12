@@ -45,6 +45,11 @@ interface OrderReturn {
 // 模块级标志位：点餐成功后置 true，供餐单页 onShow 检测并清空筛选
 const orderJustSucceeded = ref(false)
 
+// 切换组织/退出登录时重置模块级状态，避免跨实例污染
+export function resetOrderState() {
+    orderJustSucceeded.value = false
+}
+
 export function useOrder(): OrderReturn {
     const store = useStore()
     const { isAdmin } = useAuth()
@@ -165,6 +170,7 @@ export function useOrder(): OrderReturn {
         const date = getTodayString()
 
         submitting.value = true
+        const submitted = { done: false }
         try {
             const res = await orderAction('submitOrder', {
                 date,
@@ -209,7 +215,10 @@ export function useOrder(): OrderReturn {
                 selectedMenuId.value = ''
                 orderFor.value = 'self'
                 orderForMemberId.value = ''
+                // 标记成功，finally 不释放 submitting，避免 1 秒跳转窗口内重复点击
+                submitted.done = true
                 setTimeout(() => {
+                    submitting.value = false
                     uni.switchTab({ url: '/pages/home/index' })
                 }, 1000)
             } else if (res.result.code === 409 || (res.result.msg && res.result.msg.includes('已提交'))) {
@@ -220,7 +229,7 @@ export function useOrder(): OrderReturn {
         } catch (e: any) {
             uni.showToast({ title: e.message || '提交失败', icon: 'none' })
         } finally {
-            submitting.value = false
+            if (!submitted.done) submitting.value = false
         }
     }
 

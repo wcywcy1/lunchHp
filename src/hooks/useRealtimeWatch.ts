@@ -50,7 +50,8 @@ export function useRealtimeWatch() {
                         console.error('[watchTodayOrders] error:', err)
                         orderWatcher = null
                         if (cb.onError) cb.onError()
-                        const delay = Math.min(30000 * Math.pow(2, orderRetryCount++), 300000)
+                        const delay = Math.min(30000 * Math.pow(2, orderRetryCount), 300000)
+                        orderRetryCount++
                         orderRetryTimer = setTimeout(startWatcher, delay)
                     },
                 })

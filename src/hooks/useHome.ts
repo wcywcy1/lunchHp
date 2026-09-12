@@ -101,7 +101,16 @@ export function useHome() {
             }
         } catch (e) {
             console.error('initApp error:', e)
-            uni.showToast({ title: '初始化失败，请重试', icon: 'none' })
+            // 提供重试入口，避免用户必须杀进程重启
+            uni.showModal({
+                title: '初始化失败',
+                content: '加载数据失败，是否重试？',
+                confirmText: '重试',
+                cancelText: '取消',
+                success: (res) => {
+                    if (res.confirm) initApp()
+                }
+            })
         } finally {
             loading.value = false
             memberLoading.value = false

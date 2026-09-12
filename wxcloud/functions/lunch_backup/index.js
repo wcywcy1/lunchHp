@@ -9,6 +9,9 @@ const COL = {
     MENU: 'lunch_menu',
     MEMBERS: 'lunch_members',
     BACKUPS: 'lunch_backups',
+    MONTHLY_STATS: 'lunch_monthly_stats',
+    USER_STATS: 'lunch_user_menu_stats',
+    AUDIT_LOGS: 'lunch_audit_logs',
 }
 const ROLE = { CREATOR: 'creator', ADMIN: 'admin' }
 
@@ -176,22 +179,23 @@ async function restoreBackup(event, openid) {
 
     await doBackup('manual', '恢复前自动备份')
 
-    const { data: backupDoc } = await db.collection(COL.BACKUPS).doc(backupId).get()
-    if (!backupDoc) return { code: 404, msg: 'backup not found' }
+    const { data: backupList } = await db.collection(COL.BACKUPS)
+        .where({ _id: backupId, groupId: GROUP_ID }).limit(1).get()
+    if (!backupList || backupList.length === 0) return { code: 404, msg: 'backup not found' }
+    const backupDoc = backupList[0]
 
     const backupData = JSON.parse(backupDoc.data)
     const { orders = [], menu = [], members = [] } = backupData
 
-    await db.collection(COL.ORDERS).where({ groupId: GROUP_ID }).remove()
-    await db.collection(COL.MENU).where({ groupId: GROUP_ID }).remove()
-    await db.collection(COL.MEMBERS).where({ groupId: GROUP_ID }).remove()
+    // 用固定时间戳标记本次恢复写入的数据，删除时按 < cutoff 过滤，避免误删刚写入的
+    const cutoff = Date.now()
+    const ts = db.serverDate()
 
-    const now = db.serverDate()
-
+    // 原子化恢复：先写入全部备份数据，全部成功后再删除旧数据，避免中途失败导致数据丢失
     for (let i = 0; i < orders.length; i += BATCH_SIZE) {
         const batch = orders.slice(i, i + BATCH_SIZE).map(o => {
             const { _id, ...rest } = o
-            return { ...rest, createdAt: now, updatedAt: now }
+            return { ...rest, _restoreTs: cutoff, createdAt: ts, updatedAt: ts }
         })
         await db.collection(COL.ORDERS).add({ data: batch })
     }
@@ -199,7 +203,7 @@ async function restoreBackup(event, openid) {
     for (let i = 0; i < menu.length; i += BATCH_SIZE) {
         const batch = menu.slice(i, i + BATCH_SIZE).map(m => {
             const { _id, ...rest } = m
-            return { ...rest, createdAt: now, updatedAt: now }
+            return { ...rest, _restoreTs: cutoff, createdAt: ts, updatedAt: ts }
         })
         await db.collection(COL.MENU).add({ data: batch })
     }
@@ -207,10 +211,15 @@ async function restoreBackup(event, openid) {
     for (let i = 0; i < members.length; i += BATCH_SIZE) {
         const batch = members.slice(i, i + BATCH_SIZE).map(m => {
             const { _id, ...rest } = m
-            return { ...rest, joinedAt: now }
+            return { ...rest, _restoreTs: cutoff, joinedAt: ts }
         })
         await db.collection(COL.MEMBERS).add({ data: batch })
     }
+
+    // 全部写入成功后，删除恢复前的旧数据（_restoreTs != cutoff 的为旧数据）
+    await db.collection(COL.ORDERS).where({ groupId: GROUP_ID, _restoreTs: _.neq(cutoff) }).remove()
+    await db.collection(COL.MENU).where({ groupId: GROUP_ID, _restoreTs: _.neq(cutoff) }).remove()
+    await db.collection(COL.MEMBERS).where({ groupId: GROUP_ID, _restoreTs: _.neq(cutoff) }).remove()
 
     return { code: 0, data: { orderCount: orders.length, menuCount: menu.length, memberCount: members.length } }
 }
@@ -235,6 +244,9 @@ async function deleteBackup(event, openid) {
     const { backupId } = event
     if (!backupId) return { code: 400, msg: 'missing backupId' }
 
+    const { data: bk } = await db.collection(COL.BACKUPS)
+        .where({ _id: backupId, groupId: GROUP_ID }).limit(1).get()
+    if (!bk || bk.length === 0) return { code: 404, msg: 'backup not found' }
     await db.collection(COL.BACKUPS).doc(backupId).remove()
     return { code: 0 }
 }
@@ -269,6 +281,10 @@ async function clearAllData(event, openid) {
     await db.collection(COL.ORDERS).where({ groupId: GROUP_ID }).remove()
     await db.collection(COL.MENU).where({ groupId: GROUP_ID }).remove()
     await db.collection(COL.MEMBERS).where({ groupId: GROUP_ID, role: _.neq('creator') }).remove()
+    // 清理统计与审计数据，避免残留脏数据
+    try { await db.collection(COL.MONTHLY_STATS).where({ groupId: GROUP_ID }).remove() } catch (e) { console.warn('clear stats error:', e.message) }
+    try { await db.collection(COL.USER_STATS).where({ groupId: GROUP_ID }).remove() } catch (e) { console.warn('clear user stats error:', e.message) }
+    try { await db.collection(COL.AUDIT_LOGS).where({ groupId: GROUP_ID }).remove() } catch (e) { console.warn('clear audit error:', e.message) }
 
     return { code: 0 }
 }

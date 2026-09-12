@@ -12,6 +12,10 @@ node_modules
 dist
 *.local
 
+# 私钥/密钥文件，禁止入库
+*.key
+private.wx*.key
+
 # Editor directories and files
 .idea
 *.suo

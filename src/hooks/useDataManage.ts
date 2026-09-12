@@ -91,7 +91,7 @@ export function useDataManage() {
         return Object.entries(map).map(([supplier, orders]) => ({
             supplier,
             orders,
-            subtotal: orders.reduce((sum: number, o: any) => sum + (o.price || 0), 0),
+            subtotal: Math.round(orders.reduce((sum: number, o: any) => sum + (o.price || 0) * 100, 0)) / 100,
         }))
     })
 
@@ -467,7 +467,7 @@ export function useDataManage() {
                     })
                     lines.push(buildCsvLine([group.supplier, '小计', '', group.subtotal, '']))
                 })
-                const total = confirmedOrders.value.reduce((s: number, o: any) => s + (o.price || 0), 0)
+                const total = Math.round(confirmedOrders.value.reduce((s: number, o: any) => s + (o.price || 0) * 100, 0)) / 100
                 lines.push(buildCsvLine(['全部', '合计', '', total, '']))
                 const fs = wx.getFileSystemManager()
                 const fileName = `确认单_全部_${getTodayString()}.csv`

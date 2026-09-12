@@ -1,4 +1,5 @@
 import { reactive } from 'vue'
+import { resetOrderState } from '../hooks/useOrder'
 import { CACHE_KEYS, getTTL } from '../constants/cacheConfig'
 import { GROUP_ID, ACTIVE_GROUP_ID_KEY } from '../constants/appConfig'
 
@@ -69,6 +70,8 @@ export function resetStore() {
     store.isSwitchingGroup = false
     store.statsLoadTime = 0
     store.recentLoadTime = 0
+    // 重置 useOrder 模块级状态，避免切换组织后残留
+    try { resetOrderState() } catch (e) { /* useOrder 未加载时忽略 */ }
 }
 
 export function getCache(key: string, skipTTL = false): any {
