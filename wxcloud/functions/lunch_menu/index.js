@@ -62,7 +62,20 @@ async function getMemberByOpenid(openid) {
     if (data[0]) return data[0]
     const groupData = (await db.collection(COL.GROUPS).doc(GROUP_ID).get()).data
     if (groupData && groupData.creatorId === openid) {
-        return { _id: 'recovered', groupId: GROUP_ID, openid, role: ROLE.CREATOR, name: 'creator' }
+        const now = db.serverDate()
+        const member = {
+            groupId: GROUP_ID,
+            openid,
+            name: '',
+            nickName: '',
+            avatar: '',
+            role: ROLE.CREATOR,
+            isVirtual: false,
+            privacyAgreed: false,
+            joinedAt: now,
+        }
+        const { _id } = await db.collection(COL.MEMBERS).add({ data: member })
+        return { ...member, _id }
     }
     return null
 }
@@ -186,6 +199,20 @@ async function initGroup(event, openid) {
         createdAt: now,
     }
     await db.collection(COL.GROUPS).add({ data: group })
+
+    const member = {
+        groupId: GROUP_ID,
+        openid,
+        name: '',
+        nickName: '',
+        avatar: '',
+        role: ROLE.CREATOR,
+        isVirtual: false,
+        privacyAgreed: false,
+        joinedAt: now,
+    }
+    await db.collection(COL.MEMBERS).add({ data: member })
+
     return { code: 0, data: { exists: false, group } }
 }
 
@@ -308,7 +335,7 @@ async function joinGroupByName(event, openid) {
 async function joinGroup(event, openid) {
     const { nickName, name } = event
     const existing = await getMemberByOpenid(openid)
-    if (existing && existing._id !== 'recovered') {
+    if (existing) {
         return { code: 0, data: { member: existing, isNew: false, virtualMatch: null } }
     }
 
@@ -465,7 +492,7 @@ async function linkVirtualMember(event, openid) {
 
     // 1. 转移订单：把当前微信成员的订单 memberId/memberName 改到虚拟成员（保留张三的历史）
     let callerOrderCount = 0
-    if (caller._id && caller._id !== 'recovered') {
+    if (caller._id) {
         const callerOrders = await fetchAll(db.collection(COL.ORDERS), { groupId: GROUP_ID, memberId: caller._id })
         callerOrderCount = callerOrders.length
         if (callerOrders.length > 0) {
@@ -523,12 +550,12 @@ async function linkVirtualMember(event, openid) {
     await db.collection(COL.MEMBERS).doc(virtualMemberId).update({ data: update })
 
     // 4. 删除当前微信成员记录
-    if (caller._id !== 'recovered') {
+    if (caller._id) {
         await db.collection(COL.MEMBERS).doc(caller._id).remove()
     }
 
     await writeAuditLog(openid, AUDIT_ACTION.MEMBER_LINK, 'member', virtualMemberId,
-        { callerId: caller._id !== 'recovered' ? caller._id : null, callerName: caller.name, callerAvatar: caller.avatar, virtualSnapshot: virtual },
+        { callerId: caller._id || null, callerName: caller.name, callerAvatar: caller.avatar, virtualSnapshot: virtual },
         { memberId: virtualMemberId }, { ordersMoved: callerOrderCount })
     await updateGroupTimestamp('membersTimestamp')
     try {
@@ -636,7 +663,7 @@ async function updateMemberProfile(event, openid) {
     if (avatar === undefined && nickName === undefined) return { code: 400, msg: 'nothing to update' }
 
     const caller = await getMemberByOpenid(openid)
-    if (!caller || caller._id === 'recovered') return { code: 403, msg: 'not a member' }
+    if (!caller) return { code: 403, msg: 'not a member' }
 
     const update = {}
     if (avatar !== undefined) update.avatar = avatar
@@ -699,7 +726,7 @@ async function getMenuList(event, openid) {
     })
     // 合并当前用户的个人点餐统计，用于"最近点过"个人化排序
     const caller = await getMemberByOpenid(openid).catch(() => null)
-    if (caller && caller._id && caller._id !== 'recovered') {
+    if (caller && caller._id) {
         const { data: stats } = await db.collection(COL.USER_STATS)
             .where({ groupId: GROUP_ID, memberId: caller._id })
             .get()
