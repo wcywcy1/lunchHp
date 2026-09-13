@@ -87,7 +87,10 @@ export function useMenu(): MenuReturn {
         try {
             const res = await menuAction('getDataTimestamps')
             if (res.result.code !== 0) return
-            const { menuTimestamp, membersTimestamp } = res.result.data
+            const { menuTimestamp, membersTimestamp, orderCutoff, cutoffDisabled } = res.result.data
+            // 同步停止接单配置，覆盖冷启动直接进入菜单页的场景（isOrderAllowed 响应式更新）
+            store.groupCutoff = orderCutoff || '10:00'
+            store.cutoffDisabled = !!cutoffDisabled
 
             // menu 和 members 刷新无依赖，并行执行
             const tasks: Promise<void>[] = []

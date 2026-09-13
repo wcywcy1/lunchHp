@@ -1,5 +1,5 @@
 import { ref, computed, ComputedRef, Ref } from 'vue'
-import { useStore, setCache, flushCache } from '../services/store'
+import { useStore, setCache, flushCache, orderJustSucceeded } from '../services/store'
 import { menuAction, orderAction } from '../services/repositories/baseRepository'
 import { CACHE_KEYS } from '../constants/cacheConfig'
 import { getTodayString } from '../utils/date'
@@ -42,14 +42,6 @@ interface OrderReturn {
     resetOrder: () => void
 }
 
-// 模块级标志位：点餐成功后置 true，供餐单页 onShow 检测并清空筛选
-const orderJustSucceeded = ref(false)
-
-// 切换组织/退出登录时重置模块级状态，避免跨实例污染
-export function resetOrderState() {
-    orderJustSucceeded.value = false
-}
-
 export function useOrder(): OrderReturn {
     const store = useStore()
     const { isAdmin } = useAuth()
@@ -88,8 +80,11 @@ export function useOrder(): OrderReturn {
     })
 
     const isOrderAllowed = computed(() => {
-        if (isAdmin.value) return true
-        return new Date().getHours() < 10
+        if (isAdmin.value || store.cutoffDisabled) return true
+        const cutoff = (store.groupCutoff as string) || '10:00'
+        const d = new Date()
+        const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+        return hhmm < cutoff
     })
 
     function selectMenuItem(menuId: string) {

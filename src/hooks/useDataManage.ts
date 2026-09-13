@@ -57,11 +57,13 @@ export function useDataManage() {
     const saving = ref(false)
     const realtime = useRealtimeWatch()
 
-    // 通知相关
-    const showNoticeSendDialog = ref(false)
-    const noticeInput = ref('')
-    const sendingNotice = ref(false)
-    const currentNotice = ref('')
+    // 停止接单时间相关
+    const showCutoffDialog = ref(false)
+    const cutoffInput = ref('')
+    const savingCutoff = ref(false)
+    const groupCutoff = computed(() => store.groupCutoff || '10:00')
+    const groupCutoffDisabled = computed(() => store.cutoffDisabled)
+    const togglingCutoff = ref(false)
 
     const historyPendingCount = ref(0)
     const historyConfirmedCount = ref(0)
@@ -108,7 +110,7 @@ export function useDataManage() {
             }
             const tsRes = await menuAction('getDataTimestamps')
             if (tsRes.result.code === 0) {
-                currentNotice.value = tsRes.result.data.notice || ''
+                setStore({ groupCutoff: tsRes.result.data.orderCutoff || '10:00', cutoffDisabled: !!tsRes.result.data.cutoffDisabled })
             }
         } catch (e) {
             console.error('loadData error:', e)
@@ -1456,42 +1458,49 @@ export function useDataManage() {
         realtime.closeAll()
     }
 
-    function openNoticeSendDialog() {
-        noticeInput.value = ''
-        showNoticeSendDialog.value = true
+    function openCutoffDialog() {
+        cutoffInput.value = groupCutoff.value
+        showCutoffDialog.value = true
     }
 
-    async function sendNotice() {
-        const content = noticeInput.value.trim()
-        if (!content) {
-            uni.showToast({ title: '请输入通知内容', icon: 'none' })
+    async function saveCutoff() {
+        if (!cutoffInput.value) {
+            uni.showToast({ title: '请选择时间', icon: 'none' })
             return
         }
-        sendingNotice.value = true
+        savingCutoff.value = true
         try {
-            const res = await menuAction('setNotice', { content })
+            const res = await menuAction('setOrderCutoff', { time: cutoffInput.value })
             if (res.result.code === 0) {
-                currentNotice.value = content
-                uni.showToast({ title: '通知已发送', icon: 'success' })
-                showNoticeSendDialog.value = false
-                noticeInput.value = ''
+                setStore({ groupCutoff: cutoffInput.value, cutoffDisabled: false })
+                uni.showToast({ title: '已保存并启用', icon: 'success' })
+                showCutoffDialog.value = false
             } else {
-                throw new Error(res.result.msg || '发送失败')
+                throw new Error(res.result.msg || '保存失败')
             }
         } catch (e: any) {
-            uni.showToast({ title: e.message || '发送失败', icon: 'none' })
+            uni.showToast({ title: e.message || '保存失败', icon: 'none' })
         } finally {
-            sendingNotice.value = false
+            savingCutoff.value = false
         }
     }
 
-    async function clearNotice() {
+    async function toggleCutoffDisabled() {
+        if (togglingCutoff.value) return
+        togglingCutoff.value = true
         try {
-            await menuAction('clearNotice')
-            currentNotice.value = ''
-            uni.showToast({ title: '通知已清除', icon: 'success' })
+            const disabled = !groupCutoffDisabled.value
+            const res = await menuAction('setCutoffDisabled', { disabled })
+            if (res.result.code === 0) {
+                setStore({ cutoffDisabled: disabled })
+                uni.showToast({ title: disabled ? '已禁用，停止接单时间不生效' : '已启用停止接单时间', icon: 'none' })
+            } else {
+                throw new Error(res.result.msg || '操作失败')
+            }
         } catch (e: any) {
             uni.showToast({ title: e.message || '操作失败', icon: 'none' })
+        } finally {
+            togglingCutoff.value = false
         }
     }
 
@@ -1537,10 +1546,11 @@ export function useDataManage() {
         loadingHistoryConfirmed,
         historyPendingHasMore,
         historyConfirmedHasMore,
-        showNoticeSendDialog,
-        noticeInput,
-        sendingNotice,
-        currentNotice,
+        showCutoffDialog,
+        cutoffInput,
+        savingCutoff,
+        groupCutoff,
+        groupCutoffDisabled,
         loadData,
         toggleSelect,
         toggleSelectAll,
@@ -1589,9 +1599,9 @@ export function useDataManage() {
         loadMoreHistoryConfirmed,
         startRealtimeWatch,
         stopRealtimeWatch,
-        openNoticeSendDialog,
-        sendNotice,
-        clearNotice,
+        openCutoffDialog,
+        saveCutoff,
+        toggleCutoffDisabled,
         currentGroupId,
         targetGroupId,
         switchingGroup,

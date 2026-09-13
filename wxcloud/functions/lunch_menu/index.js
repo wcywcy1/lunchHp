@@ -129,6 +129,8 @@ exports.main = async (event, context) => {
         parseCsv,
         setNotice,
         clearNotice,
+        setOrderCutoff,
+        setCutoffDisabled,
         // 通用模式：选组/创建组
         createGroup,
         listJoinedGroups,
@@ -165,6 +167,8 @@ async function getDataTimestamps(event, openid) {
             membersTimestamp: data.membersTimestamp || null,
             notice: data.notice || '',
             noticeUpdatedAt: data.noticeUpdatedAt || null,
+            orderCutoff: data.orderCutoff || '10:00',
+            cutoffDisabled: !!data.cutoffDisabled,
         }
     }
 }
@@ -1080,4 +1084,47 @@ async function clearNotice(event, openid) {
     })
 
     return { code: 0 }
+}
+
+async function setOrderCutoff(event, openid) {
+    const { time } = event
+    if (!/^\d{2}:\d{2}$/.test(time || '')) {
+        return { code: 400, msg: '时间格式不正确' }
+    }
+    const [h, m] = time.split(':').map(Number)
+    if (h > 23 || m > 59) {
+        return { code: 400, msg: '时间格式不正确' }
+    }
+
+    const member = await getMemberByOpenid(openid)
+    if (!checkRole(member, ROLE.CREATOR, ROLE.ADMIN)) {
+        return { code: 403, msg: '无权限' }
+    }
+
+    // 保存新时间视为启用（自动解除禁用）
+    await db.collection(COL.GROUPS).doc(GROUP_ID).update({
+        data: { orderCutoff: time, cutoffDisabled: false }
+    })
+
+    return { code: 0, data: { orderCutoff: time, cutoffDisabled: false } }
+}
+
+async function setCutoffDisabled(event, openid) {
+    const { disabled } = event
+    if (typeof disabled !== 'boolean') return { code: 400, msg: '参数错误' }
+
+    const member = await getMemberByOpenid(openid)
+    if (!checkRole(member, ROLE.CREATOR, ROLE.ADMIN)) {
+        return { code: 403, msg: '无权限' }
+    }
+
+    const data = { cutoffDisabled: disabled }
+    // 禁用时清掉当天已自动发出的停止接单通知，横幅实时消失
+    if (disabled) {
+        data.notice = ''
+        data.noticeUpdatedAt = db.serverDate()
+    }
+    await db.collection(COL.GROUPS).doc(GROUP_ID).update({ data })
+
+    return { code: 0, data: { cutoffDisabled: disabled } }
 }

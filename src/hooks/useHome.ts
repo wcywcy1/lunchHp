@@ -208,7 +208,8 @@ export function useHome() {
         try {
             const res = await orderAction('getAllTimestamps')
             if (res.result.code === 0) {
-                const { recentTimestamp, menuTimestamp, membersTimestamp, notice, noticeUpdatedAt } = res.result.data
+                const { recentTimestamp, menuTimestamp, membersTimestamp, notice, noticeUpdatedAt, orderCutoff, cutoffDisabled } = res.result.data
+                setStore({ groupCutoff: orderCutoff || '10:00', cutoffDisabled: !!cutoffDisabled })
                 if (notice && isNoticeToday(noticeUpdatedAt)) {
                     noticeContent.value = notice
                 } else {

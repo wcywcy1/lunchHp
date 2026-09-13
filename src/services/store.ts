@@ -1,7 +1,9 @@
-import { reactive } from 'vue'
-import { resetOrderState } from '../hooks/useOrder'
+import { reactive, ref } from 'vue'
 import { CACHE_KEYS, getTTL } from '../constants/cacheConfig'
 import { GROUP_ID, ACTIVE_GROUP_ID_KEY } from '../constants/appConfig'
+
+// 模块级标志位：点餐成功后置 true，供餐单页 onShow 检测并清空筛选（放 store 避免 store→useOrder 循环依赖）
+export const orderJustSucceeded = ref(false)
 
 interface JoinedGroup {
     groupId: string
@@ -27,6 +29,8 @@ interface StoreState {
     isSwitchingGroup: boolean
     statsLoadTime: number
     recentLoadTime: number
+    groupCutoff: string
+    cutoffDisabled: boolean
 }
 
 const store = reactive<StoreState>({
@@ -46,6 +50,8 @@ const store = reactive<StoreState>({
     isSwitchingGroup: false,
     statsLoadTime: 0,
     recentLoadTime: 0,
+    groupCutoff: '',
+    cutoffDisabled: false,
 })
 
 export function useStore() {
@@ -73,8 +79,10 @@ export function resetStore() {
     store.isSwitchingGroup = false
     store.statsLoadTime = 0
     store.recentLoadTime = 0
-    // 重置 useOrder 模块级状态，避免切换组织后残留
-    try { resetOrderState() } catch (e) { /* useOrder 未加载时忽略 */ }
+    store.groupCutoff = ''
+    store.cutoffDisabled = false
+    // 重置点餐成功标志，避免切换组织后残留
+    orderJustSucceeded.value = false
 }
 
 export function getCache(key: string, skipTTL = false): any {

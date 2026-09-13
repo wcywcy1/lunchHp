@@ -3,16 +3,16 @@
     <scroll-view scroll-y class="data-scroll">
       <view class="notice-section">
         <view class="notice-header">
-          <text class="notice-title">发送通知</text>
-          <text class="notice-hint">通知将实时推送给所有在线成员，今天0点过期</text>
+          <text class="notice-title">停止接单时间</text>
+          <text class="notice-hint">{{ groupCutoffDisabled ? '已禁用，到点不截止点餐、不发送通知' : '每天到点后自动通知成员停止接单' }}</text>
         </view>
-        <view v-if="currentNotice" class="notice-current">
-          <text class="notice-current-label">当前通知：</text>
-          <text class="notice-current-text">{{ currentNotice }}</text>
+        <view class="notice-current">
+          <text class="notice-current-label">当前时间：</text>
+          <text class="notice-current-text" :class="{ 'cutoff-off': groupCutoffDisabled }">{{ groupCutoff }}</text>
         </view>
         <view class="notice-actions">
-          <view class="notice-btn" :class="{ secondary: currentNotice }" @tap="openNoticeSendDialog"><text>发送通知</text></view>
-          <view class="notice-btn" :class="{ secondary: !currentNotice }" @tap="clearNotice"><text>清除通知</text></view>
+          <view class="notice-btn" :class="{ secondary: groupCutoffDisabled }" @tap="openCutoffDialog"><text>修改时间</text></view>
+          <view class="notice-btn" :class="{ secondary: !groupCutoffDisabled }" @tap="toggleCutoffDisabled"><text>{{ groupCutoffDisabled ? '启用' : '禁用' }}</text></view>
         </view>
       </view>
 
@@ -283,17 +283,19 @@
       </view>
     </view>
 
-    <view v-if="showNoticeSendDialog" class="modal-mask" @tap="showNoticeSendDialog = false">
-      <view class="edit-modal notice-send-modal" :style="noticeSendModalStyle" @tap.stop>
-        <text class="modal-title">发送通知</text>
-        <text class="notice-send-hint">通知将实时推送给所有在线成员，今天0点过期</text>
+    <view v-if="showCutoffDialog" class="modal-mask" @tap="showCutoffDialog = false">
+      <view class="edit-modal notice-send-modal" @tap.stop>
+        <text class="modal-title">停止接单时间</text>
+        <text class="notice-send-hint">每天到点后自动发送通知，截止前成员不可点餐（管理员除外）</text>
         <view class="form-item">
-          <text class="form-label">内容</text>
-          <input class="form-input" v-model="noticeInput" placeholder="如：已停止接单，电话联系" @keyboardheightchange="onNoticeSendKeyboard" />
+          <text class="form-label">时间</text>
+          <picker mode="time" :value="cutoffInput" @change="onCutoffChange">
+            <view class="form-input cutoff-picker">{{ cutoffInput }}</view>
+          </picker>
         </view>
         <view class="modal-actions">
-          <view class="modal-btn cancel" @tap="showNoticeSendDialog = false"><text>取消</text></view>
-          <view :class="['modal-btn confirm', sendingNotice ? 'disabled' : '']" @tap="sendNotice"><text>{{ sendingNotice ? '发送中...' : '发送' }}</text></view>
+          <view class="modal-btn cancel" @tap="showCutoffDialog = false"><text>取消</text></view>
+          <view :class="['modal-btn confirm', savingCutoff ? 'disabled' : '']" @tap="saveCutoff"><text>{{ savingCutoff ? '保存中...' : '保存' }}</text></view>
         </view>
       </view>
     </view>
@@ -371,10 +373,11 @@ const {
   loadingHistoryConfirmed,
   historyPendingHasMore,
   historyConfirmedHasMore,
-  showNoticeSendDialog,
-  noticeInput,
-  sendingNotice,
-  currentNotice,
+  showCutoffDialog,
+  cutoffInput,
+  savingCutoff,
+  groupCutoff,
+  groupCutoffDisabled,
   loadData,
   toggleSelect,
   toggleSelectAll,
@@ -419,20 +422,22 @@ const {
   loadMoreHistoryConfirmed,
   startRealtimeWatch,
   stopRealtimeWatch,
-  openNoticeSendDialog,
-  sendNotice,
-  clearNotice,
+  openCutoffDialog,
+  saveCutoff,
+  toggleCutoffDisabled,
 } = useDataManage()
 
 const members = computed(() => store.members || [])
 
 const { modalStyle: nameEditModalStyle, onKeyboardHeightChange: onNameEditKeyboard, reset: resetNameEditKb } = useModalKeyboardAvoid({ modalSelector: '.name-edit-modal' })
 const { modalStyle: menuEditModalStyle, onKeyboardHeightChange: onMenuEditKeyboard, reset: resetMenuEditKb } = useModalKeyboardAvoid({ modalSelector: '.menu-edit-modal' })
-const { modalStyle: noticeSendModalStyle, onKeyboardHeightChange: onNoticeSendKeyboard, reset: resetNoticeKb } = useModalKeyboardAvoid({ modalSelector: '.notice-send-modal' })
 
 watch(showNameEditDialog, (val) => { if (!val) resetNameEditKb() })
 watch(showMenuEditModal, (val) => { if (!val) resetMenuEditKb() })
-watch(showNoticeSendDialog, (val) => { if (!val) resetNoticeKb() })
+
+function onCutoffChange(e: any) {
+  cutoffInput.value = e.detail.value
+}
 
 const autoBackups = computed(() => backupList.value.filter((b: any) => b.type === 'auto'))
 const manualBackups = computed(() => backupList.value.filter((b: any) => b.type === 'manual'))
@@ -777,6 +782,10 @@ onHide(() => {
 .notice-current-text {
   font-size: 26rpx;
   color: #d32f2f;
+}
+.notice-current-text.cutoff-off {
+  color: #999;
+  text-decoration: line-through;
 }
 .notice-actions {
   display: flex;
