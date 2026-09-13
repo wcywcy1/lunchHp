@@ -1190,6 +1190,41 @@ export function useDataManage() {
         }
     }
 
+    async function deleteGroup() {
+        const { confirm: c1 } = await uni.showModal({
+            title: '⚠️ 永久删除组织',
+            content: '将删除本组织及全部数据，你会被登出并跳转选组页。确定？',
+        })
+        if (!c1) return
+        const { confirm: c2, content: confirmText } = await uni.showModal({
+            title: '最后确认',
+            content: '操作不可逆，请输入"删除"确认。',
+            editable: true,
+            placeholderText: '请输入"删除"',
+        })
+        if (!c2) return
+        const text = (confirmText || '').trim()
+        if (text !== '删除') {
+            uni.showToast({ title: '输入"删除"以确认', icon: 'none' })
+            return
+        }
+        try {
+            const res = await menuAction('deleteGroup')
+            if (!res || !res.result || res.result.code !== 0) {
+                uni.showToast({ title: res?.result?.msg || '删除失败', icon: 'none' })
+                return
+            }
+            clearAllCache()
+            resetStore()
+            uni.showToast({ title: '组织已删除', icon: 'success' })
+            setTimeout(() => {
+                uni.reLaunch({ url: '/pages/group-select/index' })
+            }, 800)
+        } catch (e: any) {
+            uni.showToast({ title: e.message || '删除失败', icon: 'none' })
+        }
+    }
+
     // 组织切换相关
     const currentGroupId = computed(() => store.groupId || getActiveGroupId())
     const switchingGroup = ref(false)
@@ -1529,6 +1564,7 @@ export function useDataManage() {
         removeAdminRole,
         deleteMember,
         clearAllData,
+        deleteGroup,
         openMergeDialog,
         mergeWithWechat,
         openMenuAdd,

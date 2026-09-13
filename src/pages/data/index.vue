@@ -98,7 +98,7 @@
         @restore="openBackupDialog"
       />
 
-      <DangerZone @delete-data="clearAllData" />
+      <DangerZone :role="store.role" :app-mode="APP_MODE" @delete-data="clearAllData" @delete-account="handleDeleteGroup" />
     </scroll-view>
 
     <DownloadDialog
@@ -306,6 +306,7 @@
 import { computed, watch } from 'vue'
 import { onShow, onHide } from '@dcloudio/uni-app'
 import { useStore } from '../../services/store'
+import { APP_MODE } from '../../constants/appConfig'
 import { useAuth } from '../../hooks/useAuth'
 import { useDataManage } from '../../hooks/useDataManage'
 import { useModalKeyboardAvoid } from '../../hooks/useModalKeyboardAvoid'
@@ -393,6 +394,7 @@ const {
   removeAdminRole,
   deleteMember,
   clearAllData,
+  deleteGroup,
   openMergeDialog,
   mergeWithWechat,
   openMenuAdd,
@@ -439,6 +441,10 @@ function formatTime(ts: any) {
   if (!ts) return ''
   const d = new Date(ts)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+function handleDeleteGroup() {
+  deleteGroup()
 }
 
 onShow(() => {

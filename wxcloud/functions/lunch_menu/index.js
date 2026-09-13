@@ -133,6 +133,7 @@ exports.main = async (event, context) => {
         createGroup,
         listJoinedGroups,
         joinGroupByName,
+        deleteGroup,
     }
 
     const fn = handlers[action]
@@ -330,6 +331,22 @@ async function joinGroupByName(event, openid) {
     member._id = _id
 
     return { code: 0, data: { member, groupId: targetGroupId, groupName: name, alreadyJoined: false } }
+}
+
+async function deleteGroup(event, openid) {
+    const caller = await getMemberByOpenid(openid)
+    if (!checkRole(caller, ROLE.CREATOR)) return { code: 403, msg: 'only creator can delete group' }
+
+    // 彻底清除本组织全部数据
+    await db.collection(COL.ORDERS).where({ groupId: GROUP_ID }).remove()
+    await db.collection(COL.MENU).where({ groupId: GROUP_ID }).remove()
+    await db.collection(COL.MEMBERS).where({ groupId: GROUP_ID }).remove()
+    await db.collection(COL.USER_STATS).where({ groupId: GROUP_ID }).remove()
+    try { await db.collection('lunch_monthly_stats').where({ groupId: GROUP_ID }).remove() } catch (e) { console.warn('clear monthly_stats error:', e.message) }
+    try { await db.collection(COL.AUDIT_LOGS).where({ groupId: GROUP_ID }).remove() } catch (e) { console.warn('clear audit_logs error:', e.message) }
+    await db.collection(COL.GROUPS).doc(GROUP_ID).remove()
+
+    return { code: 0 }
 }
 
 async function joinGroup(event, openid) {

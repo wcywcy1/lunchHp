@@ -1,20 +1,42 @@
 <template>
   <view class="danger-zone">
     <text class="section-title">危险操作</text>
-    <view class="danger-btn delete-data" @tap="$emit('delete-data')">
+    <view
+      :class="['danger-btn', 'delete-data', { disabled: !canDeleteData }]"
+      @tap="canDeleteData && $emit('delete-data')"
+    >
       <text>删除数据</text>
     </view>
-    <view class="danger-btn delete-account disabled">
-      <text>删除账号</text>
+    <view
+      :class="['danger-btn', 'delete-account', { disabled: !canDeleteAccount }]"
+      @tap="canDeleteAccount && $emit('delete-account')"
+    >
+      <text>删除组织</text>
     </view>
-    <text class="danger-tip">删除账号不可用：当前组织ID为系统预设</text>
+    <text v-if="!isGeneral" class="danger-tip">hp 预设组织不可删除</text>
+    <text v-else-if="!isCreator" class="danger-tip">仅组织创建者可执行此操作</text>
   </view>
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
+import { ROLE } from '../../constants/orderStatus'
+
+const props = defineProps<{
+  role?: string | null
+  appMode?: string
+}>()
+
 defineEmits<{
   (e: 'delete-data'): void
+  (e: 'delete-account'): void
 }>()
+
+const isCreator = computed(() => props.role === ROLE.CREATOR)
+const isGeneral = computed(() => props.appMode === 'general')
+
+const canDeleteData = computed(() => isCreator.value && isGeneral.value)
+const canDeleteAccount = computed(() => isCreator.value && isGeneral.value)
 </script>
 
 <style scoped>
