@@ -152,7 +152,6 @@ exports.main = async (event, context) => {
         rebuildMonthStats,
         searchOrders,
         exportOrders,
-        importOrders,
         downloadConfirmed,
         downloadMonthlyData,
         getHistoryOrderCount,
