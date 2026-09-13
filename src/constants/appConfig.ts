@@ -12,8 +12,6 @@ export const APP_MODE = 'hp' as 'hp' | 'general'
 
 export const CLOUD_ENV = 'cloud1-d0g9zww8h390b6f41'
 
-export const ENABLE_SCENE_JOIN = false
-
 export const DB_PREFIX = 'lunch_'
 
 export const CLOUD_FUNC_PREFIX = 'lunch_'
@@ -35,4 +33,5 @@ export const CLOUD_FUNCTIONS = {
     MENU: 'lunch_menu',
     ORDER: 'lunch_order',
     BACKUP: 'lunch_backup',
+    VOICE: 'lunch_voice',
 }

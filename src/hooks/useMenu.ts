@@ -3,6 +3,7 @@ import { useStore, getCache, setCache } from '../services/store'
 import { menuAction } from '../services/repositories/baseRepository'
 import { waitForInit } from '../services/appInit'
 import { CACHE_KEYS } from '../constants/cacheConfig'
+import { checkDataFreshness } from '../services/freshness'
 
 interface MenuItem {
     _id: string
@@ -84,34 +85,7 @@ export function useMenu(): MenuReturn {
     }
 
     async function checkFreshness() {
-        try {
-            const res = await menuAction('getDataTimestamps')
-            if (res.result.code !== 0) return
-            const { menuTimestamp, membersTimestamp, orderCutoff, cutoffDisabled } = res.result.data
-            // 同步停止接单配置，覆盖冷启动直接进入菜单页的场景（isOrderAllowed 响应式更新）
-            store.groupCutoff = orderCutoff || '10:00'
-            store.cutoffDisabled = !!cutoffDisabled
-
-            // menu 和 members 刷新无依赖，并行执行
-            const tasks: Promise<void>[] = []
-            if (menuTimestamp !== store.menuTimestamp) {
-                tasks.push((async () => {
-                    await loadMenu(true)
-                    store.menuTimestamp = menuTimestamp
-                    setCache(CACHE_KEYS.MENU_TIMESTAMP, menuTimestamp)
-                })())
-            }
-            if (membersTimestamp !== store.membersTimestamp) {
-                tasks.push((async () => {
-                    await loadMembers()
-                    store.membersTimestamp = membersTimestamp
-                    setCache(CACHE_KEYS.MEMBERS_TIMESTAMP, membersTimestamp)
-                })())
-            }
-            await Promise.all(tasks)
-        } catch (e) {
-            console.error('checkFreshness error:', e)
-        }
+        await checkDataFreshness()
     }
 
     return {

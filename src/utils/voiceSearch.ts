@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { CLOUD_FUNCTIONS } from '../constants/appConfig'
 
 // 停用词：这些词不作为筛选关键词
 const STOP_WORDS = [
@@ -224,7 +225,7 @@ export function useVoiceSearch(options: VoiceSearchOptions = {}) {
 
             // 2. 直接 callFunction 传 base64，省掉上传云存储/取URL/删文件三次往返
             const res: any = await wx.cloud.callFunction({
-                name: 'lunch_voice',
+                name: CLOUD_FUNCTIONS.VOICE,
                 data: {
                     action: 'speechRecognize',
                     audioBase64,

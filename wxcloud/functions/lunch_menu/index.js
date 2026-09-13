@@ -160,16 +160,40 @@ async function updateGroupTimestamp(field) {
 
 async function getDataTimestamps(event, openid) {
     const { data } = await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => ({ data: {} }))
+    const groupData = data || {}
+    const getTs = (val) => {
+        if (!val) return null
+        if (val instanceof Date) return val.getTime()
+        return new Date(val).getTime()
+    }
+    let notice = groupData.notice || ''
+    let noticeUpdatedAt = getTs(groupData.noticeUpdatedAt)
+
+    // 停止接单时间懒触发：北京时间已过截止时间且今天未发过，自动写群通知（幂等，任何成员调用都会触发）；已禁用则跳过
+    const cutoff = groupData.orderCutoff || '10:00'
+    const cutoffDisabled = !!groupData.cutoffDisabled
+    const bj = new Date(Date.now() + 8 * 3600 * 1000)
+    const today = `${bj.getUTCFullYear()}-${String(bj.getUTCMonth() + 1).padStart(2, '0')}-${String(bj.getUTCDate()).padStart(2, '0')}`
+    const hhmm = `${String(bj.getUTCHours()).padStart(2, '0')}:${String(bj.getUTCMinutes()).padStart(2, '0')}`
+    if (!cutoffDisabled && groupData.cutoffNoticeDate !== today && hhmm >= cutoff) {
+        notice = `每天${cutoff}停止接单，有需要请电话联系`
+        await db.collection(COL.GROUPS).doc(GROUP_ID).update({
+            data: { notice, noticeUpdatedAt: db.serverDate(), cutoffNoticeDate: today }
+        }).catch(() => { })
+        noticeUpdatedAt = Date.now()
+    }
+
     return {
         code: 0,
         data: {
-            menuTimestamp: data.menuTimestamp || null,
-            membersTimestamp: data.membersTimestamp || null,
-            notice: data.notice || '',
-            noticeUpdatedAt: data.noticeUpdatedAt || null,
-            orderCutoff: data.orderCutoff || '10:00',
-            cutoffDisabled: !!data.cutoffDisabled,
-        }
+            recentTimestamp: getTs(groupData.ordersTimestamp),
+            menuTimestamp: getTs(groupData.menuTimestamp),
+            membersTimestamp: getTs(groupData.membersTimestamp),
+            notice,
+            noticeUpdatedAt,
+            orderCutoff: cutoff,
+            cutoffDisabled,
+        },
     }
 }
 
@@ -404,6 +428,7 @@ async function updateMemberName(event, openid) {
     const { memberId, name } = event
     if (!memberId || name === undefined) return { code: 400, msg: 'missing memberId or name' }
     if (!String(name).trim()) return { code: 400, msg: '姓名不能为空' }
+    if (String(name).trim().length > 20) return { code: 400, msg: '姓名不能超过20个字符' }
 
     const caller = await getMemberByOpenid(openid)
     if (!caller) return { code: 403, msg: 'not a member' }

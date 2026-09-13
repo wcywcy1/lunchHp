@@ -2,7 +2,7 @@
 import { onLaunch, onShow, onHide } from "@dcloudio/uni-app";
 import { initCloud } from "./services/cloudClient";
 import { startInit } from "./services/appInit";
-import { restoreSession, restoreFromCache, getActiveGroupId, setStore } from "./services/store";
+import { restoreSession, restoreFromCache, getActiveGroupId, setStore, flushCache } from "./services/store";
 import { APP_MODE, GROUP_ID } from "./constants/appConfig";
 
 onLaunch(() => {
@@ -28,6 +28,9 @@ onLaunch(() => {
   startInit();
 });
 onShow(() => {});
-onHide(() => {});
+// 切后台时冲刷防抖缓存队列，避免 300ms 窗口内退出的数据丢失
+onHide(() => {
+  flushCache();
+});
 </script>
 <style></style>

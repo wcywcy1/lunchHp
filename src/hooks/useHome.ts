@@ -5,7 +5,8 @@ import { menuAction, orderAction } from '../services/repositories/baseRepository
 import { waitForInit } from '../services/appInit'
 import { CACHE_KEYS, CACHE_TTL } from '../constants/cacheConfig'
 import { useRealtimeWatch } from './useRealtimeWatch'
-import { APP_MODE } from '../constants/appConfig'
+import { APP_MODE, CLOUD_STORAGE_PATH } from '../constants/appConfig'
+import { checkDataFreshness, toMs } from '../services/freshness'
 import { getTodayString } from '../utils/date'
 
 export function useHome() {
@@ -205,54 +206,18 @@ export function useHome() {
     const showNoticeBanner = computed(() => noticeContent.value.length > 0)
 
     async function checkFreshness() {
-        try {
-            const res = await orderAction('getAllTimestamps')
-            if (res.result.code === 0) {
-                const { recentTimestamp, menuTimestamp, membersTimestamp, notice, noticeUpdatedAt, orderCutoff, cutoffDisabled } = res.result.data
-                setStore({ groupCutoff: orderCutoff || '10:00', cutoffDisabled: !!cutoffDisabled })
-                if (notice && isNoticeToday(noticeUpdatedAt)) {
-                    noticeContent.value = notice
-                } else {
-                    noticeContent.value = ''
-                }
-                if (recentTimestamp !== store.recentTimestamp) {
-                    await fetchRecentOrders(recentTimestamp)
-                } else {
-                    setRecentLoadTime(Date.now())
-                }
-                if (menuTimestamp !== store.menuTimestamp) {
-                    try {
-                        const menuRes = await orderAction('getRecentMenu')
-                        if (menuRes.result.code === 0) {
-                            const menu = menuRes.result.data
-                            setStore({ menu, menuTimestamp })
-                            setCache(CACHE_KEYS.MENU, menu)
-                            setCache(CACHE_KEYS.MENU_TIMESTAMP, menuTimestamp)
-                        }
-                    } catch (e) { console.error('checkFreshness menu error:', e) }
-                }
-                if (membersTimestamp !== store.membersTimestamp) {
-                    try {
-                        const membersRes = await orderAction('getRecentMembers')
-                        if (membersRes.result.code === 0) {
-                            const members = membersRes.result.data
-                            setStore({ members, membersTimestamp })
-                            setCache(CACHE_KEYS.MEMBERS, members)
-                            setCache(CACHE_KEYS.MEMBERS_TIMESTAMP, membersTimestamp)
-                            // 同步本人角色变更（如被设/撤管理员），使 TabBar/权限立即生效
-                            if (store.member?._id) {
-                                const me = members.find((m: any) => m._id === store.member._id)
-                                if (me && me.role !== store.member.role) {
-                                    setStore({ member: me, role: me.role })
-                                    saveSession({ groupId: me.groupId, role: me.role, member: me })
-                                }
-                            }
-                        }
-                    } catch (e) { console.error('checkFreshness members error:', e) }
-                }
-            }
-        } catch (e) {
-            console.error('checkFreshness error:', e)
+        const data = await checkDataFreshness()
+        if (!data) return
+        const { recentTimestamp, notice, noticeUpdatedAt } = data
+        if (notice && isNoticeToday(noticeUpdatedAt)) {
+            noticeContent.value = notice
+        } else {
+            noticeContent.value = ''
+        }
+        if (toMs(recentTimestamp) !== toMs(store.recentTimestamp)) {
+            await fetchRecentOrders(recentTimestamp)
+        } else {
+            setRecentLoadTime(Date.now())
         }
     }
 
@@ -365,7 +330,7 @@ export function useHome() {
             store.member.name = name
             await menuAction('updateMemberName', { memberId: store.member._id, name })
             if (avatarChanged.value && editingAvatar.value) {
-                const cloudPath = `lunch/avatar_${store.member._id}_${Date.now()}.jpg`
+                const cloudPath = `${CLOUD_STORAGE_PATH}avatar_${store.member._id}_${Date.now()}.jpg`
                 const uploadRes = await wx.cloud.uploadFile({
                     cloudPath,
                     filePath: editingAvatar.value,

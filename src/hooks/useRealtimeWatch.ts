@@ -1,4 +1,5 @@
 import { GROUP_ID, COLLECTIONS } from '../constants/appConfig'
+import { useStore } from '../services/store'
 import { getTodayString } from '../utils/date'
 
 interface WatcherRef {
@@ -13,6 +14,9 @@ interface OrderWatchCallbacks {
 }
 
 export function useRealtimeWatch() {
+    const store = useStore()
+    // 实时监听当前激活组（运行时可切换），回退默认组
+    const activeGroupId = () => store.groupId || GROUP_ID
     let orderWatcher: WatcherRef | null = null
     let groupWatcher: WatcherRef | null = null
     let orderRetryTimer: any = null
@@ -29,7 +33,7 @@ export function useRealtimeWatch() {
 
         const startWatcher = () => {
             orderWatcher = db.collection(COLLECTIONS.ORDERS)
-                .where({ groupId: GROUP_ID, date: today })
+                .where({ groupId: activeGroupId(), date: today })
                 .watch({
                     onChange: (snapshot: any) => {
                         orderRetryCount = 0
@@ -63,7 +67,7 @@ export function useRealtimeWatch() {
         closeGroupWatcher()
         const db = wx.cloud.database()
         groupWatcher = db.collection(COLLECTIONS.GROUPS)
-            .where({ _id: GROUP_ID })
+            .where({ _id: activeGroupId() })
             .watch({
                 onChange,
                 onError: (err: any) => {
