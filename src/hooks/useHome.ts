@@ -5,7 +5,7 @@ import { menuAction, orderAction } from '../services/repositories/baseRepository
 import { waitForInit } from '../services/appInit'
 import { CACHE_KEYS, CACHE_TTL } from '../constants/cacheConfig'
 import { useRealtimeWatch } from './useRealtimeWatch'
-import { APP_MODE, CLOUD_STORAGE_PATH } from '../constants/appConfig'
+import { CLOUD_STORAGE_PATH } from '../constants/appConfig'
 import { checkDataFreshness, toMs } from '../services/freshness'
 import { getTodayString } from '../utils/date'
 
@@ -141,7 +141,7 @@ export function useHome() {
     }
 
     async function onShow() {
-        if (APP_MODE === 'general' && !uni.getStorageSync('lunch_session')) {
+        if (!uni.getStorageSync('lunch_session')) {
             uni.reLaunch({ url: '/pages/group-select/index' })
             return
         }

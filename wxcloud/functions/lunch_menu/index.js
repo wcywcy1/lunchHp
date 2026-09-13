@@ -236,32 +236,11 @@ async function ensureCollections() {
 async function initGroup(event, openid) {
     await ensureCollections()
     const { data } = await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => ({ data: null }))
-    if (data) return { code: 0, data: { exists: true, group: data } }
+    if (data) return { code: 0, data: { exists: true } }
 
-    const now = db.serverDate()
-    const group = {
-        _id: GROUP_ID,
-        name: '默认组织',
-        creatorId: openid,
-        qrcode: '',
-        createdAt: now,
-    }
-    await db.collection(COL.GROUPS).add({ data: group })
-
-    const member = {
-        groupId: GROUP_ID,
-        openid,
-        name: '',
-        nickName: '',
-        avatar: '',
-        role: ROLE.CREATOR,
-        isVirtual: false,
-        privacyAgreed: false,
-        joinedAt: now,
-    }
-    await db.collection(COL.MEMBERS).add({ data: member })
-
-    return { code: 0, data: { exists: false, group } }
+    // 组不存在（如被删除或失效）：返回 404，前端清除失效会话并引导回选组页。
+    // 任何组织（含 hp 默认组）都不自动创建，建组统一走 createGroup
+    return { code: 404, msg: 'group not found' }
 }
 
 // 通用模式：创建新组（组名全局唯一，组ID系统生成）

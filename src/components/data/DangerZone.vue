@@ -13,8 +13,7 @@
     >
       <text>删除组织</text>
     </view>
-    <text v-if="!isGeneral" class="danger-tip">hp 预设组织不可删除</text>
-    <text v-else-if="!isCreator" class="danger-tip">仅组织创建者可执行此操作</text>
+    <text v-if="!isCreator" class="danger-tip">仅组织创建者可执行此操作</text>
   </view>
 </template>
 
@@ -24,7 +23,6 @@ import { ROLE } from '../../constants/orderStatus'
 
 const props = defineProps<{
   role?: string | null
-  appMode?: string
 }>()
 
 defineEmits<{
@@ -33,10 +31,9 @@ defineEmits<{
 }>()
 
 const isCreator = computed(() => props.role === ROLE.CREATOR)
-const isGeneral = computed(() => props.appMode === 'general')
 
-const canDeleteData = computed(() => isCreator.value && isGeneral.value)
-const canDeleteAccount = computed(() => isCreator.value && isGeneral.value)
+const canDeleteData = computed(() => isCreator.value)
+const canDeleteAccount = computed(() => isCreator.value)
 </script>
 
 <style scoped>

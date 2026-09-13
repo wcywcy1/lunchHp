@@ -98,7 +98,7 @@
         @restore="openBackupDialog"
       />
 
-      <DangerZone :role="store.role" :app-mode="APP_MODE" @delete-data="clearAllData" @delete-account="handleDeleteGroup" />
+      <DangerZone :role="store.role" @delete-data="clearAllData" @delete-account="handleDeleteGroup" />
     </scroll-view>
 
     <DownloadDialog
@@ -308,7 +308,6 @@
 import { computed, watch } from 'vue'
 import { onShow, onHide } from '@dcloudio/uni-app'
 import { useStore } from '../../services/store'
-import { APP_MODE } from '../../constants/appConfig'
 import { useAuth } from '../../hooks/useAuth'
 import { useDataManage } from '../../hooks/useDataManage'
 import { useModalKeyboardAvoid } from '../../hooks/useModalKeyboardAvoid'
