@@ -65,7 +65,15 @@ const canDeleteAccount = computed(() => isCreator.value && isGeneral.value)
   background: #fce4ec;
   color: #c62828;
 }
+.danger-btn.delete-data.disabled {
+  background: #f5f5f5;
+  color: #bbb;
+}
 .danger-btn.delete-account {
+  background: #fce4ec;
+  color: #c62828;
+}
+.danger-btn.delete-account.disabled {
   background: #f5f5f5;
   color: #bbb;
 }
