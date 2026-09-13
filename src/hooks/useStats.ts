@@ -2,6 +2,7 @@ import { ref, computed, ComputedRef, Ref } from 'vue'
 import { useStore, getCache, setCache, getStatsLoadTime, setStatsLoadTime } from '../services/store'
 import { orderAction } from '../services/repositories/baseRepository'
 import { CACHE_KEYS, CACHE_TTL } from '../constants/cacheConfig'
+import { ORDER_STATUS } from '../constants/orderStatus'
 import { buildCsvLine, writeCsvWithBom, shareOrSaveFile, isPcPlatform } from '../utils/csv'
 
 interface MonthlyStat {
@@ -13,6 +14,13 @@ interface MonthlyStat {
     orderByMember: Record<string, number>
     orderBySupplier: Record<string, number>
     [key: string]: any
+}
+
+/** 后端实时聚合结果（与清单同一查询条件，口径一致） */
+interface SummaryAggregate {
+    totals: { totalAmount: number; totalCount: number }
+    byMonth: { year: number; month: number; totalAmount: number; orderCount: number }[]
+    bySupplier: { name: string; totalAmount: number; count: number }[]
 }
 
 interface FilterState {
@@ -60,6 +68,8 @@ export function useStats(): StatsReturn {
     const detailPage = ref(0)
     const detailTotal = ref(0)
     const pageSize = 50
+    // 有筛选时由后端实时聚合填充，无筛选时为 null（走月度统计快路径）
+    const summaryAggregate = ref<SummaryAggregate | null>(null)
 
     const filter = ref<FilterState>({
         year: null,
@@ -122,23 +132,44 @@ export function useStats(): StatsReturn {
     })
 
     const totalAmount = computed(() =>
-        filteredStats.value.reduce((sum, s) => sum + (s.totalAmount || 0), 0)
+        summaryAggregate.value
+            ? summaryAggregate.value.totals.totalAmount
+            : filteredStats.value.reduce((sum, s) => sum + (s.totalAmount || 0), 0)
     )
 
     const totalCount = computed(() =>
-        filteredStats.value.reduce((sum, s) => sum + (s.orderCount || 0), 0)
+        summaryAggregate.value
+            ? summaryAggregate.value.totals.totalCount
+            : filteredStats.value.reduce((sum, s) => sum + (s.orderCount || 0), 0)
     )
 
-    const barChartData = computed(() =>
-        filteredStats.value.map(s => ({
+    const barChartData = computed(() => {
+        if (summaryAggregate.value) {
+            return summaryAggregate.value.byMonth.map(m => ({
+                label: `${m.month}月`,
+                value: m.totalAmount,
+                amount: m.totalAmount,
+                year: m.year,
+            }))
+        }
+        return filteredStats.value.map(s => ({
             label: `${s.month}月`,
             value: s.totalAmount || 0,
             amount: s.totalAmount || 0,
             year: s.year,
         }))
-    )
+    })
 
     const pieChartData = computed(() => {
+        if (summaryAggregate.value) {
+            const total = summaryAggregate.value.bySupplier.reduce((a, b) => a + b.totalAmount, 0)
+            return summaryAggregate.value.bySupplier.map(item => ({
+                name: item.name,
+                value: item.totalAmount,
+                amount: item.totalAmount,
+                percent: total > 0 ? ((item.totalAmount / total) * 100).toFixed(1) : '0.0',
+            })).sort((a, b) => b.value - a.value)
+        }
         const supplierMap: Record<string, number> = {}
         filteredStats.value.forEach(s => {
             if (!s.orderBySupplier) return
@@ -232,17 +263,51 @@ export function useStats(): StatsReturn {
     async function applyFilter(f: FilterState) {
         filter.value = { ...f }
         showFilter.value = false
-        await searchDetail()
+        await Promise.all([searchDetail(), fetchSummaryAggregate()])
     }
 
     async function resetFilter() {
         filter.value = { year: null, months: [], members: [], suppliers: [] }
         showFilter.value = false
+        summaryAggregate.value = null
         await searchDetail()
     }
 
     function openFilter() { showFilter.value = true }
     function closeFilter() { showFilter.value = false }
+
+    /** 拉取筛选后的实时聚合（与清单同一查询条件，保证汇总和清单口径一致） */
+    async function fetchSummaryAggregate() {
+        const f = filter.value
+        if (f.year === null && f.months.length === 0 && f.members.length === 0 && f.suppliers.length === 0) {
+            summaryAggregate.value = null
+            return
+        }
+        try {
+            const params: Record<string, any> = { aggregateBy: 'supplier', status: ORDER_STATUS.CONFIRMED }
+            if (f.year !== null) params.year = f.year
+            if (f.months.length > 0) params.months = f.months
+            if (f.members.length > 0) params.members = f.members
+            if (f.suppliers.length > 0) params.suppliers = f.suppliers
+
+            const res = await orderAction('searchOrders', params)
+            if (res.result.code === 0 && res.result.data.totals) {
+                summaryAggregate.value = {
+                    totals: res.result.data.totals,
+                    byMonth: res.result.data.byMonth || [],
+                    bySupplier: res.result.data.aggregate || [],
+                }
+            } else if (res.result.code === 0) {
+                // 云函数未更新到聚合版本：无 totals 字段，静默回退会导致汇总口径错误
+                console.warn('searchOrders 缺少聚合响应（totals），请重新上传 lunch_order 云函数')
+                uni.showToast({ title: '汇总需更新云函数', icon: 'none' })
+            }
+            // code !== 0 的错误已由 cloudAction 统一抛出，走下方 catch
+        } catch (e: any) {
+            console.error('fetchSummaryAggregate error:', e)
+            uni.showToast({ title: e.message || '汇总查询失败', icon: 'none' })
+        }
+    }
 
     async function searchDetail() {
         detailPage.value = 0
@@ -259,7 +324,7 @@ export function useStats(): StatsReturn {
         detailLoading.value = true
         try {
             const f = filter.value
-            const params: Record<string, any> = { page: detailPage.value + 1, pageSize }
+            const params: Record<string, any> = { page: detailPage.value + 1, pageSize, status: ORDER_STATUS.CONFIRMED }
             if (f.year !== null) params.year = f.year
             if (f.months.length > 0) params.months = f.months
             if (f.members.length > 0) params.members = f.members

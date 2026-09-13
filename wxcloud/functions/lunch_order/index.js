@@ -980,14 +980,34 @@ async function getMonthlyStats(event, openid) {
 }
 
 function _formatStatDoc(doc) {
+    // orderByMember/orderBySupplier 在库里存了完整数组（带 count），
+    // orderByMemberMap/orderBySupplierMap 是前端用的金额 map
+    const byMemberAmount = doc.orderByMemberMap || arrayToRecord(doc.orderByMember, 'memberName')
+    const bySupplierAmount = doc.orderBySupplierMap || arrayToRecord(doc.orderBySupplier, 'supplier')
+
+    const byMemberCount = {}
+    if (Array.isArray(doc.orderByMember)) {
+        for (const item of doc.orderByMember) {
+            byMemberCount[item.memberName || '未定义'] = item.count || 0
+        }
+    }
+    const bySupplierCount = {}
+    if (Array.isArray(doc.orderBySupplier)) {
+        for (const item of doc.orderBySupplier) {
+            bySupplierCount[item.supplier || '未定义'] = item.count || 0
+        }
+    }
+
     return {
         _id: doc._id,
         year: doc.year,
         month: doc.month,
         totalAmount: doc.totalAmount || 0,
         orderCount: doc.orderCount || doc.count || 0,
-        orderByMember: doc.orderByMemberMap || arrayToRecord(doc.orderByMember, 'memberName'),
-        orderBySupplier: doc.orderBySupplierMap || arrayToRecord(doc.orderBySupplier, 'supplier'),
+        orderByMember: byMemberAmount,
+        orderBySupplier: bySupplierAmount,
+        orderByMemberCount: byMemberCount,
+        orderBySupplierCount: bySupplierCount,
     }
 }
 
@@ -1087,7 +1107,7 @@ async function doRebuildMonthStats(targetYearMonth) {
 }
 
 async function searchOrders(event, openid) {
-    const { startDate, endDate, memberId, supplier, status, members, suppliers, year, months, page = 1, pageSize = 50 } = event
+    const { startDate, endDate, memberId, supplier, status, members, suppliers, year, months, page = 1, pageSize = 50, aggregateBy } = event
 
     const where = { groupId: GROUP_ID }
 
@@ -1115,6 +1135,62 @@ async function searchOrders(event, openid) {
     if (members && members.length > 0) where.memberName = _.in(members)
     if (suppliers && suppliers.length > 0) where.supplier = _.in(suppliers)
     if (status) where.status = status
+
+    // 聚合模式：按筛选条件实时聚合（与清单同一 where，保证口径一致）
+    // 用于筛选后的汇总卡 / 柱状图 / 饼图
+    // 注意：只用 match + group($.sum) —— 项目内已验证的聚合写法；
+    // 不使用 project/substrCP 等操作符（云开发聚合管道兼容性风险）
+    if (aggregateBy === 'supplier') {
+        const [byDateRes, bySupplierRes] = await Promise.all([
+            db.collection(COL.ORDERS)
+                .aggregate()
+                .match(where)
+                .group({ _id: '$date', totalAmount: $.sum('$price'), count: $.sum(1) })
+                .limit(1000)
+                .end(),
+            db.collection(COL.ORDERS)
+                .aggregate()
+                .match(where)
+                .group({ _id: '$supplier', totalAmount: $.sum('$price'), count: $.sum(1) })
+                .limit(100)
+                .end(),
+        ])
+
+        // 按日期分组的结果在云函数内合并为月份
+        const monthMap = {}
+        let totalAmount = 0
+        let totalCount = 0
+        for (const item of byDateRes.list) {
+            const [year, month] = String(item._id || '').substring(0, 7).split('-').map(Number)
+            if (!year || !month) continue
+            const ym = `${year}-${month}`
+            if (!monthMap[ym]) monthMap[ym] = { year, month, totalAmount: 0, orderCount: 0 }
+            monthMap[ym].totalAmount += item.totalAmount || 0
+            monthMap[ym].orderCount += item.count || 0
+            totalAmount += item.totalAmount || 0
+            totalCount += item.count || 0
+        }
+        const byMonth = Object.values(monthMap)
+            .map(m => ({ ...m, totalAmount: Math.round(m.totalAmount * 100) / 100 }))
+            .sort((a, b) => (a.year - b.year) || (a.month - b.month))
+
+        const aggregate = bySupplierRes.list.map(item => ({
+            name: item._id || '未定义',
+            totalAmount: Math.round((item.totalAmount || 0) * 100) / 100,
+            count: item.count || 0,
+        })).sort((a, b) => b.totalAmount - a.totalAmount)
+
+        return {
+            code: 0,
+            data: {
+                aggregate,
+                totals: { totalAmount: Math.round(totalAmount * 100) / 100, totalCount },
+                byMonth,
+                list: [],
+                total: 0,
+            },
+        }
+    }
 
     const skip = (page - 1) * pageSize
     const [countResult, { data }] = await Promise.all([
