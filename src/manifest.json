@@ -1,7 +1,7 @@
 {
     "name" : "我要干饭",
     "appid" : "__UNI__2973906",
-    "description" : "HP公司午饭点餐小程序",
+    "description" : "午餐点餐小程序",
     "versionName" : "1.0.0",
     "versionCode" : "100",
     "transformPx" : false,

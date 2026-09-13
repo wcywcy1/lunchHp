@@ -1275,10 +1275,6 @@ export function useDataManage() {
         }
     }
 
-    function resetToDefaultGroup() {
-        targetGroupId.value = 'lunch_hp'
-    }
-
     const showMergeDialog = ref(false)
     const mergingMember = ref<any>(null)
     const mergeTargetId = ref('')
@@ -1606,6 +1602,5 @@ export function useDataManage() {
         targetGroupId,
         switchingGroup,
         switchGroup,
-        resetToDefaultGroup,
     }
 }

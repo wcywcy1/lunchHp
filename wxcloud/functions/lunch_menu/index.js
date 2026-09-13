@@ -98,11 +98,30 @@ async function fetchAll(collection, where) {
     return all
 }
 
+// 简单速率限制：同一 openid 10 秒窗口内最多 30 次调用（实例级内存，防异常刷量）
+const _rateMap = new Map()
+function rateLimit(openid, limit = 30, windowMs = 10000) {
+    if (!openid) return true
+    const now = Date.now()
+    const arr = (_rateMap.get(openid) || []).filter(t => now - t < windowMs)
+    if (arr.length >= limit) return false
+    arr.push(now)
+    _rateMap.set(openid, arr)
+    if (_rateMap.size > 10000) {
+        for (const [k, v] of _rateMap) {
+            if (v.every(t => now - t >= windowMs)) _rateMap.delete(k)
+        }
+    }
+    return true
+}
+
 exports.main = async (event, context) => {
     const { OPENID } = cloud.getWXContext()
     const { action } = event
     // 从前端传入 groupId，回退默认值，实现多组织切换
     GROUP_ID = event.groupId || 'lunch_hp'
+
+    if (!rateLimit(OPENID)) return { code: 429, msg: '请求过于频繁，请稍后再试' }
 
     const handlers = {
         initGroup,
@@ -222,7 +241,7 @@ async function initGroup(event, openid) {
     const now = db.serverDate()
     const group = {
         _id: GROUP_ID,
-        name: 'HP午饭',
+        name: '默认组织',
         creatorId: openid,
         qrcode: '',
         createdAt: now,

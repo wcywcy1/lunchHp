@@ -1,7 +1,7 @@
 <template>
   <view class="home-header">
     <view class="header-left" @tap="$emit('switch-group')">
-      <text class="app-title">🍚 {{ groupName || 'hp Lunch' }}</text>
+      <text class="app-title">🍚 {{ groupName || APP_NAME }}</text>
       <text class="today-date">{{ todayDate }}</text>
     </view>
     <view class="header-right" @tap="$emit('click-avatar')">
@@ -16,6 +16,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { APP_NAME } from '../../constants/appConfig'
 
 const props = defineProps<{
   displayName: string
