@@ -3,7 +3,7 @@
     {
       "path": "pages/home/index",
       "style": {
-        "navigationBarTitleText": "我要干饭",
+        "navigationBarTitleText": "hp Lunch",
         "enablePullDownRefresh": true
       }
     },
@@ -36,7 +36,7 @@
   ],
   "globalStyle": {
     "navigationBarTextStyle": "black",
-    "navigationBarTitleText": "我要干饭",
+    "navigationBarTitleText": "hp Lunch",
     "navigationBarBackgroundColor": "#F8F8F8",
     "backgroundColor": "#F8F8F8"
   },

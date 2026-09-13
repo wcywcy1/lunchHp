@@ -1,7 +1,7 @@
 <template>
   <view class="home-header">
-    <view class="header-left">
-      <text class="app-title">🍚 我要干饭</text>
+    <view class="header-left" @tap="$emit('switch-group')">
+      <text class="app-title">🍚 {{ groupName || 'hp Lunch' }}</text>
       <text class="today-date">{{ todayDate }}</text>
     </view>
     <view class="header-right" @tap="$emit('click-avatar')">
@@ -22,10 +22,12 @@ const props = defineProps<{
   todayDate: string
   avatar: string
   memberLoading?: boolean
+  groupName?: string
 }>()
 
 defineEmits<{
   (e: 'click-avatar'): void
+  (e: 'switch-group'): void
 }>()
 
 const initial = computed(() => {

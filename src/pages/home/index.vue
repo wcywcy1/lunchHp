@@ -5,7 +5,9 @@
       :todayDate="todayDate"
       :avatar="currentAvatar"
       :memberLoading="memberLoading"
+      :groupName="store.groupName"
       @click-avatar="openNameEdit"
+      @switch-group="switchGroup"
     />
 
     <MonthlyStats
@@ -91,7 +93,14 @@ import TodayOrders from '../../components/home/TodayOrders.vue'
 import NameEditDialog from '../../components/home/NameEditDialog.vue'
 import CustomTabBar from '../../components/CustomTabBar/CustomTabBar.vue'
 import { useHome } from '../../hooks/useHome'
+import { useStore } from '../../services/store'
 import { useModalKeyboardAvoid } from '../../hooks/useModalKeyboardAvoid'
+
+const store = useStore()
+
+function switchGroup() {
+  uni.reLaunch({ url: '/pages/group-select/index' })
+}
 
 const {
   loading,
