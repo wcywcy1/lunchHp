@@ -70,7 +70,8 @@ import { resetInit, startInit } from '@/services/appInit'
 
 const store = useStore()
 const joinedGroups = ref<any[]>([])
-const currentGroupId = ref<string>(store.groupId || '')
+// 无 session（新设备）时 groupId 是回退值，不能作为"当前组"判断依据，否则回退组成员点击死循环
+const currentGroupId = ref<string>(uni.getStorageSync('lunch_session') ? (store.groupId || '') : '')
 const joinGroupName = ref('')
 const newGroupName = ref('')
 const loading = ref(false)
