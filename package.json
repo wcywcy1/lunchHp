@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "lunch-hp",
   "version": "0.0.0",
   "scripts": {
@@ -71,4 +71,3 @@
     "vue-tsc": "^1.0.24"
   }
 }
-
