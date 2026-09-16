@@ -253,13 +253,13 @@
             <text class="preview-value">{{ selectedBackup.remark }}</text>
           </view>
           <view class="preview-tip">
-            <text>恢复前将自动创建一次手动备份，防止误操作</text>
+            <text>恢复前将创建安全快照；恢复期间暂停本组织操作，失败后可选择同一备份继续。</text>
           </view>
         </view>
 
         <view v-if="backupStep === 'confirm'" class="confirm-content">
           <text class="confirm-warning">⚠️ 确认恢复此备份？</text>
-          <text class="confirm-desc">当前所有数据将被替换为备份数据，恢复前已自动创建手动备份。</text>
+          <text class="confirm-desc">订单和菜品将恢复为备份数据，现有微信账号及权限保留。确认后先创建安全快照，再开始恢复。</text>
           <view class="confirm-detail">
             <text>备份时间：{{ formatTime(selectedBackup?.createdAt) }}</text>
             <text>订单数：{{ selectedBackup?.orderCount || 0 }}</text>

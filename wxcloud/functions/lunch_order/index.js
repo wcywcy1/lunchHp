@@ -6,7 +6,13 @@ const $ = db.command.aggregate
 let XLSX = null
 try { XLSX = require('xlsx') } catch (e) { }
 
-let GROUP_ID = 'lunch_hp' // 默认值，main 入口会被 event.groupId 覆盖
+const requestGate = require('./requestGate')
+const _rateMap = new Map()
+const autoCancelByGroup = new Map()
+let _collectionsEnsured = false
+
+// 每次调用创建独立组织上下文，避免复用实例并发请求时串组。
+function createRequestHandlers(GROUP_ID) {
 const COL = {
     ORDERS: 'lunch_orders',
     MENU: 'lunch_menu',
@@ -15,6 +21,7 @@ const COL = {
     GROUPS: 'lunch_groups',
     USER_STATS: 'lunch_user_menu_stats',
     AUDIT_LOGS: 'lunch_audit_logs',
+    ORDER_KEYS: 'lunch_order_keys',
 }
 const ROLE = { CREATOR: 'creator', ADMIN: 'admin', MEMBER: 'member' }
 const STATUS = { PENDING: 'pending', CONFIRMED: 'confirmed', CANCELLED: 'cancelled' }
@@ -108,10 +115,10 @@ function buildCsvLine(fields) {
     return fields.map(csvEscape).join(',')
 }
 
-let _collectionsEnsured = false
+// 集合初始化状态在模块级缓存。
 async function ensureCollections() {
     if (_collectionsEnsured) return
-    const required = [COL.ORDERS, COL.MENU, COL.MEMBERS, COL.MONTHLY_STATS, COL.GROUPS, COL.USER_STATS, COL.AUDIT_LOGS]
+    const required = [COL.ORDERS, COL.MENU, COL.MEMBERS, COL.MONTHLY_STATS, COL.GROUPS, COL.USER_STATS, COL.AUDIT_LOGS, COL.ORDER_KEYS]
     for (const name of required) {
         try {
             await db.createCollection(name)
@@ -125,7 +132,7 @@ async function ensureCollections() {
 }
 
 // 简单速率限制：同一 openid 10 秒窗口内最多 30 次调用（实例级内存，防异常刷量）
-const _rateMap = new Map()
+// 速率记录保留在模块级，组织上下文仅属于本次请求。
 function rateLimit(openid, limit = 30, windowMs = 10000) {
     if (!openid) return true
     const now = Date.now()
@@ -141,11 +148,11 @@ function rateLimit(openid, limit = 30, windowMs = 10000) {
     return true
 }
 
-exports.main = async (event, context) => {
+async function dispatch(event, context) {
     const { OPENID } = cloud.getWXContext()
     const { action } = event
     // 从前端传入 groupId，回退默认值，实现多组织切换
-    GROUP_ID = event.groupId || 'lunch_hp'
+    // GROUP_ID 来自本次调用的闭包，不使用可变全局变量。
 
     if (!rateLimit(OPENID)) return { code: 429, msg: '请求过于频繁，请稍后再试' }
 
@@ -184,11 +191,38 @@ exports.main = async (event, context) => {
     const fn = handlers[action]
     if (!fn) return { code: 400, msg: `unknown action: ${action}` }
     try {
+        if (!Object.prototype.hasOwnProperty.call(handlers, action)) return { code: 400, msg: 'unknown action' }
+        if (!OPENID) return { code: 401, msg: '请先登录' }
+        if (action !== 'getInitData' && !await getMemberByOpenid(OPENID)) return { code: 403, msg: '请先加入当前组织' }
+        const targetError = await validateTargetDocuments(action, event)
+        if (targetError) return targetError
+        if (['parseXlsx', 'parseCsv', 'importFromCsv', 'importFromXlsx'].includes(action) && event.fileID && !requestGate.validImportFile(event.fileID, GROUP_ID)) {
+            return { code: 403, msg: '导入文件不属于当前组织，请重新上传' }
+        }
         return await fn(event, OPENID)
     } catch (e) {
         console.error(`[lunch_order] ${action} error:`, e)
-        return { code: 500, msg: e.message || 'internal error' }
+        return { code: typeof e.code === 'number' ? e.code : 500, msg: e.message || 'internal error' }
     }
+}
+
+async function validateTargetDocuments(action, event) {
+    const targets = []
+    if (['cancelOrder', 'cancelMyOrder', 'requestCancelOrder', 'rejectCancelRequest', 'updateOrder'].includes(action)) {
+        targets.push([COL.ORDERS, event.orderId])
+    }
+    if (action === 'submitOrder') targets.push([COL.MEMBERS, event.memberId], [COL.MENU, event.menuId])
+    if (action === 'updateOrder' && event.menuId !== undefined) targets.push([COL.MENU, event.menuId])
+    if (['batchConfirm', 'batchCancelOrders'].includes(action)) {
+        if (!Array.isArray(event.orderIds) || !event.orderIds.length) return { code: 400, msg: 'missing orderIds' }
+        for (const id of new Set(event.orderIds)) targets.push([COL.ORDERS, id])
+    }
+    for (const [collection, id] of targets) {
+        if (typeof id !== 'string' || !id.trim()) return { code: 400, msg: 'invalid document ID' }
+        const { data } = await db.collection(collection).where({ _id: id, groupId: GROUP_ID }).limit(1).get()
+        if (!data.length) return { code: 404, msg: '目标数据不存在或不属于当前组织' }
+    }
+    return null
 }
 
 async function getInitData(event, openid) {
@@ -539,12 +573,11 @@ async function _upsertUserStat(memberId, menuId, now) {
 }
 
 // 自动取消过期待确认订单（date < today && status === pending）
-let _autoCancelThrottle = 0
 
 async function _autoCancelExpiredPending() {
     const now = Date.now()
-    if (now - _autoCancelThrottle < 60 * 1000) return { cancelled: 0, throttled: true }
-    _autoCancelThrottle = now
+    if (now - (autoCancelByGroup.get(GROUP_ID) || 0) < 60 * 1000) return { cancelled: 0, throttled: true }
+    autoCancelByGroup.set(GROUP_ID, now)
     const today = getToday()
     const expired = await fetchAll(db.collection(COL.ORDERS), {
         groupId: GROUP_ID,
@@ -571,19 +604,40 @@ async function _autoCancelExpiredPending() {
 }
 
 async function submitOrder(event, openid) {
-    const { date, memberId, memberName, menuId, menuName, supplier, price, note } = event
+    const { date, memberId, menuId, note } = event
     if (!date || !memberId || !menuId) return { code: 400, msg: 'missing required fields' }
+
+    const caller = await getMemberByOpenid(openid)
+    if (!caller) return { code: 403, msg: '请先加入当前组织' }
+    const bj = new Date(Date.now() + 8 * 3600000)
+    const today = bj.toISOString().slice(0, 10)
+    const hhmm = bj.toISOString().slice(11, 16)
+    if (date !== today) return { code: 400, msg: '点餐仅支持北京时间当天，历史订单请使用导入' }
+    const group = await requestGate.groupDoc(db, GROUP_ID)
+    if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR) && !group.cutoffDisabled && hhmm >= (group.orderCutoff || '10:00')) {
+        return { code: 403, msg: '今日点餐已截止，如需点餐请联系管理员' }
+    }
+    const menu = (await db.collection(COL.MENU).doc(menuId).get()).data
+    const member = (await db.collection(COL.MEMBERS).doc(memberId).get()).data
+    if (!menu || menu.groupId !== GROUP_ID || !member || member.groupId !== GROUP_ID) {
+        return { code: 404, msg: '菜品或成员不属于当前组织' }
+    }
+    if (menu.visible === false) return { code: 400, msg: '该菜品已下架，请重新选择' }
+    if (typeof menu.price !== 'number' || !Number.isFinite(menu.price) || menu.price < 0) {
+        return { code: 400, msg: '菜品价格无效，请联系管理员' }
+    }
+    if (note !== undefined && (typeof note !== 'string' || note.length > 500)) return { code: 400, msg: '备注格式无效或超过500字' }
 
     const now = db.serverDate()
     const order = {
         groupId: GROUP_ID,
         date,
         memberId,
-        memberName: memberName || '',
+        memberName: member.name || member.nickName || '',
         menuId,
-        menuName: menuName || '',
-        supplier: supplier || '',
-        price: Number(price),
+        menuName: menu.name || '',
+        supplier: menu.supplier || '',
+        price: Math.round(menu.price * 100) / 100,
         note: note || '',
         status: STATUS.PENDING,
         createdBy: openid,
@@ -591,21 +645,33 @@ async function submitOrder(event, openid) {
         updatedAt: now,
     }
 
-    // 事务原子化"查重+插入"，消除并发重复下单窗口
+    // 同一组/日期/成员/菜品共用一个事务锁文档；事务中仅使用 doc 操作。
+    const key = require('crypto').createHash('sha256').update(JSON.stringify([GROUP_ID, date, memberId, menuId])).digest('hex')
+    const lockId = 'order_' + key
+    await ensureCollections()
+    const { data: existing } = await db.collection(COL.ORDERS)
+        .where({ groupId: GROUP_ID, date, memberId, menuId, status: STATUS.PENDING }).limit(1).get()
+    if (existing.length) return { code: 409, msg: '已提交相同订单' }
+    const { data: lockRows } = await db.collection(COL.ORDER_KEYS).where({ _id: lockId }).limit(1).get()
+    if (!lockRows.length) {
+        try { await db.collection(COL.ORDER_KEYS).add({ data: { _id: lockId, groupId: GROUP_ID, orderId: '' } }) }
+        catch (e) {
+            const check = await db.collection(COL.ORDER_KEYS).where({ _id: lockId, groupId: GROUP_ID }).limit(1).get()
+            if (!check.data.length) throw e
+        }
+    }
     let newId = null
     try {
         newId = await db.runTransaction(async transaction => {
-            const { data: existing } = await transaction.collection(COL.ORDERS)
-                .where({
-                    groupId: GROUP_ID,
-                    date,
-                    memberId,
-                    menuId,
-                    status: STATUS.PENDING,
-                })
-                .get()
-            if (existing.length > 0) throw new Error('EXISTING_ORDER')
+            const keyDoc = transaction.collection(COL.ORDER_KEYS).doc(lockId)
+            const keyData = (await keyDoc.get()).data
+            if (!keyData || keyData.groupId !== GROUP_ID) throw new Error('订单锁归属异常')
+            if (keyData.orderId) {
+                const prior = await requestGate.optionalDocument(transaction.collection(COL.ORDERS).doc(keyData.orderId))
+                if (prior && prior.status === STATUS.PENDING) throw new Error('EXISTING_ORDER')
+            }
             const addRes = await transaction.collection(COL.ORDERS).add({ data: order })
+            await keyDoc.update({ data: { orderId: addRes._id } })
             return addRes._id
         })
     } catch (e) {
@@ -617,7 +683,6 @@ async function submitOrder(event, openid) {
     // 更新菜单项/成员的最近点餐时间与次数，用于前端 LRU+频率排序
     // 同时 upsert 发起人的个人点餐统计（createdBy=我），用于"最近点过"个人化排序
     // 失败不阻断下单主流程
-    const caller = await getMemberByOpenid(openid).catch(() => null)
     const callerMemberId = caller && caller._id ? caller._id : null
     await Promise.all([
         db.collection(COL.MENU).doc(menuId).update({
@@ -1230,7 +1295,7 @@ async function exportOrders(event, openid) {
     const csv = '\uFEFF' + header + '\r\n' + rows.join('\r\n')
 
     const ts = Date.now()
-    const cloudPath = `lunch/exports/orders_${ts}.csv`
+    const cloudPath = 'lunch/exports/' + GROUP_ID + '/' + require('crypto').randomBytes(16).toString('hex') + '.csv'
     const uploadResult = await cloud.uploadFile({
         cloudPath,
         fileContent: Buffer.from(csv, 'utf-8'),
@@ -1435,7 +1500,7 @@ async function downloadConfirmed(event, openid) {
     }
 
     const ts = Date.now()
-    const cloudPath = `lunch/exports/confirmed_${ts}.csv`
+    const cloudPath = 'lunch/exports/' + GROUP_ID + '/' + require('crypto').randomBytes(16).toString('hex') + '.csv'
     const uploadResult = await cloud.uploadFile({
         cloudPath,
         fileContent: Buffer.from(csv, 'utf-8'),
@@ -1482,7 +1547,7 @@ async function downloadMonthlyData(event, openid) {
     const csv = '\uFEFF' + header + '\r\n' + rows.join('\r\n')
     const ts = Date.now()
     const yearSuffix = year || 'all'
-    const cloudPath = `lunch/exports/monthly_${yearSuffix}_${ts}.csv`
+    const cloudPath = 'lunch/exports/' + GROUP_ID + '/' + require('crypto').randomBytes(16).toString('hex') + '.csv'
     const uploadResult = await cloud.uploadFile({
         cloudPath,
         fileContent: Buffer.from(csv, 'utf-8'),
@@ -1855,54 +1920,13 @@ async function _importMenuFromRows(rows, mode) {
 }
 
 async function _importMembersFromRows(rows, mode) {
-    if (rows.length < 2) return { code: 400, msg: '文件为空' }
-
-    const header = rows[0]
-    const idx = _mapHeader(header, ['name_member', 'nickName', 'role', 'isVirtual'])
-    if (idx.name_member === undefined) {
-        return { code: 400, msg: '格式不正确，需包含姓名' }
-    }
-
-    const members = rows.slice(1)
-        .filter(cols => cols[idx.name_member]?.trim())
-        .map(cols => ({
-            name: cols[idx.name_member].trim(),
-            nickName: idx.nickName !== undefined ? (cols[idx.nickName] || '') : '',
-            role: idx.role !== undefined ? (cols[idx.role] || 'member') : 'member',
-            isVirtual: idx.isVirtual !== undefined ? cols[idx.isVirtual] !== '否' : true,
-        }))
-
-    if (members.length === 0) return { code: 400, msg: '无有效数据' }
-
-    if (mode === 'rewrite') {
-        const { OPENID } = cloud.getWXContext()
-        await db.collection(COL.MEMBERS).where({ groupId: GROUP_ID, openid: _.neq(OPENID) }).remove()
-    }
-
-    const now = db.serverDate()
-    const batch = members.filter(m => m.name && m.name.trim()).map(m => ({
-        groupId: GROUP_ID,
-        name: m.name.trim(),
-        nickName: m.nickName || '',
-        avatar: '',
-        openid: '',
-        role: m.role || ROLE.MEMBER,
-        isVirtual: m.isVirtual !== undefined ? m.isVirtual : true,
-        privacyAgreed: false,
-        joinedAt: now,
-    }))
-
-    if (batch.length === 0) return { code: 400, msg: 'no valid members' }
-
-    const BATCH_SIZE = 100
-    let inserted = 0
-    for (let i = 0; i < batch.length; i += BATCH_SIZE) {
-        const chunk = batch.slice(i, i + BATCH_SIZE)
-        await db.collection(COL.MEMBERS).add({ data: chunk })
-        inserted += chunk.length
-    }
-
-    return { code: 0, data: { count: inserted } }
+    if (!Array.isArray(rows) || rows.length < 2) return { code: 400, msg: '文件为空' }
+    const idx = _mapHeader(rows[0], ['name_member', 'nickName'])
+    if (idx.name_member === undefined) return { code: 400, msg: '需包含姓名列' }
+    const members = rows.slice(1).map(cols => ({ name: cols[idx.name_member], nickName: idx.nickName !== undefined ? cols[idx.nickName] : '' }))
+    const result = await require('./importMembers').importMembers(db, GROUP_ID, members, mode)
+    if (result.code === 0) await _touchMenuAndMembersTimestamp()
+    return result
 }
 
 // 查询指定成员的个人点餐统计，用于帮他人点餐时"最近点过"按被帮人频率排序
@@ -1921,4 +1945,29 @@ async function getUserMenuStats(event, openid) {
         map[s.menuId] = { count: s.count || 0, lastAt: s.lastAt || null }
     })
     return { code: 0, data: { stats: map } }
+}
+
+return dispatch
+}
+
+exports.main = async (event = {}, context) => {
+    const groupId = event.groupId || 'lunch_hp'
+    if (!requestGate.validGroupId(groupId)) return { code: 400, msg: 'invalid groupId' }
+    let release
+    try {
+        if (!cloud.getWXContext().OPENID) return { code: 401, msg: '请先登录' }
+        if (event.action === 'getInitData') {
+            const member = await requestGate.maintenanceMember(db, groupId, cloud.getWXContext().OPENID)
+            if (member) return { code: 0, data: { groupId, member, role: member.role, isNew: false,
+                menu: [], members: [member], recentOrders: [], monthSummary: { totalAmount: 0, count: 0 },
+                notice: '组织正在恢复备份，请到管理页选择同一备份继续恢复', noticeUpdatedAt: new Date(),
+                recentTimestamp: null, menuTimestamp: null, membersTimestamp: null } }
+        }
+        release = await requestGate.enter(db, groupId)
+        return await createRequestHandlers(groupId)(event, context)
+    } catch (e) {
+        return { code: typeof e.code === 'number' ? e.code : 500, msg: e.message }
+    } finally {
+        if (release) await release()
+    }
 }

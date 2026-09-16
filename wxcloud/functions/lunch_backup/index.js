@@ -3,8 +3,23 @@ cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 const _ = db.command
 
-let GROUP_ID = 'lunch_hp' // 默认值，main 入口会被 event.groupId 覆盖
+const requestGate = require('./requestGate')
+const _rateMap = new Map()
+let backupCollectionsEnsured = false
+
+async function ensureBackupCollections() {
+    if (backupCollectionsEnsured) return
+    for (const name of ['lunch_orders', 'lunch_menu', 'lunch_members', 'lunch_backups', 'lunch_user_menu_stats', 'lunch_monthly_stats', 'lunch_order_keys']) {
+        try { await db.createCollection(name) }
+        catch (e) { if (!/exists|已存在/i.test(e.message || e.errMsg || '')) throw e }
+    }
+    backupCollectionsEnsured = true
+}
+
+// 每次调用创建独立组织上下文，避免复用实例并发请求时串组。
+function createRequestHandlers(GROUP_ID) {
 const COL = {
+    GROUPS: 'lunch_groups',
     ORDERS: 'lunch_orders',
     MENU: 'lunch_menu',
     MEMBERS: 'lunch_members',
@@ -51,10 +66,10 @@ function checkRole(member, ...allowed) {
 
 async function fetchAll(collection, where) {
     const all = []
-    const limit = 1000
+    const limit = 100
     let skip = 0
     while (true) {
-        const { data } = await collection.where(where).skip(skip).limit(limit).get()
+        const { data } = await collection.where(where).orderBy('_id', 'asc').skip(skip).limit(limit).get()
         all.push(...data)
         if (data.length < limit) break
         skip += limit
@@ -88,52 +103,57 @@ function buildCsvLine(fields) {
 }
 
 async function doBackup(type, remark) {
-    const [orders, menu, members] = await Promise.all([
+    await ensureBackupCollections()
+    const [orders, menu, members, userStats, monthlyStats, orderKeys] = await Promise.all([
         fetchAll(db.collection(COL.ORDERS), { groupId: GROUP_ID }),
         fetchAll(db.collection(COL.MENU), { groupId: GROUP_ID }),
         fetchAll(db.collection(COL.MEMBERS), { groupId: GROUP_ID }),
+        fetchAll(db.collection(COL.USER_STATS), { groupId: GROUP_ID }),
+        fetchAll(db.collection(COL.MONTHLY_STATS), { groupId: GROUP_ID }),
+        fetchAll(db.collection('lunch_order_keys'), { groupId: GROUP_ID }),
     ])
-
     const dates = orders.map(o => o.date).filter(Boolean).sort()
-    const dateRange = dates.length > 0
-        ? { start: dates[0], end: dates[dates.length - 1] }
-        : null
-
-    const data = JSON.stringify({ orders, menu, members })
-
-    const now = db.serverDate()
+    const dateRange = dates.length ? { start: dates[0], end: dates[dates.length - 1] } : null
+    const content = Buffer.from(JSON.stringify({ version: 2, groupId: GROUP_ID, orders, menu, members, userStats, monthlyStats, orderKeys }), 'utf8')
+    const crypto = require('crypto')
+    const path = 'lunch/backups/' + GROUP_ID + '/' + crypto.randomBytes(16).toString('hex') + '.json'
+    const uploaded = await cloud.uploadFile({ cloudPath: path, fileContent: content })
     const backup = {
-        type,
-        createdAt: now,
-        orderCount: orders.length,
-        menuCount: menu.length,
-        memberCount: members.length,
-        dateRange,
-        remark: remark || '',
-        data,
+        groupId: GROUP_ID, version: 2, type, createdAt: db.serverDate(),
+        orderCount: orders.length, menuCount: menu.length, memberCount: members.length,
+        dateRange, remark: remark || '', fileID: uploaded.fileID,
+        sha256: crypto.createHash('sha256').update(content).digest('hex'),
     }
-
     const { _id } = await db.collection(COL.BACKUPS).add({ data: backup })
+    // 恢复前安全快照独立保留，不受普通备份轮换影响。
+    if (type === 'auto' || type === 'manual') {
+        try { await cleanupOldBackups(type, type === 'auto' ? AUTO_MAX : MANUAL_MAX) }
+        catch (e) { console.error('cleanup backups:', e.message) }
+    }
+    return { _id, ...backup }
+}
 
-    if (type === 'auto') {
-        await cleanupOldBackups('auto', AUTO_MAX)
+async function loadBackup(backupId) {
+    if (typeof backupId !== 'string' || !backupId) throw requestGate.error(400, '请选择备份')
+    const { data } = await db.collection(COL.BACKUPS).where({ _id: backupId, groupId: GROUP_ID }).limit(1).get()
+    if (!data.length) throw requestGate.error(404, '备份不存在或尚未确认组织归属')
+    const meta = data[0]
+    let content
+    if (meta.fileID) {
+        content = Buffer.from((await cloud.downloadFile({ fileID: meta.fileID })).fileContent)
+        const hash = require('crypto').createHash('sha256').update(content).digest('hex')
+        if (!meta.sha256 || hash !== meta.sha256) throw requestGate.error(400, '备份完整性校验失败')
     } else {
-        await cleanupOldBackups('manual', MANUAL_MAX)
+        content = Buffer.from(meta.data || '', 'utf8')
     }
-
-    return {
-        _id,
-        type,
-        orderCount: orders.length,
-        menuCount: menu.length,
-        memberCount: members.length,
-        dateRange,
-    }
+    const snapshot = JSON.parse(content.toString('utf8'))
+    require('./restore').validateSnapshot(snapshot, GROUP_ID)
+    return snapshot
 }
 
 async function cleanupOldBackups(type, maxKeep) {
     const { data: all } = await db.collection(COL.BACKUPS)
-        .where({ type })
+        .where({ type, groupId: GROUP_ID })
         .orderBy('createdAt', 'desc')
         .limit(maxKeep + 5)
         .field({ _id: true })
@@ -142,11 +162,14 @@ async function cleanupOldBackups(type, maxKeep) {
     if (all.length <= maxKeep) return
 
     const toDeleteIds = all.slice(maxKeep).map(item => item._id)
-    await db.collection(COL.BACKUPS).where({ _id: _.in(toDeleteIds) }).remove()
+    const expired = await db.collection(COL.BACKUPS).where({ _id: _.in(toDeleteIds), groupId: GROUP_ID }).get()
+    await db.collection(COL.BACKUPS).where({ _id: _.in(toDeleteIds), groupId: GROUP_ID }).remove()
+    const fileList = expired.data.map(item => item.fileID).filter(Boolean)
+    if (fileList.length) await cloud.deleteFile({ fileList })
 }
 
 // 简单速率限制：同一 openid 10 秒窗口内最多 30 次调用（实例级内存，防异常刷量）
-const _rateMap = new Map()
+// 速率记录保留在模块级，组织上下文仅属于本次请求。
 function rateLimit(openid, limit = 30, windowMs = 10000) {
     if (!openid) return true
     const now = Date.now()
@@ -162,19 +185,20 @@ function rateLimit(openid, limit = 30, windowMs = 10000) {
     return true
 }
 
-exports.main = async (event, context) => {
+async function dispatch(event, context, trustedTimer = false) {
     const { OPENID } = cloud.getWXContext()
     const { action } = event
     // 从前端传入 groupId，回退默认值，实现多组织切换
-    GROUP_ID = event.groupId || 'lunch_hp'
+    // GROUP_ID 来自本次调用的闭包，不使用可变全局变量。
 
-    if (!rateLimit(OPENID)) return { code: 429, msg: '请求过于频繁，请稍后再试' }
+    if (action !== 'restoreBackup' && !rateLimit(OPENID)) return { code: 429, msg: '请求过于频繁，请稍后再试' }
 
     const handlers = {
         backupAuto,
         backupManual,
         restoreBackup,
         getBackupList,
+        getBackupCapabilities,
         deleteBackup,
         exportAllOrders,
         clearAllData,
@@ -183,15 +207,20 @@ exports.main = async (event, context) => {
     const fn = handlers[action]
     if (!fn) return { code: 400, msg: `unknown action: ${action}` }
     try {
+        if (!Object.prototype.hasOwnProperty.call(handlers, action)) return { code: 400, msg: 'unknown action' }
+        if (!OPENID && !trustedTimer) return { code: 401, msg: '请先登录' }
+        if (trustedTimer && action === 'backupAuto') return { code: 0, data: await doBackup('auto', '') }
         return await fn(event, OPENID)
     } catch (e) {
         console.error(`[lunch_backup] ${action} error:`, e)
-        return { code: 500, msg: e.message || 'internal error' }
+        return { code: typeof e.code === 'number' ? e.code : 500, msg: e.message || 'internal error' }
     }
 }
 
 async function backupAuto(event, openid) {
-    return await doBackup('auto', '')
+    const caller = await getMemberByOpenid(openid)
+    if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
+    return { code: 0, data: await doBackup('auto', '') }
 }
 
 async function backupManual(event, openid) {
@@ -204,64 +233,29 @@ async function backupManual(event, openid) {
 }
 
 async function restoreBackup(event, openid) {
-    const caller = await getMemberByOpenid(openid)
-    if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
+    return require('./restore').restore({
+        db, cloud, groupId: GROUP_ID, openid, event,
+        loadBackup, doBackup, getMemberByOpenid,
+    })
+}
 
-    const { backupId } = event
-    if (!backupId) return { code: 400, msg: 'missing backupId' }
-
-    await doBackup('manual', '恢复前自动备份')
-
-    const { data: backupList } = await db.collection(COL.BACKUPS)
-        .where({ _id: backupId, groupId: GROUP_ID }).limit(1).get()
-    if (!backupList || backupList.length === 0) return { code: 404, msg: 'backup not found' }
-    const backupDoc = backupList[0]
-
-    const backupData = JSON.parse(backupDoc.data)
-    const { orders = [], menu = [], members = [] } = backupData
-
-    // 用固定时间戳标记本次恢复写入的数据，删除时按 < cutoff 过滤，避免误删刚写入的
-    const cutoff = Date.now()
-    const ts = db.serverDate()
-
-    // 原子化恢复：先写入全部备份数据，全部成功后再删除旧数据，避免中途失败导致数据丢失
-    for (let i = 0; i < orders.length; i += BATCH_SIZE) {
-        const batch = orders.slice(i, i + BATCH_SIZE).map(o => {
-            const { _id, ...rest } = o
-            return { ...rest, _restoreTs: cutoff, createdAt: ts, updatedAt: ts }
-        })
-        await db.collection(COL.ORDERS).add({ data: batch })
-    }
-
-    for (let i = 0; i < menu.length; i += BATCH_SIZE) {
-        const batch = menu.slice(i, i + BATCH_SIZE).map(m => {
-            const { _id, ...rest } = m
-            return { ...rest, _restoreTs: cutoff, createdAt: ts, updatedAt: ts }
-        })
-        await db.collection(COL.MENU).add({ data: batch })
-    }
-
-    for (let i = 0; i < members.length; i += BATCH_SIZE) {
-        const batch = members.slice(i, i + BATCH_SIZE).map(m => {
-            const { _id, ...rest } = m
-            return { ...rest, _restoreTs: cutoff, joinedAt: ts }
-        })
-        await db.collection(COL.MEMBERS).add({ data: batch })
-    }
-
-    // 全部写入成功后，删除恢复前的旧数据（_restoreTs != cutoff 的为旧数据）
-    await db.collection(COL.ORDERS).where({ groupId: GROUP_ID, _restoreTs: _.neq(cutoff) }).remove()
-    await db.collection(COL.MENU).where({ groupId: GROUP_ID, _restoreTs: _.neq(cutoff) }).remove()
-    await db.collection(COL.MEMBERS).where({ groupId: GROUP_ID, _restoreTs: _.neq(cutoff) }).remove()
-
-    return { code: 0, data: { orderCount: orders.length, menuCount: menu.length, memberCount: members.length } }
+async function getBackupCapabilities(event, openid) {
+    const member = await requestGate.maintenanceMember(db, GROUP_ID, openid) || await getMemberByOpenid(openid)
+    if (!checkRole(member, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
+    return { code: 0, data: { restoreProtocol: 2 } }
 }
 
 async function getBackupList(event, openid) {
+    const group = await requestGate.groupDoc(db, GROUP_ID)
+    if (group.restoreJob && [group.restoreJob.actorOpenid, group.creatorId].includes(openid)) {
+        const result = await db.collection(COL.BACKUPS).where({ groupId: GROUP_ID, _id: group.restoreJob.backupId }).field({ data: false }).get()
+        return { code: 0, data: result.data, restoring: true }
+    }
     const caller = await getMemberByOpenid(openid)
     if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
 
     const { data } = await db.collection(COL.BACKUPS)
+        .where({ groupId: GROUP_ID })
         .orderBy('createdAt', 'desc')
         .limit(50)
         .field({ data: false })
@@ -281,6 +275,7 @@ async function deleteBackup(event, openid) {
         .where({ _id: backupId, groupId: GROUP_ID }).limit(1).get()
     if (!bk || bk.length === 0) return { code: 404, msg: 'backup not found' }
     await db.collection(COL.BACKUPS).doc(backupId).remove()
+    if (bk[0].fileID) await cloud.deleteFile({ fileList: [bk[0].fileID] })
     return { code: 0 }
 }
 
@@ -298,7 +293,7 @@ async function exportAllOrders(event, openid) {
     const csv = '\uFEFF' + header + '\r\n' + rows.join('\r\n')
 
     const ts = formatTimestamp(new Date())
-    const cloudPath = `lunch/exports/all_orders_${ts}.csv`
+    const cloudPath = 'lunch/exports/' + GROUP_ID + '/' + require('crypto').randomBytes(16).toString('hex') + '.csv'
     const uploadResult = await cloud.uploadFile({
         cloudPath,
         fileContent: Buffer.from(csv, 'utf-8'),
@@ -318,6 +313,43 @@ async function clearAllData(event, openid) {
     try { await db.collection(COL.MONTHLY_STATS).where({ groupId: GROUP_ID }).remove() } catch (e) { console.warn('clear stats error:', e.message) }
     try { await db.collection(COL.USER_STATS).where({ groupId: GROUP_ID }).remove() } catch (e) { console.warn('clear user stats error:', e.message) }
     try { await db.collection(COL.AUDIT_LOGS).where({ groupId: GROUP_ID }).remove() } catch (e) { console.warn('clear audit error:', e.message) }
+    await db.collection('lunch_order_keys').where({ groupId: GROUP_ID }).remove()
 
     return { code: 0 }
+}
+
+return dispatch
+}
+
+async function runForGroup(event, context, trustedTimer = false) {
+    const groupId = event.groupId || 'lunch_hp'
+    if (!requestGate.validGroupId(groupId)) return { code: 400, msg: 'invalid groupId' }
+    let release
+    try {
+        if (!trustedTimer && !cloud.getWXContext().OPENID) return { code: 401, msg: '请先登录' }
+        if (!['restoreBackup', 'getBackupList', 'getBackupCapabilities'].includes(event.action)) release = await requestGate.enter(db, groupId)
+        return await createRequestHandlers(groupId)(event, context, trustedTimer)
+    } catch (e) {
+        return { code: typeof e.code === 'number' ? e.code : 500, msg: e.message }
+    } finally {
+        if (release) await release()
+    }
+}
+
+exports.main = async (event = {}, context) => {
+    // 定时触发不携带微信身份；客户端伪造 Timer 字段不能绕过身份检查。
+    if (cloud.getWXContext().SOURCE === 'wx_trigger' && event.Type === 'Timer' && event.TriggerName === 'weeklyBackup') {
+        const results = []
+        let skip = 0
+        while (true) {
+            const { data } = await db.collection('lunch_groups').skip(skip).limit(100).get()
+            for (const group of data) {
+                results.push({ groupId: group._id, result: await runForGroup({ action: 'backupAuto', groupId: group._id }, context, true) })
+            }
+            if (data.length < 100) break
+            skip += 100
+        }
+        return { code: results.some(item => item.result.code !== 0) ? 500 : 0, data: results }
+    }
+    return runForGroup(event, context)
 }

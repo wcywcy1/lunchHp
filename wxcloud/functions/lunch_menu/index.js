@@ -6,7 +6,12 @@ const $ = db.command.aggregate
 let XLSX = null
 try { XLSX = require('xlsx') } catch (e) { }
 
-let GROUP_ID = 'lunch_hp' // 默认值，main 入口会被 event.groupId 覆盖
+const requestGate = require('./requestGate')
+const _rateMap = new Map()
+let _collectionsEnsured = false
+
+// 每次调用创建独立组织上下文，避免复用实例并发请求时串组。
+function createRequestHandlers(GROUP_ID) {
 const COL = {
     GROUPS: 'lunch_groups',
     MEMBERS: 'lunch_members',
@@ -99,7 +104,7 @@ async function fetchAll(collection, where) {
 }
 
 // 简单速率限制：同一 openid 10 秒窗口内最多 30 次调用（实例级内存，防异常刷量）
-const _rateMap = new Map()
+// 速率记录保留在模块级，组织上下文仅属于本次请求。
 function rateLimit(openid, limit = 30, windowMs = 10000) {
     if (!openid) return true
     const now = Date.now()
@@ -115,11 +120,11 @@ function rateLimit(openid, limit = 30, windowMs = 10000) {
     return true
 }
 
-exports.main = async (event, context) => {
+async function dispatch(event, context) {
     const { OPENID } = cloud.getWXContext()
     const { action } = event
     // 从前端传入 groupId，回退默认值，实现多组织切换
-    GROUP_ID = event.groupId || 'lunch_hp'
+    // GROUP_ID 来自本次调用的闭包，不使用可变全局变量。
 
     if (!rateLimit(OPENID)) return { code: 429, msg: '请求过于频繁，请稍后再试' }
 
@@ -160,11 +165,40 @@ exports.main = async (event, context) => {
     const fn = handlers[action]
     if (!fn) return { code: 400, msg: `unknown action: ${action}` }
     try {
+        if (!Object.prototype.hasOwnProperty.call(handlers, action)) return { code: 400, msg: 'unknown action' }
+        if (!OPENID) return { code: 401, msg: '请先登录' }
+        const publicActions = ['initGroup', 'createGroup', 'listJoinedGroups', 'joinGroup', 'joinGroupByName']
+        if (!publicActions.includes(action)) {
+            const caller = await getMemberByOpenid(OPENID)
+            if (!caller) return { code: 403, msg: '请先加入当前组织' }
+            if (['parseXlsx', 'parseCsv'].includes(action) && !checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) {
+                return { code: 403, msg: 'admin/creator only' }
+            }
+        }
+        const targetError = await validateTargetDocuments(action, event)
+        if (targetError) return targetError
+        if (['parseXlsx', 'parseCsv', 'importFromCsv', 'importFromXlsx'].includes(action) && event.fileID && !requestGate.validImportFile(event.fileID, GROUP_ID)) {
+            return { code: 403, msg: '导入文件不属于当前组织，请重新上传' }
+        }
         return await fn(event, OPENID)
     } catch (e) {
         console.error(`[lunch_menu] ${action} error:`, e)
-        return { code: 500, msg: e.message || 'internal error' }
+        return { code: typeof e.code === 'number' ? e.code : 500, msg: e.message || 'internal error' }
     }
+}
+
+async function validateTargetDocuments(action, event) {
+    const targets = []
+    if (['updateMemberName', 'deleteMember', 'setAdmin'].includes(action)) targets.push([COL.MEMBERS, event.memberId])
+    if (['linkVirtualMember', 'adminLinkVirtualMember'].includes(action)) targets.push([COL.MEMBERS, event.virtualMemberId])
+    if (action === 'adminLinkVirtualMember') targets.push([COL.MEMBERS, event.targetMemberId])
+    if (['updateMenuItem', 'deleteMenuItem', 'toggleVisible'].includes(action)) targets.push([COL.MENU, event.menuId])
+    for (const [collection, id] of targets) {
+        if (typeof id !== 'string' || !id.trim()) return { code: 400, msg: 'invalid document ID' }
+        const { data } = await db.collection(collection).where({ _id: id, groupId: GROUP_ID }).limit(1).get()
+        if (!data.length) return { code: 404, msg: '目标数据不存在或不属于当前组织' }
+    }
+    return null
 }
 
 async function updateGroupTimestamp(field) {
@@ -217,7 +251,7 @@ async function getDataTimestamps(event, openid) {
 }
 
 // 集合初始化只需执行一次，云函数实例复用时跳过
-let _collectionsEnsured = false
+// 集合初始化状态在模块级缓存。
 async function ensureCollections() {
     if (_collectionsEnsured) return
     const required = ['lunch_groups', 'lunch_members', 'lunch_menu', 'lunch_orders', 'lunch_monthly_stats', 'lunch_backups', 'lunch_user_menu_stats']
@@ -332,6 +366,8 @@ async function joinGroupByName(event, openid) {
         return { code: 404, msg: `组织「${name}」不存在，请检查名称` }
     }
     const targetGroupId = found.data[0]._id
+    const release = await requestGate.enter(db, targetGroupId)
+    try {
 
     // 检查是否已加入
     const existing = await db.collection(COL.MEMBERS)
@@ -357,6 +393,9 @@ async function joinGroupByName(event, openid) {
     member._id = _id
 
     return { code: 0, data: { member, groupId: targetGroupId, groupName: name, alreadyJoined: false } }
+    } finally {
+        await release()
+    }
 }
 
 async function deleteGroup(event, openid) {
@@ -474,45 +513,12 @@ async function addVirtualMember(event, openid) {
 async function importMembers(event, openid) {
     const caller = await getMemberByOpenid(openid)
     if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
-
-    const { members, mode } = event
-    if (!Array.isArray(members) || members.length === 0) return { code: 400, msg: 'missing members' }
-
-    if (mode === 'rewrite') {
-        await db.collection(COL.MEMBERS).where({ groupId: GROUP_ID, openid: _.neq(openid) }).remove()
+    const result = await require('./importMembers').importMembers(db, GROUP_ID, event.members, event.mode, event.retainedNames)
+    if (result.code === 0) {
+        await writeAuditLog(openid, AUDIT_ACTION.MEMBER_IMPORT, 'member', '', null, result.data, null)
+        await updateGroupTimestamp('membersTimestamp')
     }
-
-    const now = db.serverDate()
-    const batch = members.filter(m => m.name && m.name.trim()).map(m => ({
-        groupId: GROUP_ID,
-        name: m.name.trim(),
-        nickName: m.nickName || '',
-        avatar: '',
-        openid: '',
-        role: m.role || ROLE.MEMBER,
-        isVirtual: m.isVirtual !== undefined ? m.isVirtual : true,
-        privacyAgreed: false,
-        joinedAt: now,
-    }))
-
-    if (batch.length === 0) return { code: 400, msg: 'no valid members' }
-
-    const BATCH_SIZE = 100
-    let inserted = 0
-    for (let i = 0; i < batch.length; i += BATCH_SIZE) {
-        const chunk = batch.slice(i, i + BATCH_SIZE)
-        await db.collection(COL.MEMBERS).add({ data: chunk })
-        inserted += chunk.length
-    }
-
-    await writeAuditLog(openid, AUDIT_ACTION.MEMBER_IMPORT, 'member', '', null, { count: inserted, mode }, null)
-    await updateGroupTimestamp('membersTimestamp')
-    if (mode === 'rewrite') {
-        await db.collection(COL.GROUPS).doc(GROUP_ID).update({
-            data: { dataTimestamp: 0 },
-        }).catch(() => { })
-    }
-    return { code: 0, data: { count: inserted } }
+    return result
 }
 
 async function agreePrivacy(event, openid) {
@@ -531,6 +537,7 @@ async function linkVirtualMember(event, openid) {
 
     const virtual = (await db.collection(COL.MEMBERS).doc(virtualMemberId).get()).data
     if (!virtual || !virtual.isVirtual) return { code: 404, msg: 'virtual member not found' }
+    if (virtual.openid) return { code: 409, msg: '该成员已关联微信账号' }
 
     const virtualName = virtual.name || virtual.nickName || ''
 
@@ -581,6 +588,7 @@ async function linkVirtualMember(event, openid) {
     // 3. 更新虚拟成员：挂 openid，isVirtual=false，保留 caller role，avatar 取舍
     const update = {
         openid,
+        role: caller.role || ROLE.MEMBER,
         isVirtual: false,
         nickName: caller.nickName || '',
         privacyAgreed: caller.privacyAgreed || false,
@@ -1150,4 +1158,29 @@ async function setCutoffDisabled(event, openid) {
     await db.collection(COL.GROUPS).doc(GROUP_ID).update({ data })
 
     return { code: 0, data: { cutoffDisabled: disabled } }
+}
+
+return dispatch
+}
+
+exports.main = async (event = {}, context) => {
+    const groupId = event.groupId || 'lunch_hp'
+    if (!requestGate.validGroupId(groupId)) return { code: 400, msg: 'invalid groupId' }
+    let release
+    try {
+        if (!cloud.getWXContext().OPENID) return { code: 401, msg: '请先登录' }
+        if (event.action === 'joinGroup') {
+            const member = await requestGate.maintenanceMember(db, groupId, cloud.getWXContext().OPENID)
+            if (member) return { code: 0, data: { member, isNew: false, virtualMatch: null } }
+        }
+        // 选组/建组不访问当前组；按名称入组在查到目标组后单独申请租约。
+        if (!['initGroup', 'createGroup', 'listJoinedGroups', 'joinGroupByName'].includes(event.action)) {
+            release = await requestGate.enter(db, groupId)
+        }
+        return await createRequestHandlers(groupId)(event, context)
+    } catch (e) {
+        return { code: typeof e.code === 'number' ? e.code : 500, msg: e.message }
+    } finally {
+        if (release) await release()
+    }
 }

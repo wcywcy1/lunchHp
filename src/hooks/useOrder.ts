@@ -1,8 +1,8 @@
-import { ref, computed, ComputedRef, Ref } from 'vue'
+import { ref, computed, onUnmounted, ComputedRef, Ref } from 'vue'
+import { onShow, onHide } from '@dcloudio/uni-app'
 import { useStore, setCache, flushCache, orderJustSucceeded } from '../services/store'
 import { menuAction, orderAction } from '../services/repositories/baseRepository'
 import { CACHE_KEYS } from '../constants/cacheConfig'
-import { getTodayString } from '../utils/date'
 import { useAuth } from './useAuth'
 
 interface MenuItem {
@@ -51,6 +51,19 @@ export function useOrder(): OrderReturn {
     const submitting = ref(false)
     const showMemberPicker = ref(false)
     const showAddMember = ref(false)
+    const clockNow = ref(Date.now())
+    let clockTimer: ReturnType<typeof setInterval> | null = null
+    function stopClock() {
+        if (clockTimer) clearInterval(clockTimer)
+        clockTimer = null
+    }
+    onShow(() => {
+        stopClock()
+        clockNow.value = Date.now()
+        clockTimer = setInterval(() => { clockNow.value = Date.now() }, 1000)
+    })
+    onHide(stopClock)
+    onUnmounted(stopClock)
 
     const selectedMenuItem = computed<MenuItem | null>(() => {
         if (!selectedMenuId.value) return null
@@ -82,8 +95,7 @@ export function useOrder(): OrderReturn {
     const isOrderAllowed = computed(() => {
         if (isAdmin.value || store.cutoffDisabled) return true
         const cutoff = (store.groupCutoff as string) || '10:00'
-        const d = new Date()
-        const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+        const hhmm = new Date(clockNow.value + 8 * 3600000).toISOString().slice(11, 16)
         return hhmm < cutoff
     })
 
@@ -133,6 +145,8 @@ export function useOrder(): OrderReturn {
     }
 
     async function submitOrder() {
+        if (submitting.value) return
+        clockNow.value = Date.now()
         if (!isOrderAllowed.value) {
             uni.showToast({ title: '今日点餐已截止，如需点餐请联系管理员', icon: 'none', duration: 2500 })
             return
@@ -162,7 +176,7 @@ export function useOrder(): OrderReturn {
             : orderForMemberId.value
         const memberName = orderForName.value
 
-        const date = getTodayString()
+        const date = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10)
 
         submitting.value = true
         const submitted = { done: false }

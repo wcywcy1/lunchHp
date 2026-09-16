@@ -1,6 +1,6 @@
 import { ref, computed } from 'vue'
 import { onShow, onHide } from '@dcloudio/uni-app'
-import { useStore, saveSession, setCache, setRecentLoadTime, resetStore, clearAllCache, setActiveGroupId, getActiveGroupId, setStore } from '../services/store'
+import { useStore, saveSession, setCache, setRecentLoadTime, resetStore, clearAllCache, setActiveGroupId, getActiveGroupId, setStore, flushCache } from '../services/store'
 import { menuAction, orderAction, backupAction } from '../services/repositories/baseRepository'
 import { resetInit, startInit, isInitRunning } from '../services/appInit'
 import { ORDER_STATUS, ROLE } from '../constants/orderStatus'
@@ -610,7 +610,7 @@ export function useDataManage() {
     }
 
     async function parseXlsxViaCloud(filePath: string): Promise<string[][]> {
-        const cloudPath = `xlsx_import/${Date.now()}_${Math.random().toString(36).substr(2, 6)}.xlsx`
+        const cloudPath = 'lunch/imports/' + getActiveGroupId() + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 10) + '.xlsx'
         const uploadRes = await wx.cloud.uploadFile({ cloudPath, filePath })
         const parseRes = await menuAction('parseXlsx', { fileID: uploadRes.fileID })
         if (parseRes.result.code !== 0) {
@@ -625,7 +625,9 @@ export function useDataManage() {
             const typeLabel = importType === 'orders' ? '订单' : importType === 'menu' ? '菜单' : '人员'
             uni.showModal({
                 title: '导入方式',
-                content: `追加数据：仅导入新${typeLabel}，重复跳过\n清库重写：清空所有${typeLabel}后导入`,
+                content: importType === 'members'
+                    ? '已有微信账号及角色保留，同名账号行跳过。角色列忽略。追加导入或覆盖未绑定微信的普通成员？'
+                    : `追加数据：仅导入新${typeLabel}，重复跳过\n清库重写：清空所有${typeLabel}后导入`,
                 confirmText: '追加',
                 cancelText: '清库重写',
                 success: res => resolve(res.confirm ? 'append' : 'rewrite'),
@@ -635,7 +637,7 @@ export function useDataManage() {
 
         uni.showLoading({ title: '上传文件...' })
         try {
-            const cloudPath = `xlsx_import/${Date.now()}_${Math.random().toString(36).substr(2, 6)}.xlsx`
+            const cloudPath = 'lunch/imports/' + getActiveGroupId() + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 10) + '.xlsx'
             const uploadRes = await wx.cloud.uploadFile({ cloudPath, filePath })
             uni.showLoading({ title: '导入中...' })
             let res: any
@@ -667,6 +669,7 @@ export function useDataManage() {
                         }
                     } catch {}
                 } else {
+                    if (data.skippedDetails?.length) showSkippedDetails(data.skippedDetails)
                     try {
                         const memberRes = await menuAction('getMembers')
                         if (memberRes.result.code === 0) {
@@ -876,13 +879,13 @@ export function useDataManage() {
     function showSkippedDetails(details: any[]) {
         if (!details || details.length === 0) return
         const lines = details.slice(0, 10).map(d =>
-            `${d.memberName} - ${d.menuName}（${d.date}，¥${d.price}）`
+            d.reason ? (d.name + '：' + d.reason) : `${d.memberName} - ${d.menuName}（${d.date}，¥${d.price}）`
         )
         if (details.length > 10) {
             lines.push(`...等共${details.length}条`)
         }
         uni.showModal({
-            title: `跳过${details.length}条重复`,
+            title: '已跳过 ' + details.length + ' 条',
             content: lines.join('\n'),
             showCancel: false,
             confirmText: '知道了',
@@ -903,7 +906,7 @@ export function useDataManage() {
 
         uni.showLoading({ title: '上传文件...' })
         try {
-            const cloudPath = `csv_import/${Date.now()}_${Math.random().toString(36).substr(2, 6)}.csv`
+            const cloudPath = 'lunch/imports/' + getActiveGroupId() + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 10) + '.csv'
             const uploadRes = await wx.cloud.uploadFile({ cloudPath, filePath })
             uni.showLoading({ title: '导入中...' })
             const res = await orderAction('importFromCsv', { fileID: uploadRes.fileID, mode })
@@ -938,7 +941,7 @@ export function useDataManage() {
     }
 
     async function fetchCsvRowsFromCloud(filePath: string): Promise<string[][]> {
-        const cloudPath = `csv_import/${Date.now()}_${Math.random().toString(36).substr(2, 6)}.csv`
+        const cloudPath = 'lunch/imports/' + getActiveGroupId() + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 10) + '.csv'
         const uploadRes = await wx.cloud.uploadFile({ cloudPath, filePath })
         const res = await menuAction('parseCsv', { fileID: uploadRes.fileID })
         try { await wx.cloud.deleteFile({ fileList: [uploadRes.fileID] }).catch(() => {}) } catch {}
@@ -1039,7 +1042,7 @@ export function useDataManage() {
         const mode = await new Promise<'append' | 'rewrite' | ''>(resolve => {
             uni.showModal({
                 title: '导入方式',
-                content: '追加数据：仅导入新数据，重复跳过\n清库重写：清空所有人员后导入',
+                content: '已有微信账号及角色保留，同名账号行跳过，角色列忽略。追加导入或覆盖未绑定微信的普通成员？',
                 confirmText: '追加',
                 cancelText: '清库重写',
                 success: res => resolve(res.confirm ? 'append' : 'rewrite'),
@@ -1048,12 +1051,17 @@ export function useDataManage() {
         if (!mode) return
         const batches = splitBatches(members)
         let totalInserted = 0
+        const skippedMembers: any[] = []
         for (let i = 0; i < batches.length; i++) {
             const batchMode = i === 0 ? mode : (mode === 'rewrite' ? 'rewrite_continue' : 'append')
-            const res = await menuAction('importMembers', { members: batches[i], mode: batchMode })
-            if (res.result.code === 0) totalInserted += res.result.data.count
+            const res = await menuAction('importMembers', { members: batches[i], mode: batchMode, retainedNames: members.map(m => m.name) })
+            if (res.result.code === 0) {
+                totalInserted += res.result.data.count
+                skippedMembers.push(...(res.result.data.skippedDetails || []))
+            }
             else throw new Error(res.result.msg || '导入失败')
         }
+        if (skippedMembers.length) showSkippedDetails(skippedMembers)
         uni.showToast({ title: `导入${totalInserted}条`, icon: 'success' })
         try {
             const res = await menuAction('getMembers')
@@ -1109,21 +1117,45 @@ export function useDataManage() {
     }
 
     async function restoreBackup() {
+        if (restoring.value) return
         if (!selectedBackupId.value) {
             uni.showToast({ title: '请选择备份', icon: 'none' })
             return
         }
         restoring.value = true
         try {
-            const res = await backupAction('restoreBackup', { backupId: selectedBackupId.value })
-            if (res.result.code === 0) {
-                uni.showToast({ title: '恢复成功', icon: 'success' })
-                showBackupDialog.value = false
+            const backupId = selectedBackupId.value
+            const groupId = store.groupId
+            const capabilities = await backupAction('getBackupCapabilities', { groupId })
+            if (capabilities.result.data?.restoreProtocol !== 2) throw new Error('请先更新备份云函数')
+            let jobId = ''
+            while (true) {
+                if (store.groupId !== groupId) throw new Error('组织已切换，请返回原组织继续恢复')
+                const res = await backupAction('restoreBackup', { backupId, jobId: jobId || undefined, groupId, restoreProtocol: 2 })
+                const progress = res.result.data
+                if (typeof progress?.done !== 'boolean') throw new Error('恢复协议不匹配，请更新云函数')
+                jobId = progress.jobId
+                if (progress.done) break
+                uni.showLoading({ title: '恢复 ' + (progress.processed || 0) + '/' + progress.total, mask: true })
+            }
+            showBackupDialog.value = false
+            flushCache()
+            clearAllCache()
+            setStore({ statsLoadTime: 0, recentLoadTime: 0 })
+            try {
+                const init = await orderAction('getInitData')
+                setStore(init.result.data)
+                saveSession({ groupId: groupId!, role: init.result.data.role, member: init.result.data.member })
                 await loadData()
+                uni.showToast({ title: '恢复成功', icon: 'success' })
+            } catch {
+                uni.showToast({ title: '已恢复，请重新打开小程序刷新', icon: 'none', duration: 3500 })
             }
         } catch (e: any) {
-            uni.showToast({ title: e.message || '恢复失败', icon: 'none' })
+            uni.hideLoading()
+            await uni.showModal({ title: '恢复未完成', content: (e.message || '请求失败') + '。若恢复已经开始，组织将保持维护状态；请选择同一备份继续恢复。', showCancel: false })
         } finally {
+            uni.hideLoading()
             restoring.value = false
         }
     }
