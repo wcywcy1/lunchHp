@@ -20,6 +20,7 @@ function harness() {
     function matches(row, where) {
         return Object.entries(where || {}).every(([key, expected]) => {
             const actual = row[key]
+            if (expected && expected.__regex) return new RegExp(expected.__regex).test(actual)
             if (!expected || !expected.__op) return actual === expected
             switch (expected.__op) {
                 case 'eq': return actual === expected.value
@@ -108,6 +109,7 @@ function harness() {
     }
     const db = {
         command, failWrite: null, collection: name => collection(name),
+        RegExp: ({ regexp }) => ({ __regex: regexp }),
         serverDate: () => new Date('2026-09-16T01:00:00Z'),
         createCollection: async name => { getTable(name) },
         runTransaction(fn) {
@@ -123,7 +125,7 @@ function harness() {
     }
     const cloud = {
         DYNAMIC_CURRENT_ENV: 'test', init() {}, database: () => db,
-        getWXContext: () => ({ OPENID: identity.getStore() || '' }),
+        getWXContext: () => (identity.getStore() || { OPENID: '', SOURCE: '' }),
         uploadFile: async ({ cloudPath, fileContent }) => {
             const fileID = 'cloud://test/' + cloudPath
             files.set(fileID, Buffer.from(fileContent))
@@ -177,8 +179,7 @@ function harness() {
         db, cloud, files, seed,
         rows: name => clone([...getTable(name).values()]),
         setNow: date => { now = new Date(date).getTime() },
-        invoke: (name, event, openid = 'admin-a') => identity.run(openid, () => load(name)(event, {})),
+        invoke: (name, event, openid = 'admin-a', source = 'wx_client') => identity.run({ OPENID: openid, SOURCE: source }, () => load(name)(event, {})),
     }
 }
 module.exports = { harness }
-

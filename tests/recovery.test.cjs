@@ -56,7 +56,7 @@ test('恢复等已有请求结束后再进入维护状态，租约释放不残�
     const h = harness()
     const backup = await h.invoke('lunch_backup', { action: 'backupManual', groupId: 'a' })
     const release = await gate.enter(h.db, 'a')
-    const request = { action: 'restoreBackup', groupId: 'a', backupId: backup.data._id }
+    const request = { action: 'restoreBackup', restoreProtocol: 2, groupId: 'a', backupId: backup.data._id }
     assert.equal((await h.invoke('lunch_backup', request)).code, 409)
     assert.ok(!h.rows('lunch_groups').find(row => row._id === 'a').restoreJob)
     await release()
@@ -68,7 +68,7 @@ test('备份校验失败不进入维护状态、不改变当前业务数据', as
     const h = harness()
     const backup = await h.invoke('lunch_backup', { action: 'backupManual', groupId: 'a' })
     h.files.set(backup.data.fileID, Buffer.from('{}'))
-    const result = await h.invoke('lunch_backup', { action: 'restoreBackup', groupId: 'a', backupId: backup.data._id })
+    const result = await h.invoke('lunch_backup', { action: 'restoreBackup', restoreProtocol: 2, groupId: 'a', backupId: backup.data._id })
     assert.equal(result.code, 400)
     assert.ok(!h.rows('lunch_groups').find(row => row._id === 'a').restoreJob)
     assert.equal(h.rows('lunch_menu').find(row => row._id === 'dish').price, 18.5)
@@ -81,7 +81,7 @@ test('跨多个事务批次恢复：中断后继续、保留已有账号、新�
     })))
     const backup = await h.invoke('lunch_backup', { action: 'backupManual', groupId: 'a' })
     h.seed('lunch_members', [{ _id: 'new-admin', groupId: 'a', openid: 'new-admin', role: 'admin', isVirtual: false, name: '后来加入' }])
-    const req = { action: 'restoreBackup', groupId: 'a', backupId: backup.data._id }
+    const req = { action: 'restoreBackup', restoreProtocol: 2, groupId: 'a', backupId: backup.data._id }
     const start = await h.invoke('lunch_backup', req)
     assert.equal(start.code, 0, start.msg)
     const session = await h.invoke('lunch_order', { action: 'getInitData', groupId: 'a' })
@@ -124,4 +124,3 @@ test('只将明确的文档不存在视为缺失，数据库故障不能被吞�
     assert.equal(await gate.optionalDocument({ get: async () => { throw new Error('document does not exist') } }), null)
     await assert.rejects(gate.optionalDocument({ get: async () => { throw new Error('network timeout') } }), /network timeout/)
 })
-

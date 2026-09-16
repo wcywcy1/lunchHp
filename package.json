@@ -1,8 +1,8 @@
-{
+﻿{
   "name": "lunch-hp",
   "version": "0.0.0",
   "scripts": {
-    "test:security": "node --test tests/security.test.cjs tests/recovery.test.cjs",
+    "test:security": "node --test tests/security.test.cjs tests/recovery.test.cjs tests/business-logic.test.cjs",
     "dev:custom": "uni -p",
     "dev:h5": "uni",
     "dev:h5:ssr": "uni --ssr",
@@ -71,3 +71,4 @@
     "vue-tsc": "^1.0.24"
   }
 }
+

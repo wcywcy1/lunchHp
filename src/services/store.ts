@@ -122,25 +122,38 @@ export function setCache(key: string, data: any, immediate = false) {
         uni.setStorageSync(key, value)
         return
     }
-    _pendingWrites.set(key, value)
+    const generation = _cacheGeneration
+    const groupId = store.groupId
+    _pendingWrites.set(key, { value, generation, groupId })
     if (_writeTimer) return
     _writeTimer = setTimeout(() => {
-        for (const [k, v] of _pendingWrites) {
-            uni.setStorageSync(k, v)
+        for (const [k, pending] of _pendingWrites) {
+            if (pending.generation === _cacheGeneration && pending.groupId === store.groupId) {
+                uni.setStorageSync(k, pending.value)
+            }
         }
         _pendingWrites.clear()
         _writeTimer = null
     }, 300)
 }
 
-const _pendingWrites = new Map<string, string>()
+interface PendingCacheWrite {
+    value: string
+    generation: number
+    groupId: string | null
+}
+
+const _pendingWrites = new Map<string, PendingCacheWrite>()
 let _writeTimer: any = null
+let _cacheGeneration = 0
 
 export function flushCache() {
     if (_writeTimer) clearTimeout(_writeTimer)
     _writeTimer = null
-    for (const [k, v] of _pendingWrites) {
-        uni.setStorageSync(k, v)
+    for (const [k, pending] of _pendingWrites) {
+        if (pending.generation === _cacheGeneration && pending.groupId === store.groupId) {
+            uni.setStorageSync(k, pending.value)
+        }
     }
     _pendingWrites.clear()
 }
@@ -178,6 +191,10 @@ export function setActiveGroupId(groupId: string) {
 
 // 清空所有本地缓存（切换组时调用）
 export function clearAllCache() {
+    _cacheGeneration++
+    if (_writeTimer) clearTimeout(_writeTimer)
+    _writeTimer = null
+    _pendingWrites.clear()
     Object.values(CACHE_KEYS).forEach(key => {
         try { uni.removeStorageSync(key) } catch {}
     })

@@ -12,6 +12,7 @@ interface MonthlyStat {
     totalAmount: number
     orderCount: number
     orderByMember: Record<string, number>
+    deleted?: boolean
     orderBySupplier: Record<string, number>
     [key: string]: any
 }
@@ -251,6 +252,10 @@ export function useStats(): StatsReturn {
         for (const s of fresh) {
             const key = `${s.year}_${s.month}`
             const idx = merged.findIndex(m => `${m.year}_${m.month}` === key)
+            if (s.deleted) {
+                if (idx >= 0) merged.splice(idx, 1)
+                continue
+            }
             if (idx >= 0) {
                 merged[idx] = s
             } else {

@@ -1,10 +1,22 @@
 import { CLOUD_FUNCTIONS, GROUP_ID } from '../../constants/appConfig'
 import { useStore } from '../store'
 
+export class CloudActionError extends Error {
+    code: number
+    result: any
+
+    constructor(code: number, message: string, result: any) {
+        super(message)
+        this.name = 'CloudActionError'
+        this.code = code
+        this.result = result
+    }
+}
+
 export async function cloudAction(cloudFuncName: string, action: string, data: Record<string, any> = {}) {
     // 自动注入当前激活组ID，云函数据此隔离数据
     const store = useStore()
-    const groupId = store.groupId || GROUP_ID
+    const groupId = data.groupId || store.groupId || GROUP_ID
     const res = await wx.cloud.callFunction({
         name: cloudFuncName,
         data: {
@@ -13,12 +25,15 @@ export async function cloudAction(cloudFuncName: string, action: string, data: R
             ...data,
         },
     })
+    if (store.groupId && store.groupId !== groupId) {
+        throw new CloudActionError(409, '组织已切换，已忽略旧请求结果', { stale: true })
+    }
     // 云函数全局 catch 会把内部异常"正常化"为 {code:500} 返回（callFunction 不会失败），
     // 这里统一转为异常抛出，否则各调用点的 try/catch 全部失效、错误被静默吞掉
     // 仅拦截 code 信封（lunch_voice 用 {success,message} 信封，code 未定义不拦截）
     const code = (res as any)?.result?.code
     if (typeof code === 'number' && code !== 0) {
-        throw new Error((res as any).result.msg || `操作失败(${code})`)
+        throw new CloudActionError(code, (res as any).result.msg || `操作失败(${code})`, (res as any).result)
     }
     return res
 }

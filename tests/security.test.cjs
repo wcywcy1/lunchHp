@@ -122,7 +122,7 @@ test('备份按组织隔离，旧无归属备份不显示不可恢复，普通�
     assert.ok(created.data.fileID)
     const list = await h.invoke('lunch_backup', { action: 'getBackupList', groupId: 'a' })
     assert.equal(list.data.length, 1)
-    assert.equal((await h.invoke('lunch_backup', { action: 'restoreBackup', groupId: 'a', backupId: 'legacy' })).code, 404)
+    assert.equal((await h.invoke('lunch_backup', { action: 'restoreBackup', restoreProtocol: 2, groupId: 'a', backupId: 'legacy' })).code, 404)
     assert.ok(!h.rows('lunch_groups').find(g => g._id === 'a').restoreJob)
 })
 
@@ -133,7 +133,7 @@ test('恢复保留ID和关联、不提权，失败回滚当前批次并可继续
     h.seed('lunch_members', [{ ...h.rows('lunch_members').find(m => m._id === 'admin'), role: 'member' }])
     h.seed('lunch_menu', [{ ...h.rows('lunch_menu')[0], price: 999 }])
     h.seed('lunch_orders', [{ _id: 'new-order', groupId: 'a', memberId: 'member', menuId: 'dish', price: 999, date: '2026-09-16' }])
-    const request = { action: 'restoreBackup', groupId: 'a', backupId: backup.data._id }
+    const request = { action: 'restoreBackup', restoreProtocol: 2, groupId: 'a', backupId: backup.data._id }
     const started = await h.invoke('lunch_backup', request, 'owner-a')
     assert.equal(started.code, 0, started.msg)
     assert.equal(started.data.done, false)
@@ -167,4 +167,3 @@ test('备份内容混入其他组织数据在写入前拒绝', () => {
     const before = { orders: [], menu: [], members: [{ _id: 'm', groupId: 'a', openid: 'm', role: 'member' }] }
     assert.equal(buildPlan(snapshot, before, 'a', 'owner-a')[0].data.role, 'member')
 })
-

@@ -84,8 +84,8 @@ function createRequestHandlers(GROUP_ID) {
     }
 
     function getToday() {
-        const d = new Date()
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+        const beijing = new Date(Date.now() + 8 * 60 * 60 * 1000)
+        return `${beijing.getUTCFullYear()}-${String(beijing.getUTCMonth() + 1).padStart(2, '0')}-${String(beijing.getUTCDate()).padStart(2, '0')}`
     }
 
     async function fetchAll(collection, where) {
@@ -231,7 +231,7 @@ function createRequestHandlers(GROUP_ID) {
         const today = getToday()
         const yearMonth = today.substring(0, 7)
 
-        const [monthAggResult, todayCountResult, menuResult, membersResult, groupResult] = await Promise.all([
+        const [monthAggResult, todayOrdersResult, menuResult, membersResult, groupResult] = await Promise.all([
             db.collection(COL.ORDERS)
                 .aggregate()
                 .match({
@@ -245,9 +245,7 @@ function createRequestHandlers(GROUP_ID) {
                     count: $.sum(1),
                 })
                 .end(),
-            db.collection(COL.ORDERS)
-                .where({ groupId: GROUP_ID, date: today })
-                .count(),
+            fetchAll(db.collection(COL.ORDERS), { groupId: GROUP_ID, date: today }),
             db.collection(COL.MENU)
                 .where({ groupId: GROUP_ID })
                 .orderBy('sortNo', 'asc')
@@ -259,14 +257,10 @@ function createRequestHandlers(GROUP_ID) {
             db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => ({ data: {} })),
         ])
 
-        const todayCount = todayCountResult.total || 0
-        const limit = Math.min(Math.max(100, todayCount), 500)
-
-        const { data: recentOrders } = await db.collection(COL.ORDERS)
-            .where({ groupId: GROUP_ID })
-            .orderBy('createdAt', 'desc')
-            .limit(limit)
-            .get()
+        // Home and management screens consume today's business orders. Querying
+        // them by date prevents imported history from pushing them out of a
+        // createdAt-based "recent" window.
+        const recentOrders = todayOrdersResult.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
 
         const monthSummary = monthAggResult.list.length > 0
             ? { totalAmount: monthAggResult.list[0].totalAmount, count: monthAggResult.list[0].count, yearMonth }
@@ -341,20 +335,9 @@ function createRequestHandlers(GROUP_ID) {
 
     async function getRecentOrders(event, openid) {
         await _autoCancelExpiredPending()
-        const { limit: reqLimit = 100 } = event
         const today = getToday()
-
-        const { total: todayCount } = await db.collection(COL.ORDERS)
-            .where({ groupId: GROUP_ID, date: today })
-            .count()
-
-        const actualLimit = Math.min(Math.max(reqLimit, todayCount), 500)
-
-        const { data } = await db.collection(COL.ORDERS)
-            .where({ groupId: GROUP_ID })
-            .orderBy('createdAt', 'desc')
-            .limit(actualLimit)
-            .get()
+        const data = await fetchAll(db.collection(COL.ORDERS), { groupId: GROUP_ID, date: today })
+        data.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
 
         return { code: 0, data }
     }
@@ -477,6 +460,20 @@ function createRequestHandlers(GROUP_ID) {
         }
     }
 
+    async function _touchOrderAndDataTimestamps() {
+        const now = db.serverDate()
+        const existing = await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => null)
+        if (existing && existing.data) {
+            await db.collection(COL.GROUPS).doc(GROUP_ID).update({
+                data: { ordersTimestamp: now, dataTimestamp: now },
+            })
+        } else {
+            await db.collection(COL.GROUPS).add({
+                data: { _id: GROUP_ID, ordersTimestamp: now, dataTimestamp: now, createdAt: now },
+            })
+        }
+    }
+
     async function _resetDataTimestamp() {
         const existing = await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => null)
         if (existing && existing.data) {
@@ -591,7 +588,7 @@ function createRequestHandlers(GROUP_ID) {
         for (let i = 0; i < expired.length; i += BATCH_SIZE) {
             const chunk = expired.slice(i, i + BATCH_SIZE)
             await db.collection(COL.ORDERS)
-                .where({ _id: _.in(chunk.map(o => o._id)) })
+                .where({ _id: _.in(chunk.map(o => o._id)), groupId: GROUP_ID, status: STATUS.PENDING })
                 .update({ data: { status: STATUS.CANCELLED, updatedAt: now2 } })
         }
 
@@ -599,7 +596,7 @@ function createRequestHandlers(GROUP_ID) {
         for (const ym of months) {
             try { await doRebuildMonthStats(ym) } catch (e) { console.error('rebuild month stats error:', e) }
         }
-        await _updateOrdersTimestamp()
+        await _touchOrderAndDataTimestamps()
         return { cancelled: expired.length }
     }
 
@@ -711,7 +708,7 @@ function createRequestHandlers(GROUP_ID) {
     }
 
     async function batchConfirm(event, openid) {
-        const { orderIds, date } = event
+        const { orderIds } = event
         if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
             return { code: 400, msg: 'missing orderIds' }
         }
@@ -719,20 +716,25 @@ function createRequestHandlers(GROUP_ID) {
         const caller = await getMemberByOpenid(openid)
         if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
 
+        const { data: pendingOrders } = await db.collection(COL.ORDERS)
+            .where({ _id: _.in(orderIds), groupId: GROUP_ID, status: STATUS.PENDING })
+            .get()
+        const pendingIds = new Set(pendingOrders.map(order => order._id))
         const now = db.serverDate()
         // 批量更新：用 where + _.in 一次更新，避免循环单条 update
         const updateRes = await db.collection(COL.ORDERS)
-            .where({ _id: _.in(orderIds), groupId: GROUP_ID })
+            .where({ _id: _.in(orderIds), groupId: GROUP_ID, status: STATUS.PENDING })
             .update({ data: { status: STATUS.CONFIRMED, updatedAt: now } })
-        const results = orderIds.map(id => ({ orderId: id, success: true }))
+        const results = orderIds.map(id => ({ orderId: id, success: pendingIds.has(id) }))
         if (updateRes.stats && updateRes.stats.updated !== orderIds.length) {
             console.warn('batchConfirm partial update:', updateRes.stats.updated, '/', orderIds.length)
         }
 
-        if (date) {
-            await doRebuildMonthStats(date.substring(0, 7))
+        const months = [...new Set(pendingOrders.map(order => order.date.substring(0, 7)))]
+        for (const month of months) {
+            await doRebuildMonthStats(month)
         }
-        await _touchAllTimestamps()
+        await _touchOrderAndDataTimestamps()
 
         return { code: 0, data: results }
     }
@@ -747,12 +749,15 @@ function createRequestHandlers(GROUP_ID) {
         const order = (await db.collection(COL.ORDERS).doc(orderId).get()).data
         if (!order) return { code: 404, msg: 'order not found' }
 
-        await db.collection(COL.ORDERS).doc(orderId).update({
+        const updateRes = await db.collection(COL.ORDERS)
+            .where({ _id: orderId, groupId: GROUP_ID, status: _.neq(STATUS.CANCELLED) })
+            .update({
             data: { status: STATUS.CANCELLED, cancelRequested: false, cancelRejected: false, updatedAt: db.serverDate() },
         })
+        if (!updateRes.stats || updateRes.stats.updated !== 1) return { code: 409, msg: 'order status changed, please refresh' }
 
         await doRebuildMonthStats(order.date.substring(0, 7))
-        await _touchAllTimestamps()
+        await _touchOrderAndDataTimestamps()
         return { code: 0 }
     }
 
@@ -768,13 +773,13 @@ function createRequestHandlers(GROUP_ID) {
 
         // 1. 一次性查出订单（拿 date 用于按月 rebuild）
         const { data: orders } = await db.collection(COL.ORDERS)
-            .where({ _id: _.in(orderIds), groupId: GROUP_ID })
+            .where({ _id: _.in(orderIds), groupId: GROUP_ID, status: _.neq(STATUS.CANCELLED) })
             .get()
 
         // 2. 批量更新状态
         const now = db.serverDate()
         await db.collection(COL.ORDERS)
-            .where({ _id: _.in(orderIds), groupId: GROUP_ID })
+            .where({ _id: _.in(orderIds), groupId: GROUP_ID, status: _.neq(STATUS.CANCELLED) })
             .update({
                 data: {
                     status: STATUS.CANCELLED,
@@ -790,8 +795,8 @@ function createRequestHandlers(GROUP_ID) {
             try { await doRebuildMonthStats(ym) } catch (e) { console.error('rebuild month stats error:', e) }
         }
 
-        // 4. 时间戳只更新一次
-        await _touchAllTimestamps()
+        // 4. Only order/stat consumers need invalidation.
+        await _touchOrderAndDataTimestamps()
 
         return { code: 0, data: { cancelled: orders.length } }
     }
@@ -810,9 +815,12 @@ function createRequestHandlers(GROUP_ID) {
         if (order.status !== STATUS.CONFIRMED) return { code: 400, msg: '只能对已确认订单申请取消' }
         if (order.cancelRequested) return { code: 409, msg: '已申请取消，请等待管理员处理' }
 
-        await db.collection(COL.ORDERS).doc(orderId).update({
+        const updateRes = await db.collection(COL.ORDERS)
+            .where({ _id: orderId, groupId: GROUP_ID, memberId: caller._id, status: STATUS.CONFIRMED, cancelRequested: _.neq(true) })
+            .update({
             data: { cancelRequested: true, cancelRejected: false, updatedAt: db.serverDate() },
         })
+        if (!updateRes.stats || updateRes.stats.updated !== 1) return { code: 409, msg: 'order status changed, please refresh' }
         await _updateOrdersTimestamp()
         return { code: 0 }
     }
@@ -830,9 +838,12 @@ function createRequestHandlers(GROUP_ID) {
         if (order.memberId !== caller._id) return { code: 403, msg: '只能取消自己的订单' }
         if (order.status !== STATUS.PENDING) return { code: 400, msg: '只能取消待确认订单' }
 
-        await db.collection(COL.ORDERS).doc(orderId).update({
+        const updateRes = await db.collection(COL.ORDERS)
+            .where({ _id: orderId, groupId: GROUP_ID, memberId: caller._id, status: STATUS.PENDING })
+            .update({
             data: { status: STATUS.CANCELLED, updatedAt: db.serverDate() },
         })
+        if (!updateRes.stats || updateRes.stats.updated !== 1) return { code: 409, msg: 'order status changed, please refresh' }
         await _updateOrdersTimestamp()
         return { code: 0 }
     }
@@ -860,9 +871,12 @@ function createRequestHandlers(GROUP_ID) {
         const order = (await db.collection(COL.ORDERS).doc(orderId).get()).data
         if (!order) return { code: 404, msg: 'order not found' }
 
-        await db.collection(COL.ORDERS).doc(orderId).update({
+        const updateRes = await db.collection(COL.ORDERS)
+            .where({ _id: orderId, groupId: GROUP_ID, status: STATUS.CONFIRMED, cancelRequested: true })
+            .update({
             data: { cancelRequested: false, cancelRejected: true, updatedAt: db.serverDate() },
         })
+        if (!updateRes.stats || updateRes.stats.updated !== 1) return { code: 409, msg: 'cancel request is no longer pending' }
         await _updateOrdersTimestamp()
         return { code: 0 }
     }
@@ -942,7 +956,7 @@ function createRequestHandlers(GROUP_ID) {
                 .orderBy('year', 'asc')
                 .orderBy('month', 'asc')
                 .get()
-            const result = data.map(doc => _formatStatDoc(doc))
+            const result = data.map(doc => _formatStatDoc(doc)).filter(stat => !stat.deleted)
             const newGroupRes = await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => ({ data: {} }))
             const newTs = newGroupRes.data && newGroupRes.data.dataTimestamp
                 ? (newGroupRes.data.dataTimestamp instanceof Date ? newGroupRes.data.dataTimestamp.getTime() : new Date(newGroupRes.data.dataTimestamp).getTime())
@@ -970,34 +984,10 @@ function createRequestHandlers(GROUP_ID) {
                         .orderBy('year', 'asc')
                         .orderBy('month', 'asc')
                         .get()
-                    const result = rebuilt.map(doc => _formatStatDoc(doc))
+                    const result = rebuilt.map(doc => _formatStatDoc(doc)).filter(stat => !stat.deleted)
                     return { code: 0, data: result, dataTimestamp: serverTs, incremental: false }
                 }
                 return { code: 0, data: [], dataTimestamp: serverTs, incremental: true }
-            }
-
-            const needRebuild = []
-            for (const stat of changedStats) {
-                const statTs = stat.updatedAt
-                    ? (stat.updatedAt instanceof Date ? stat.updatedAt.getTime() : new Date(stat.updatedAt).getTime())
-                    : 0
-                if (statTs < serverTs) {
-                    needRebuild.push(stat)
-                }
-            }
-
-            for (const m of needRebuild) {
-                await doRebuildMonthStats(`${m.year}-${String(m.month).padStart(2, '0')}`)
-            }
-
-            if (needRebuild.length > 0) {
-                const reQueryWhere = { groupId: GROUP_ID, updatedAt: _.gt(new Date(since)) }
-                if (year) reQueryWhere.year = Number(year)
-                changedStats = (await db.collection(COL.MONTHLY_STATS)
-                    .where(reQueryWhere)
-                    .orderBy('year', 'asc')
-                    .orderBy('month', 'asc')
-                    .get()).data
             }
 
             const result = changedStats.map(doc => _formatStatDoc(doc))
@@ -1018,29 +1008,9 @@ function createRequestHandlers(GROUP_ID) {
                 .orderBy('month', 'asc')
                 .get()
             data = result.data
-        } else {
-            const needRebuild = []
-            for (const stat of data) {
-                const statTs = stat.updatedAt
-                    ? (stat.updatedAt instanceof Date ? stat.updatedAt.getTime() : new Date(stat.updatedAt).getTime())
-                    : 0
-                if (statTs < serverTs) {
-                    needRebuild.push(stat)
-                }
-            }
-            if (needRebuild.length > 0) {
-                for (const m of needRebuild) {
-                    await doRebuildMonthStats(`${m.year}-${String(m.month).padStart(2, '0')}`)
-                }
-                data = (await db.collection(COL.MONTHLY_STATS)
-                    .where(where)
-                    .orderBy('year', 'asc')
-                    .orderBy('month', 'asc')
-                    .get()).data
-            }
         }
 
-        const result = data.map(doc => _formatStatDoc(doc))
+        const result = data.map(doc => _formatStatDoc(doc)).filter(stat => !stat.deleted)
         return { code: 0, data: result, dataTimestamp: serverTs, incremental: false }
     }
 
@@ -1053,7 +1023,8 @@ function createRequestHandlers(GROUP_ID) {
         const byMemberCount = {}
         if (Array.isArray(doc.orderByMember)) {
             for (const item of doc.orderByMember) {
-                byMemberCount[item.memberName || '未定义'] = item.count || 0
+                const key = item.memberName || '未定义'
+                byMemberCount[key] = (byMemberCount[key] || 0) + (item.count || 0)
             }
         }
         const bySupplierCount = {}
@@ -1067,6 +1038,7 @@ function createRequestHandlers(GROUP_ID) {
             _id: doc._id,
             year: doc.year,
             month: doc.month,
+            deleted: doc.deleted === true,
             totalAmount: doc.totalAmount || 0,
             orderCount: doc.orderCount || doc.count || 0,
             orderByMember: byMemberAmount,
@@ -1083,7 +1055,7 @@ function createRequestHandlers(GROUP_ID) {
         const record = {}
         for (const item of arr) {
             const key = item[keyField] || '未定义'
-            record[key] = item.amount || 0
+            record[key] = (record[key] || 0) + (item.amount || 0)
         }
         return record
     }
@@ -1142,7 +1114,8 @@ function createRequestHandlers(GROUP_ID) {
 
             const orderByMemberMap = {}
             for (const item of orderByMember) {
-                orderByMemberMap[item.memberName || '未定义'] = Math.round(item.amount * 100) / 100
+                const key = item.memberName || '未定义'
+                orderByMemberMap[key] = Math.round(((orderByMemberMap[key] || 0) + item.amount) * 100) / 100
             }
             const orderBySupplierMap = {}
             for (const item of orderBySupplier) {
@@ -1162,6 +1135,30 @@ function createRequestHandlers(GROUP_ID) {
                     orderBySupplier,
                     orderByMemberMap,
                     orderBySupplierMap,
+                    deleted: false,
+                    createdAt: now,
+                    updatedAt: now,
+                },
+            })
+        }
+
+        // Targeted rebuilds retain a deletion marker so incremental clients can
+        // remove a cached month after its last confirmed order disappears.
+        if (targetYearMonth && Object.keys(monthMap).length === 0) {
+            const [year, month] = targetYearMonth.split('-').map(Number)
+            const docId = `${GROUP_ID}_${year}_${month}`
+            await db.collection(COL.MONTHLY_STATS).doc(docId).set({
+                data: {
+                    groupId: GROUP_ID,
+                    year,
+                    month,
+                    totalAmount: 0,
+                    orderCount: 0,
+                    orderByMember: [],
+                    orderBySupplier: [],
+                    orderByMemberMap: {},
+                    orderBySupplierMap: {},
+                    deleted: true,
                     createdAt: now,
                     updatedAt: now,
                 },
@@ -1725,7 +1722,10 @@ function createRequestHandlers(GROUP_ID) {
 
         if (records.length === 0) return { code: 400, msg: '无有效数据' }
 
+        const affectedStatMonths = new Set()
         if (mode === 'rewrite') {
+            const priorOrders = await fetchAll(db.collection(COL.ORDERS), { groupId: GROUP_ID, status: STATUS.CONFIRMED })
+            for (const order of priorOrders) affectedStatMonths.add(order.date.substring(0, 7))
             await db.collection(COL.ORDERS).where({ groupId: GROUP_ID }).remove()
         }
 
@@ -1789,20 +1789,16 @@ function createRequestHandlers(GROUP_ID) {
         }
         Object.assign(menuMap, newMenuItems)
 
-        let lastDaySet = null
+        const existingKeys = new Set()
         if (mode === 'append') {
-            // 只查最近一天的订单用于去重，避免 fetchAll 全量订单
-            const { list: lastDateAgg } = await db.collection(COL.ORDERS)
-                .aggregate()
-                .match({ groupId: GROUP_ID })
-                .group({ _id: null, lastDate: $.max('$date') })
-                .end()
-            if (lastDateAgg.length > 0) {
-                const lastDate = lastDateAgg[0].lastDate
-                const { data: lastDayOrders } = await db.collection(COL.ORDERS)
-                    .where({ groupId: GROUP_ID, date: lastDate })
-                    .get()
-                lastDaySet = new Set(lastDayOrders.map(o => `${o.memberId}|${o.menuId}`))
+            // Query only dates present in the file, then use the complete
+            // date/member/menu key for historical and in-file deduplication.
+            const dates = [...new Set(records.map(record => record.date))]
+            for (const date of dates) {
+                const dateOrders = await fetchAll(db.collection(COL.ORDERS), { groupId: GROUP_ID, date })
+                for (const order of dateOrders) {
+                    existingKeys.add(`${date}|${order.memberId}|${order.menuId}`)
+                }
             }
         }
 
@@ -1821,7 +1817,8 @@ function createRequestHandlers(GROUP_ID) {
                 continue
             }
 
-            if (lastDaySet && lastDaySet.has(`${member._id}|${menuItem._id}`)) {
+            const uniqueKey = `${o.date}|${member._id}|${menuItem._id}`
+            if (existingKeys.has(uniqueKey)) {
                 skippedCount++
                 skippedDetails.push({
                     memberName: o.memberName,
@@ -1831,6 +1828,7 @@ function createRequestHandlers(GROUP_ID) {
                 })
                 continue
             }
+            existingKeys.add(uniqueKey)
 
             toInsert.push({
                 groupId: GROUP_ID,
@@ -1850,13 +1848,22 @@ function createRequestHandlers(GROUP_ID) {
         }
 
         if (toInsert.length > 0) {
+            for (const order of toInsert) {
+                if (order.status === STATUS.CONFIRMED) affectedStatMonths.add(order.date.substring(0, 7))
+            }
             const BATCH_SIZE = 100
             for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
                 await db.collection(COL.ORDERS).add({ data: toInsert.slice(i, i + BATCH_SIZE) })
             }
-            await _updateOrdersTimestamp()
+        }
+        if (toInsert.length > 0 || mode === 'rewrite') {
             if (isLastBatch) {
-                await _resetDataTimestamp()
+                for (const yearMonth of affectedStatMonths) {
+                    await doRebuildMonthStats(yearMonth)
+                }
+                await _touchAllTimestamps()
+            } else {
+                await _updateOrdersTimestamp()
             }
         }
 

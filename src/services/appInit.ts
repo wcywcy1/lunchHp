@@ -1,4 +1,4 @@
-import { menuAction } from './repositories/baseRepository'
+import { CloudActionError, menuAction } from './repositories/baseRepository'
 import { clearAllCache, resetStore } from './store'
 import { ACTIVE_GROUP_ID_KEY } from '../constants/appConfig'
 
@@ -8,18 +8,21 @@ let _isRunning = false
 export function startInit() {
     if (initPromise || _isRunning) return initPromise || Promise.resolve()
     _isRunning = true
-    initPromise = menuAction('initGroup').then((res: any) => {
+    initPromise = menuAction('initGroup').then(() => {
         _isRunning = false
+    }).catch(e => {
+        _isRunning = false
+        initPromise = null
         // 组织已不存在（如被创建者删除）：清除失效会话并引导回选组页，避免自动"复活"死组
-        if (res?.result?.code === 404) {
+        if (e instanceof CloudActionError && e.code === 404) {
             clearAllCache()
             resetStore()
             try { uni.removeStorageSync(ACTIVE_GROUP_ID_KEY) } catch {}
             uni.reLaunch({ url: '/pages/group-select/index' })
+            return
         }
-    }).catch(e => {
-        _isRunning = false
         console.error('initGroup error:', e)
+        throw e
     })
     return initPromise
 }
