@@ -327,8 +327,8 @@ function createRequestHandlers(GROUP_ID) {
                 recentTimestamp: groupData.ordersTimestamp || null,
                 menuTimestamp: groupData.menuTimestamp || null,
                 membersTimestamp: groupData.membersTimestamp || null,
-                notice: groupData.notice || '',
-                noticeUpdatedAt: groupData.noticeUpdatedAt || null,
+                orderCutoff: groupData.orderCutoff || '10:00',
+                cutoffDisabled: !!groupData.cutoffDisabled,
             },
         }
     }
@@ -357,22 +357,8 @@ function createRequestHandlers(GROUP_ID) {
             return new Date(val).getTime()
         }
         const ordersTs = getTs(groupData.ordersTimestamp)
-        let notice = groupData.notice || ''
-        let noticeUpdatedAt = getTs(groupData.noticeUpdatedAt) || null
-
-        // 停止接单时间懒触发：北京时间已过截止时间且今天未发过，自动写群通知（幂等，任何成员调用都会触发）；已禁用则跳过
         const cutoff = groupData.orderCutoff || '10:00'
         const cutoffDisabled = !!groupData.cutoffDisabled
-        const bj = new Date(Date.now() + 8 * 3600 * 1000)
-        const today = `${bj.getUTCFullYear()}-${String(bj.getUTCMonth() + 1).padStart(2, '0')}-${String(bj.getUTCDate()).padStart(2, '0')}`
-        const hhmm = `${String(bj.getUTCHours()).padStart(2, '0')}:${String(bj.getUTCMinutes()).padStart(2, '0')}`
-        if (!cutoffDisabled && groupData.cutoffNoticeDate !== today && hhmm >= cutoff) {
-            notice = `每天${cutoff}停止接单，有需要请电话联系`
-            await db.collection(COL.GROUPS).doc(GROUP_ID).update({
-                data: { notice, noticeUpdatedAt: db.serverDate(), cutoffNoticeDate: today }
-            }).catch(() => { })
-            noticeUpdatedAt = Date.now()
-        }
 
         return {
             code: 0,
@@ -381,8 +367,6 @@ function createRequestHandlers(GROUP_ID) {
                 recentTimestamp: ordersTs,
                 menuTimestamp: getTs(groupData.menuTimestamp),
                 membersTimestamp: getTs(groupData.membersTimestamp),
-                notice,
-                noticeUpdatedAt,
                 orderCutoff: cutoff,
                 cutoffDisabled,
             },

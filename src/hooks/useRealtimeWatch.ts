@@ -18,7 +18,6 @@ export function useRealtimeWatch() {
     // 实时监听当前激活组（运行时可切换），回退默认组
     const activeGroupId = () => store.groupId || GROUP_ID
     let orderWatcher: WatcherRef | null = null
-    let groupWatcher: WatcherRef | null = null
     let orderRetryTimer: any = null
     let orderRetryCount = 0
 
@@ -63,20 +62,6 @@ export function useRealtimeWatch() {
         startWatcher()
     }
 
-    function watchGroupNotice(onChange: (snapshot: any) => void) {
-        closeGroupWatcher()
-        const db = wx.cloud.database()
-        groupWatcher = db.collection(COLLECTIONS.GROUPS)
-            .where({ _id: activeGroupId() })
-            .watch({
-                onChange,
-                onError: (err: any) => {
-                    console.error('[watchGroupNotice] error:', err)
-                    groupWatcher = null
-                },
-            })
-    }
-
     function closeOrderWatcherWithRetry() {
         if (orderRetryTimer) {
             clearTimeout(orderRetryTimer)
@@ -93,23 +78,13 @@ export function useRealtimeWatch() {
         closeOrderWatcherWithRetry()
     }
 
-    function closeGroupWatcher() {
-        if (groupWatcher) {
-            groupWatcher.close()
-            groupWatcher = null
-        }
-    }
-
     function closeAll() {
         closeOrderWatcherWithRetry()
-        closeGroupWatcher()
     }
 
     return {
         watchTodayOrders,
-        watchGroupNotice,
         closeOrderWatcher,
-        closeGroupWatcher,
         closeAll,
     }
 }

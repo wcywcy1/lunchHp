@@ -19,6 +19,7 @@ function loadTypeScriptModule(relativePath) {
 const { GroupRequestCache } = loadTypeScriptModule('src/services/groupRequestCache.ts')
 const { loadAdminData } = loadTypeScriptModule('src/services/adminDataLoader.ts')
 const { createDebouncedTask } = loadTypeScriptModule('src/utils/debouncedTask.ts')
+const { getCutoffNoticeState } = loadTypeScriptModule('src/utils/cutoffNotice.ts')
 
 test('freshness 请求按组织复用并发 Promise，并分别缓存结果', async () => {
     const cache = new GroupRequestCache(5000)
@@ -75,4 +76,19 @@ test('Watch 防抖只执行最后一次任务，取消后不再执行', async ()
     debounced.cancel()
     await new Promise(resolve => setTimeout(resolve, 30))
     assert.equal(calls, 1)
+})
+
+test('停止接单通知只在北京时间截止后至次日零点显示', () => {
+    const before = Date.parse('2026-09-18T01:59:59.000Z')
+    const atCutoff = Date.parse('2026-09-18T02:00:00.000Z')
+    const endOfDay = Date.parse('2026-09-18T15:59:59.999Z')
+    const midnight = Date.parse('2026-09-18T16:00:00.000Z')
+
+    assert.equal(getCutoffNoticeState('10:00', false, before).content, '')
+    assert.equal(getCutoffNoticeState('10:00', false, atCutoff).content,
+        '每天10:00停止接单，有需要请电话联系')
+    assert.equal(getCutoffNoticeState('10:00', false, endOfDay).content,
+        '每天10:00停止接单，有需要请电话联系')
+    assert.equal(getCutoffNoticeState('10:00', false, midnight).content, '')
+    assert.equal(getCutoffNoticeState('10:00', true, atCutoff).content, '')
 })

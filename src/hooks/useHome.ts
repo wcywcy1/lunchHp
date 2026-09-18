@@ -1,4 +1,4 @@
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { onShow, onHide } from '@dcloudio/uni-app'
 import { useStore, setStore, getCache, setCache, saveSession, getRecentLoadTime, setRecentLoadTime, flushCache } from '../services/store'
 import { menuAction, orderAction } from '../services/repositories/baseRepository'
@@ -8,6 +8,7 @@ import { useRealtimeWatch } from './useRealtimeWatch'
 import { CLOUD_STORAGE_PATH } from '../constants/appConfig'
 import { checkDataFreshness, toMs } from '../services/freshness'
 import { getTodayString } from '../utils/date'
+import { getCutoffNoticeState } from '../utils/cutoffNotice'
 
 export function useHome() {
     const store = useStore()
@@ -21,24 +22,32 @@ export function useHome() {
     const showLinkDialog = ref(false)
     const selectedVirtualId = ref('')
     const saving = ref(false)
-    const noticeContent = ref('')
+    const cutoffNoticeContent = ref('')
+    const operationalNotice = ref('')
+    const noticeContent = computed(() => operationalNotice.value || cutoffNoticeContent.value)
     const realtime = useRealtimeWatch()
+    let cutoffNoticeTimer: ReturnType<typeof setTimeout> | null = null
 
     const currentAvatar = computed(() => store.member?.avatar || '')
 
     let lastFreshnessCheck: number = 0
     const FRESHNESS_THROTTLE_MS = 10 * 1000
 
-    // 判断通知是否是今天的（0点自动过期）
-    function isNoticeToday(noticeTime: any): boolean {
-        if (!noticeTime) return false
-        const t = noticeTime instanceof Date ? noticeTime : new Date(noticeTime)
-        if (isNaN(t.getTime())) return false
-        const today = new Date()
-        return t.getFullYear() === today.getFullYear()
-            && t.getMonth() === today.getMonth()
-            && t.getDate() === today.getDate()
+    function refreshCutoffNotice() {
+        if (cutoffNoticeTimer) clearTimeout(cutoffNoticeTimer)
+        cutoffNoticeTimer = null
+        const state = getCutoffNoticeState(store.groupCutoff || '10:00', store.cutoffDisabled)
+        cutoffNoticeContent.value = state.content
+        if (state.nextUpdateInMs > 0) {
+            cutoffNoticeTimer = setTimeout(refreshCutoffNotice, state.nextUpdateInMs)
+        }
     }
+
+    watch(
+        [() => store.groupId, () => store.groupCutoff, () => store.cutoffDisabled],
+        refreshCutoffNotice,
+        { immediate: true },
+    )
 
     const memberLoading = ref(false)
 
@@ -78,13 +87,14 @@ export function useHome() {
             const res = await orderAction('getInitData')
             if (res.result.code === 0) {
                 const { member, isNew, monthSummary, recentOrders, menu, members,
-                    recentTimestamp, menuTimestamp, membersTimestamp, notice, noticeUpdatedAt } = res.result.data
+                    recentTimestamp, menuTimestamp, membersTimestamp, orderCutoff, cutoffDisabled, notice } = res.result.data
                 if (member) {
                     setStore({ member, role: member.role, groupId: member.groupId })
                     saveSession({ groupId: member.groupId, role: member.role, member })
                 }
                 setStore({ monthSummary, recentOrders, menu, members,
-                    recentTimestamp, menuTimestamp, membersTimestamp, initialized: true })
+                    recentTimestamp, menuTimestamp, membersTimestamp,
+                    groupCutoff: orderCutoff || '10:00', cutoffDisabled: !!cutoffDisabled, initialized: true })
                 setCache(CACHE_KEYS.RECENT_ORDERS, recentOrders)
                 setCache(CACHE_KEYS.MENU, menu)
                 setCache(CACHE_KEYS.MEMBERS, members)
@@ -93,7 +103,7 @@ export function useHome() {
                 setCache(CACHE_KEYS.MEMBERS_TIMESTAMP, membersTimestamp)
                 setCache(CACHE_KEYS.MONTH_SUMMARY, monthSummary)
                 setRecentLoadTime(Date.now())
-                noticeContent.value = notice && isNoticeToday(noticeUpdatedAt) ? notice : ''
+                operationalNotice.value = notice || ''
                 if (member && !member.privacyAgreed) {
                     showPrivacyDialog.value = true
                 } else if (isNew && member && !member.name) {
@@ -123,8 +133,9 @@ export function useHome() {
         try {
             const res = await orderAction('getInitData')
             if (res.result.code === 0) {
-                const { monthSummary, recentOrders, menu, members, recentTimestamp, menuTimestamp, membersTimestamp, notice, noticeUpdatedAt } = res.result.data
-                setStore({ monthSummary, recentOrders, menu, members, recentTimestamp, menuTimestamp, membersTimestamp, initialized: true })
+                const { monthSummary, recentOrders, menu, members, recentTimestamp, menuTimestamp, membersTimestamp, orderCutoff, cutoffDisabled, notice } = res.result.data
+                setStore({ monthSummary, recentOrders, menu, members, recentTimestamp, menuTimestamp, membersTimestamp,
+                    groupCutoff: orderCutoff || '10:00', cutoffDisabled: !!cutoffDisabled, initialized: true })
                 setCache(CACHE_KEYS.RECENT_ORDERS, recentOrders)
                 setCache(CACHE_KEYS.MENU, menu)
                 setCache(CACHE_KEYS.MEMBERS, members)
@@ -133,7 +144,7 @@ export function useHome() {
                 setCache(CACHE_KEYS.MEMBERS_TIMESTAMP, membersTimestamp)
                 setCache(CACHE_KEYS.MONTH_SUMMARY, monthSummary)
                 setRecentLoadTime(Date.now())
-                noticeContent.value = notice && isNoticeToday(noticeUpdatedAt) ? notice : ''
+                operationalNotice.value = notice || ''
             }
         } catch (e) {
             console.error('loadInitData error:', e)
@@ -141,6 +152,7 @@ export function useHome() {
     }
 
     async function onShow() {
+        refreshCutoffNotice()
         if (!uni.getStorageSync('lunch_session')) {
             uni.reLaunch({ url: '/pages/group-select/index' })
             return
@@ -183,24 +195,6 @@ export function useHome() {
             },
             onError: () => { fetchRecentOrders() }
         })
-        realtime.watchGroupNotice((snapshot: any) => {
-            if (snapshot.type === 'init') {
-                const docs = snapshot.docs
-                const d = docs && docs[0]
-                noticeContent.value = d && d.notice && isNoticeToday(d.noticeUpdatedAt) ? d.notice : ''
-                return
-            }
-            const docChanges = snapshot.docChanges || []
-            for (const change of docChanges) {
-                if (change.dataType === 'update' || change.dataType === 'replace') {
-                    const uf = change.updatedFields || {}
-                    const doc = change.doc || {}
-                    const notice = uf.notice !== undefined ? uf.notice : doc.notice
-                    const noticeTime = uf.noticeUpdatedAt !== undefined ? uf.noticeUpdatedAt : doc.noticeUpdatedAt || 0
-                    noticeContent.value = notice && isNoticeToday(noticeTime) ? notice : ''
-                }
-            }
-        })
     }
 
     const showNoticeBanner = computed(() => noticeContent.value.length > 0)
@@ -208,12 +202,7 @@ export function useHome() {
     async function checkFreshness() {
         const data = await checkDataFreshness()
         if (!data) return
-        const { recentTimestamp, notice, noticeUpdatedAt } = data
-        if (notice && isNoticeToday(noticeUpdatedAt)) {
-            noticeContent.value = notice
-        } else {
-            noticeContent.value = ''
-        }
+        const { recentTimestamp } = data
         if (toMs(recentTimestamp) !== toMs(store.recentTimestamp)) {
             await fetchRecentOrders(recentTimestamp)
         } else {
@@ -455,7 +444,11 @@ export function useHome() {
         showNoticeBanner,
         initApp,
         onShow,
-        onHide: () => realtime.closeAll(),
+        onHide: () => {
+            realtime.closeAll()
+            if (cutoffNoticeTimer) clearTimeout(cutoffNoticeTimer)
+            cutoffNoticeTimer = null
+        },
         refreshData,
         cancelMyOrder,
         requestCancelOrder,

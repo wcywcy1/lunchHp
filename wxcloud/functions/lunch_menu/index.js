@@ -151,8 +151,6 @@ function createRequestHandlers(GROUP_ID) {
             batchToggleVisibleBySupplier,
             parseXlsx,
             parseCsv,
-            setNotice,
-            clearNotice,
             setOrderCutoff,
             setCutoffDisabled,
             // 通用模式：选组/创建组
@@ -219,22 +217,8 @@ function createRequestHandlers(GROUP_ID) {
             if (val instanceof Date) return val.getTime()
             return new Date(val).getTime()
         }
-        let notice = groupData.notice || ''
-        let noticeUpdatedAt = getTs(groupData.noticeUpdatedAt)
-
-        // 停止接单时间懒触发：北京时间已过截止时间且今天未发过，自动写群通知（幂等，任何成员调用都会触发）；已禁用则跳过
         const cutoff = groupData.orderCutoff || '10:00'
         const cutoffDisabled = !!groupData.cutoffDisabled
-        const bj = new Date(Date.now() + 8 * 3600 * 1000)
-        const today = `${bj.getUTCFullYear()}-${String(bj.getUTCMonth() + 1).padStart(2, '0')}-${String(bj.getUTCDate()).padStart(2, '0')}`
-        const hhmm = `${String(bj.getUTCHours()).padStart(2, '0')}:${String(bj.getUTCMinutes()).padStart(2, '0')}`
-        if (!cutoffDisabled && groupData.cutoffNoticeDate !== today && hhmm >= cutoff) {
-            notice = `每天${cutoff}停止接单，有需要请电话联系`
-            await db.collection(COL.GROUPS).doc(GROUP_ID).update({
-                data: { notice, noticeUpdatedAt: db.serverDate(), cutoffNoticeDate: today }
-            }).catch(() => { })
-            noticeUpdatedAt = Date.now()
-        }
 
         return {
             code: 0,
@@ -242,8 +226,6 @@ function createRequestHandlers(GROUP_ID) {
                 recentTimestamp: getTs(groupData.ordersTimestamp),
                 menuTimestamp: getTs(groupData.menuTimestamp),
                 membersTimestamp: getTs(groupData.membersTimestamp),
-                notice,
-                noticeUpdatedAt,
                 orderCutoff: cutoff,
                 cutoffDisabled,
             },
@@ -1081,42 +1063,6 @@ function createRequestHandlers(GROUP_ID) {
         }
     }
 
-    async function setNotice(event, openid) {
-        const { content } = event
-        if (!content || !content.trim()) return { code: 400, msg: '通知内容不能为空' }
-
-        const member = await getMemberByOpenid(openid)
-        if (!checkRole(member, ROLE.CREATOR, ROLE.ADMIN)) {
-            return { code: 403, msg: '无权限' }
-        }
-
-        const now = db.serverDate()
-        await db.collection(COL.GROUPS).doc(GROUP_ID).update({
-            data: {
-                notice: content.trim(),
-                noticeUpdatedAt: now,
-            }
-        })
-
-        return { code: 0, data: { notice: content.trim() } }
-    }
-
-    async function clearNotice(event, openid) {
-        const member = await getMemberByOpenid(openid)
-        if (!checkRole(member, ROLE.CREATOR, ROLE.ADMIN)) {
-            return { code: 403, msg: '无权限' }
-        }
-
-        await db.collection(COL.GROUPS).doc(GROUP_ID).update({
-            data: {
-                notice: '',
-                noticeUpdatedAt: db.serverDate(),
-            }
-        })
-
-        return { code: 0 }
-    }
-
     async function setOrderCutoff(event, openid) {
         const { time } = event
         if (!/^\d{2}:\d{2}$/.test(time || '')) {
@@ -1149,13 +1095,7 @@ function createRequestHandlers(GROUP_ID) {
             return { code: 403, msg: '无权限' }
         }
 
-        const data = { cutoffDisabled: disabled }
-        // 禁用时清掉当天已自动发出的停止接单通知，横幅实时消失
-        if (disabled) {
-            data.notice = ''
-            data.noticeUpdatedAt = db.serverDate()
-        }
-        await db.collection(COL.GROUPS).doc(GROUP_ID).update({ data })
+        await db.collection(COL.GROUPS).doc(GROUP_ID).update({ data: { cutoffDisabled: disabled } })
 
         return { code: 0, data: { cutoffDisabled: disabled } }
     }
