@@ -67,6 +67,7 @@ import { ref, onMounted } from 'vue'
 import { useStore, setStore, setActiveGroupId, clearAllCache, resetStore, saveSession } from '@/services/store'
 import { menuAction } from '@/services/repositories/baseRepository'
 import { resetInit, startInit } from '@/services/appInit'
+import { clearFreshnessCache } from '@/services/freshness'
 
 const store = useStore()
 const joinedGroups = ref<any[]>([])
@@ -174,6 +175,7 @@ async function onCreate() {
 
 // 切换到目标组：清缓存 → 设新组ID → 重新初始化 → joinGroup 获取 member → 保存 session
 async function switchToGroup(targetGroupId: string, targetGroupName?: string) {
+  clearFreshnessCache()
   clearAllCache()
   resetStore()
   setActiveGroupId(targetGroupId)

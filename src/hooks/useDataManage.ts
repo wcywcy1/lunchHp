@@ -3,6 +3,7 @@ import { onShow, onHide } from '@dcloudio/uni-app'
 import { useStore, saveSession, setCache, setRecentLoadTime, resetStore, clearAllCache, setActiveGroupId, getActiveGroupId, setStore, flushCache } from '../services/store'
 import { menuAction, orderAction, backupAction } from '../services/repositories/baseRepository'
 import { resetInit, startInit, isInitRunning } from '../services/appInit'
+import { clearFreshnessCache } from '../services/freshness'
 import { ORDER_STATUS, ROLE } from '../constants/orderStatus'
 import { CACHE_KEYS } from '../constants/cacheConfig'
 import { useRealtimeWatch } from './useRealtimeWatch'
@@ -100,6 +101,29 @@ export function useDataManage() {
     async function loadData() {
         loading.value = true
         try {
+            const [res, tsRes] = await Promise.all([
+                orderAction('getRecentOrders'),
+                menuAction('getDataTimestamps'),
+            ])
+            if (res.result.code === 0) {
+                const orders = res.result.data || []
+                const today = getTodayString()
+                const todayOrders = orders.filter((o: any) => o.date === today)
+                pendingOrders.value = todayOrders.filter((o: any) => o.status === ORDER_STATUS.PENDING)
+                confirmedOrders.value = todayOrders.filter((o: any) => o.status === ORDER_STATUS.CONFIRMED)
+            }
+            if (tsRes.result.code === 0) {
+                setStore({ groupCutoff: tsRes.result.data.orderCutoff || '10:00', cutoffDisabled: !!tsRes.result.data.cutoffDisabled })
+            }
+        } catch (e) {
+            console.error('loadData error:', e)
+        } finally {
+            loading.value = false
+        }
+    }
+
+    async function loadOrdersOnly() {
+        try {
             const res = await orderAction('getRecentOrders')
             if (res.result.code === 0) {
                 const orders = res.result.data || []
@@ -108,14 +132,8 @@ export function useDataManage() {
                 pendingOrders.value = todayOrders.filter((o: any) => o.status === ORDER_STATUS.PENDING)
                 confirmedOrders.value = todayOrders.filter((o: any) => o.status === ORDER_STATUS.CONFIRMED)
             }
-            const tsRes = await menuAction('getDataTimestamps')
-            if (tsRes.result.code === 0) {
-                setStore({ groupCutoff: tsRes.result.data.orderCutoff || '10:00', cutoffDisabled: !!tsRes.result.data.cutoffDisabled })
-            }
         } catch (e) {
-            console.error('loadData error:', e)
-        } finally {
-            loading.value = false
+            console.error('loadOrdersOnly error:', e)
         }
     }
 
@@ -1248,6 +1266,7 @@ export function useDataManage() {
                 uni.showToast({ title: res?.result?.msg || '删除失败', icon: 'none' })
                 return
             }
+            clearFreshnessCache()
             clearAllCache()
             resetStore()
             uni.showToast({ title: '组织已删除', icon: 'success' })
@@ -1283,6 +1302,7 @@ export function useDataManage() {
         store.isSwitchingGroup = true
         try {
             realtime.closeAll()
+            clearFreshnessCache()
             clearAllCache()
             resetStore()
             setActiveGroupId(target)
@@ -1475,14 +1495,21 @@ export function useDataManage() {
         }
     }
 
+    let _watchDebounceTimer: any = null
+
     function startRealtimeWatch() {
         realtime.watchTodayOrders((snapshot: any) => {
             if (snapshot.type === 'init') return
-            loadData()
+            if (_watchDebounceTimer) clearTimeout(_watchDebounceTimer)
+            _watchDebounceTimer = setTimeout(() => {
+                _watchDebounceTimer = null
+                loadOrdersOnly()
+            }, 400)
         })
     }
 
     function stopRealtimeWatch() {
+        if (_watchDebounceTimer) { clearTimeout(_watchDebounceTimer); _watchDebounceTimer = null }
         realtime.closeAll()
     }
 
