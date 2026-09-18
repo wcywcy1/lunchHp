@@ -5,25 +5,78 @@ import { GROUP_ID, ACTIVE_GROUP_ID_KEY } from '../constants/appConfig'
 // 模块级标志位：点餐成功后置 true，供餐单页 onShow 检测并清空筛选（放 store 避免 store→useOrder 循环依赖）
 export const orderJustSucceeded = ref(false)
 
+// Store 核心业务类型（各页面共享，字段尽量全但带索引签名兼容云函数扩展字段）
+export interface CoreMember {
+    _id: string
+    openid?: string
+    groupId: string
+    name: string
+    nickName?: string
+    role: string
+    isVirtual?: boolean
+    privacyAgreed?: boolean
+    joinedAt?: number
+    lastOrderedAt?: number
+    [key: string]: any
+}
+
+export interface CoreMenuItem {
+    _id: string
+    supplier: string
+    name: string
+    price: number
+    visible?: boolean
+    sortNo?: number
+    orderCount?: number
+    lastOrderedAt?: number
+    [key: string]: any
+}
+
+export interface CoreOrder {
+    _id: string
+    groupId: string
+    memberId: string
+    memberName: string
+    menuId: string
+    menuName: string
+    supplier: string
+    price: number
+    date: string
+    status: string
+    note?: string
+    cancelRequested?: boolean
+    cancelRejected?: boolean
+    updatedAt?: number
+    [key: string]: any
+}
+
+export interface MonthSummary {
+    totalAmount: number
+    orderCount: number
+    orderByMember?: Record<string, number>
+    orderBySupplier?: Record<string, number>
+    [key: string]: any
+}
+
 interface JoinedGroup {
     groupId: string
     groupName: string
     role: string
-    joinedAt: any
+    joinedAt?: number
 }
 
 interface StoreState {
-    member: any
+    member: CoreMember | null
     role: string | null
     groupId: string | null
     groupName: string
-    menu: any[]
-    members: any[]
-    recentOrders: any[]
-    monthSummary: any
-    recentTimestamp: any
-    menuTimestamp: any
-    membersTimestamp: any
+    menu: CoreMenuItem[]
+    members: CoreMember[]
+    recentOrders: CoreOrder[]
+    monthSummary: MonthSummary | null
+    recentTimestamp: number | null
+    menuTimestamp: number | null
+    membersTimestamp: number | null
     initialized: boolean
     joinedGroups: JoinedGroup[]
     isSwitchingGroup: boolean

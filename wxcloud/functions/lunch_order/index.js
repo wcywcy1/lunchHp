@@ -303,7 +303,7 @@ function createRequestHandlers(GROUP_ID) {
                     currentMember = { ...newMember, _id: addRes._id }
                     membersResult.data.push(currentMember)
                     isNew = true
-                    await _touchMenuAndMembersTimestamp()
+                    await _touchTimestamps({ menuTimestamp: true, membersTimestamp: true })
                 }
             }
         } catch (e) {
@@ -432,98 +432,23 @@ function createRequestHandlers(GROUP_ID) {
         return { code: 0, data: monthSummary }
     }
 
-    async function _updateDataTimestamp() {
+    async function _touchTimestamps(fields) {
         const now = db.serverDate()
         const existing = await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => null)
+        const data = {}
+        for (const [field, val] of Object.entries(fields)) {
+            data[field] = val === 0 ? 0 : (val === true ? now : val)
+        }
         if (existing && existing.data) {
-            await db.collection(COL.GROUPS).doc(GROUP_ID).update({
-                data: { dataTimestamp: now },
-            })
+            await db.collection(COL.GROUPS).doc(GROUP_ID).update({ data })
         } else {
-            await db.collection(COL.GROUPS).add({
-                data: { _id: GROUP_ID, dataTimestamp: now, createdAt: now },
-            })
+            data._id = GROUP_ID
+            data.createdAt = now
+            await db.collection(COL.GROUPS).add({ data })
         }
     }
 
-    async function _updateOrdersTimestamp() {
-        const now = db.serverDate()
-        const existing = await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => null)
-        if (existing && existing.data) {
-            await db.collection(COL.GROUPS).doc(GROUP_ID).update({
-                data: { ordersTimestamp: now },
-            })
-        } else {
-            await db.collection(COL.GROUPS).add({
-                data: { _id: GROUP_ID, ordersTimestamp: now, createdAt: now },
-            })
-        }
-    }
 
-    async function _touchOrderAndDataTimestamps() {
-        const now = db.serverDate()
-        const existing = await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => null)
-        if (existing && existing.data) {
-            await db.collection(COL.GROUPS).doc(GROUP_ID).update({
-                data: { ordersTimestamp: now, dataTimestamp: now },
-            })
-        } else {
-            await db.collection(COL.GROUPS).add({
-                data: { _id: GROUP_ID, ordersTimestamp: now, dataTimestamp: now, createdAt: now },
-            })
-        }
-    }
-
-    async function _resetDataTimestamp() {
-        const existing = await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => null)
-        if (existing && existing.data) {
-            await db.collection(COL.GROUPS).doc(GROUP_ID).update({
-                data: { dataTimestamp: 0 },
-            })
-        }
-    }
-
-    // 触发菜单与成员的时间戳，前端 checkFreshness 感知后刷新排序
-    async function _touchMenuAndMembersTimestamp() {
-        const now = db.serverDate()
-        const existing = await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => null)
-        if (existing && existing.data) {
-            await db.collection(COL.GROUPS).doc(GROUP_ID).update({
-                data: { menuTimestamp: now, membersTimestamp: now },
-            })
-        } else {
-            await db.collection(COL.GROUPS).add({
-                data: { _id: GROUP_ID, menuTimestamp: now, membersTimestamp: now, createdAt: now },
-            })
-        }
-    }
-
-    // 一次性更新 orders/data/menu/members 四个时间戳，替代分散的多次 get+update
-    async function _touchAllTimestamps() {
-        const now = db.serverDate()
-        const existing = await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => null)
-        if (existing && existing.data) {
-            await db.collection(COL.GROUPS).doc(GROUP_ID).update({
-                data: {
-                    ordersTimestamp: now,
-                    dataTimestamp: now,
-                    menuTimestamp: now,
-                    membersTimestamp: now,
-                },
-            })
-        } else {
-            await db.collection(COL.GROUPS).add({
-                data: {
-                    _id: GROUP_ID,
-                    ordersTimestamp: now,
-                    dataTimestamp: now,
-                    menuTimestamp: now,
-                    membersTimestamp: now,
-                    createdAt: now,
-                },
-            })
-        }
-    }
 
     // 合并大众点餐统计（orderCount/lastOrderedAt）到 menu
     // orderCount/lastOrderedAt 由 submitOrder 时 _.inc(1) 维护到 menu 文档自身，无需 aggregate 全量订单
@@ -596,7 +521,7 @@ function createRequestHandlers(GROUP_ID) {
         for (const ym of months) {
             try { await doRebuildMonthStats(ym) } catch (e) { console.error('rebuild month stats error:', e) }
         }
-        await _touchOrderAndDataTimestamps()
+        await _touchTimestamps({ ordersTimestamp: true, dataTimestamp: true })
         return { cancelled: expired.length }
     }
 
@@ -692,7 +617,7 @@ function createRequestHandlers(GROUP_ID) {
                 ? _upsertUserStat(callerMemberId, menuId, now).catch(e => console.error('upsert user stat error:', e))
                 : Promise.resolve(),
         ])
-        await _touchAllTimestamps()
+        await _touchTimestamps({ ordersTimestamp: true, dataTimestamp: true, menuTimestamp: true, membersTimestamp: true })
         const [menuDoc, memberDoc] = await Promise.all([
             db.collection(COL.MENU).doc(menuId).get().catch(() => null),
             db.collection(COL.MEMBERS).doc(memberId).get().catch(() => null),
@@ -734,7 +659,7 @@ function createRequestHandlers(GROUP_ID) {
         for (const month of months) {
             await doRebuildMonthStats(month)
         }
-        await _touchOrderAndDataTimestamps()
+        await _touchTimestamps({ ordersTimestamp: true, dataTimestamp: true })
 
         return { code: 0, data: results }
     }
@@ -752,12 +677,12 @@ function createRequestHandlers(GROUP_ID) {
         const updateRes = await db.collection(COL.ORDERS)
             .where({ _id: orderId, groupId: GROUP_ID, status: _.neq(STATUS.CANCELLED) })
             .update({
-            data: { status: STATUS.CANCELLED, cancelRequested: false, cancelRejected: false, updatedAt: db.serverDate() },
-        })
+                data: { status: STATUS.CANCELLED, cancelRequested: false, cancelRejected: false, updatedAt: db.serverDate() },
+            })
         if (!updateRes.stats || updateRes.stats.updated !== 1) return { code: 409, msg: 'order status changed, please refresh' }
 
         await doRebuildMonthStats(order.date.substring(0, 7))
-        await _touchOrderAndDataTimestamps()
+        await _touchTimestamps({ ordersTimestamp: true, dataTimestamp: true })
         return { code: 0 }
     }
 
@@ -796,7 +721,7 @@ function createRequestHandlers(GROUP_ID) {
         }
 
         // 4. Only order/stat consumers need invalidation.
-        await _touchOrderAndDataTimestamps()
+        await _touchTimestamps({ ordersTimestamp: true, dataTimestamp: true })
 
         return { code: 0, data: { cancelled: orders.length } }
     }
@@ -818,10 +743,10 @@ function createRequestHandlers(GROUP_ID) {
         const updateRes = await db.collection(COL.ORDERS)
             .where({ _id: orderId, groupId: GROUP_ID, memberId: caller._id, status: STATUS.CONFIRMED, cancelRequested: _.neq(true) })
             .update({
-            data: { cancelRequested: true, cancelRejected: false, updatedAt: db.serverDate() },
-        })
+                data: { cancelRequested: true, cancelRejected: false, updatedAt: db.serverDate() },
+            })
         if (!updateRes.stats || updateRes.stats.updated !== 1) return { code: 409, msg: 'order status changed, please refresh' }
-        await _updateOrdersTimestamp()
+        await _touchTimestamps({ ordersTimestamp: true })
         return { code: 0 }
     }
 
@@ -841,10 +766,10 @@ function createRequestHandlers(GROUP_ID) {
         const updateRes = await db.collection(COL.ORDERS)
             .where({ _id: orderId, groupId: GROUP_ID, memberId: caller._id, status: STATUS.PENDING })
             .update({
-            data: { status: STATUS.CANCELLED, updatedAt: db.serverDate() },
-        })
+                data: { status: STATUS.CANCELLED, updatedAt: db.serverDate() },
+            })
         if (!updateRes.stats || updateRes.stats.updated !== 1) return { code: 409, msg: 'order status changed, please refresh' }
-        await _updateOrdersTimestamp()
+        await _touchTimestamps({ ordersTimestamp: true })
         return { code: 0 }
     }
 
@@ -874,10 +799,10 @@ function createRequestHandlers(GROUP_ID) {
         const updateRes = await db.collection(COL.ORDERS)
             .where({ _id: orderId, groupId: GROUP_ID, status: STATUS.CONFIRMED, cancelRequested: true })
             .update({
-            data: { cancelRequested: false, cancelRejected: true, updatedAt: db.serverDate() },
-        })
+                data: { cancelRequested: false, cancelRejected: true, updatedAt: db.serverDate() },
+            })
         if (!updateRes.stats || updateRes.stats.updated !== 1) return { code: 409, msg: 'cancel request is no longer pending' }
-        await _updateOrdersTimestamp()
+        await _touchTimestamps({ ordersTimestamp: true })
         return { code: 0 }
     }
 
@@ -904,9 +829,9 @@ function createRequestHandlers(GROUP_ID) {
 
         if (priceChanged && order) {
             await doRebuildMonthStats(order.date.substring(0, 7))
-            await _updateDataTimestamp()
+            await _touchTimestamps({ dataTimestamp: true })
         }
-        await _updateOrdersTimestamp()
+        await _touchTimestamps({ ordersTimestamp: true })
         return { code: 0 }
     }
 
@@ -944,11 +869,11 @@ function createRequestHandlers(GROUP_ID) {
 
         if (serverTs === 0) {
             // 立即占位，防止并发请求也触发 rebuild
-            await _updateDataTimestamp()
+            await _touchTimestamps({ dataTimestamp: true })
             try {
                 await doRebuildMonthStats(null)
             } catch (e) {
-                await _resetDataTimestamp()
+                await _touchTimestamps({ dataTimestamp: 0 })
                 throw e
             }
             const { data } = await db.collection(COL.MONTHLY_STATS)
@@ -1430,7 +1355,7 @@ function createRequestHandlers(GROUP_ID) {
         }
 
         await db.collection(COL.USER_STATS).where({ groupId: GROUP_ID }).remove()
-        await _updateOrdersTimestamp()
+        await _touchTimestamps({ ordersTimestamp: true })
 
         return {
             code: 0,
@@ -1861,9 +1786,9 @@ function createRequestHandlers(GROUP_ID) {
                 for (const yearMonth of affectedStatMonths) {
                     await doRebuildMonthStats(yearMonth)
                 }
-                await _touchAllTimestamps()
+                await _touchTimestamps({ ordersTimestamp: true, dataTimestamp: true, menuTimestamp: true, membersTimestamp: true })
             } else {
-                await _updateOrdersTimestamp()
+                await _touchTimestamps({ ordersTimestamp: true })
             }
         }
 
@@ -1932,7 +1857,7 @@ function createRequestHandlers(GROUP_ID) {
         if (idx.name_member === undefined) return { code: 400, msg: '需包含姓名列' }
         const members = rows.slice(1).map(cols => ({ name: cols[idx.name_member], nickName: idx.nickName !== undefined ? cols[idx.nickName] : '' }))
         const result = await require('./importMembers').importMembers(db, GROUP_ID, members, mode)
-        if (result.code === 0) await _touchMenuAndMembersTimestamp()
+        if (result.code === 0) await _touchTimestamps({ menuTimestamp: true, membersTimestamp: true })
         return result
     }
 

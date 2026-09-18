@@ -70,9 +70,11 @@ async function _doCheckFreshness(groupId: string) {
                         setStore({ members, membersTimestamp })
                         setCache(CACHE_KEYS.MEMBERS, members)
                         setCache(CACHE_KEYS.MEMBERS_TIMESTAMP, membersTimestamp)
-                        if (store.member?._id) {
-                            const me = members.find((m: any) => m._id === store.member._id)
-                            if (me && me.role !== store.member.role) {
+                        const meId = store.member?._id
+                        const myRole = store.member?.role
+                        if (meId) {
+                            const me = members.find((m: any) => m._id === meId)
+                            if (me && me.role !== myRole) {
                                 setStore({ member: me, role: me.role })
                                 saveSession({ groupId: me.groupId, role: me.role, member: me })
                             }

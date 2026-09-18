@@ -517,7 +517,7 @@ export function useDataManage() {
             await menuAction('updateMemberName', { memberId: editingMember.value._id, name })
             const member = store.members.find((m: any) => m._id === editingMember.value._id)
             if (member) member.name = name
-            if (store.member?._id === editingMember.value._id) {
+            if (store.member && store.member._id === editingMember.value._id) {
                 store.member.name = name
                 saveSession({ groupId: store.member.groupId, role: store.member.role, member: store.member })
             }
