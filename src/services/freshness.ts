@@ -1,6 +1,7 @@
 import { useStore, setStore, setCache, saveSession } from './store'
 import { menuAction } from './repositories/baseRepository'
 import { CACHE_KEYS } from '../constants/cacheConfig'
+import { GroupRequestCache } from './groupRequestCache'
 
 export function toMs(val: any): number | null {
     if (!val) return null
@@ -10,12 +11,10 @@ export function toMs(val: any): number | null {
 }
 
 const FRESHNESS_CACHE_TTL = 5 * 1000
-let _freshnessCache: { groupId: string; ts: number; result: any } | null = null
-let _freshnessPromise: Promise<any> | null = null
+const freshnessRequests = new GroupRequestCache<any>(FRESHNESS_CACHE_TTL)
 
 export function clearFreshnessCache() {
-    _freshnessCache = null
-    _freshnessPromise = null
+    freshnessRequests.clear()
 }
 
 /**
@@ -29,29 +28,22 @@ export async function checkDataFreshness() {
     const store = useStore()
     const groupId = store.groupId || ''
 
-    if (_freshnessCache && _freshnessCache.groupId === groupId && Date.now() - _freshnessCache.ts < FRESHNESS_CACHE_TTL) {
-        return _freshnessCache.result
-    }
-
-    if (_freshnessPromise) return _freshnessPromise
-
-    _freshnessPromise = _doCheckFreshness(groupId).finally(() => { _freshnessPromise = null })
-    return _freshnessPromise
+    return freshnessRequests.getOrLoad(groupId, () => _doCheckFreshness(groupId))
 }
 
 async function _doCheckFreshness(groupId: string) {
     const store = useStore()
     try {
-        const res = await menuAction('getDataTimestamps')
+        const res = await menuAction('getDataTimestamps', { groupId })
         if (res.result.code !== 0) return null
-        const { recentTimestamp, menuTimestamp, membersTimestamp, notice, noticeUpdatedAt, orderCutoff, cutoffDisabled } = res.result.data
+        const { recentTimestamp, menuTimestamp, membersTimestamp, orderCutoff, cutoffDisabled } = res.result.data
         setStore({ groupCutoff: orderCutoff || '10:00', cutoffDisabled: !!cutoffDisabled })
 
         const tasks: Promise<void>[] = []
         if (toMs(menuTimestamp) !== toMs(store.menuTimestamp)) {
             tasks.push((async () => {
                 try {
-                    const menuRes = await menuAction('getMenuList')
+                    const menuRes = await menuAction('getMenuList', { groupId })
                     if (menuRes.result.code === 0) {
                         const menu = menuRes.result.data
                         setStore({ menu, menuTimestamp })
@@ -64,7 +56,7 @@ async function _doCheckFreshness(groupId: string) {
         if (toMs(membersTimestamp) !== toMs(store.membersTimestamp)) {
             tasks.push((async () => {
                 try {
-                    const membersRes = await menuAction('getMembers')
+                    const membersRes = await menuAction('getMembers', { groupId })
                     if (membersRes.result.code === 0) {
                         const members = membersRes.result.data
                         setStore({ members, membersTimestamp })
@@ -84,8 +76,7 @@ async function _doCheckFreshness(groupId: string) {
             })())
         }
         await Promise.all(tasks)
-        const result = { recentTimestamp, menuTimestamp, membersTimestamp, notice, noticeUpdatedAt, orderCutoff, cutoffDisabled }
-        _freshnessCache = { groupId, ts: Date.now(), result }
+        const result = { recentTimestamp, menuTimestamp, membersTimestamp, orderCutoff, cutoffDisabled }
         return result
     } catch (e) {
         console.error('checkDataFreshness error:', e)

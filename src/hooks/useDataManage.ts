@@ -9,6 +9,8 @@ import { CACHE_KEYS } from '../constants/cacheConfig'
 import { useRealtimeWatch } from './useRealtimeWatch'
 import { buildCsvLine, writeCsvWithBom, shareOrSaveFile, isPcPlatform, chooseFile } from '../utils/csv'
 import { getTodayString } from '../utils/date'
+import { loadAdminData } from '../services/adminDataLoader'
+import { createDebouncedTask } from '../utils/debouncedTask'
 
 export function useDataManage() {
     const MAX_BATCH_COUNT = 2000
@@ -101,20 +103,22 @@ export function useDataManage() {
     async function loadData() {
         loading.value = true
         try {
-            const [res, tsRes] = await Promise.all([
-                orderAction('getRecentOrders'),
-                menuAction('getDataTimestamps'),
-            ])
-            if (res.result.code === 0) {
+            const { orders: res, timestamps: tsRes, ordersError, timestampsError } = await loadAdminData(
+                () => orderAction('getRecentOrders'),
+                () => menuAction('getDataTimestamps'),
+            )
+            if (res?.result.code === 0) {
                 const orders = res.result.data || []
                 const today = getTodayString()
                 const todayOrders = orders.filter((o: any) => o.date === today)
                 pendingOrders.value = todayOrders.filter((o: any) => o.status === ORDER_STATUS.PENDING)
                 confirmedOrders.value = todayOrders.filter((o: any) => o.status === ORDER_STATUS.CONFIRMED)
             }
-            if (tsRes.result.code === 0) {
+            if (tsRes?.result.code === 0) {
                 setStore({ groupCutoff: tsRes.result.data.orderCutoff || '10:00', cutoffDisabled: !!tsRes.result.data.cutoffDisabled })
             }
+            if (ordersError) console.error('loadData orders error:', ordersError)
+            if (timestampsError) console.error('loadData timestamps error:', timestampsError)
         } catch (e) {
             console.error('loadData error:', e)
         } finally {
@@ -1159,6 +1163,7 @@ export function useDataManage() {
             showBackupDialog.value = false
             flushCache()
             clearAllCache()
+            clearFreshnessCache()
             setStore({ statsLoadTime: 0, recentLoadTime: 0 })
             try {
                 const init = await orderAction('getInitData')
@@ -1495,21 +1500,17 @@ export function useDataManage() {
         }
     }
 
-    let _watchDebounceTimer: any = null
+    const watchRefresh = createDebouncedTask(() => { void loadOrdersOnly() }, 400)
 
     function startRealtimeWatch() {
         realtime.watchTodayOrders((snapshot: any) => {
             if (snapshot.type === 'init') return
-            if (_watchDebounceTimer) clearTimeout(_watchDebounceTimer)
-            _watchDebounceTimer = setTimeout(() => {
-                _watchDebounceTimer = null
-                loadOrdersOnly()
-            }, 400)
+            watchRefresh.schedule()
         })
     }
 
     function stopRealtimeWatch() {
-        if (_watchDebounceTimer) { clearTimeout(_watchDebounceTimer); _watchDebounceTimer = null }
+        watchRefresh.cancel()
         realtime.closeAll()
     }
 

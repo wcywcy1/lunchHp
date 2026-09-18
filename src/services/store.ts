@@ -52,7 +52,8 @@ export interface CoreOrder {
 
 export interface MonthSummary {
     totalAmount: number
-    orderCount: number
+    count: number
+    yearMonth?: string
     orderByMember?: Record<string, number>
     orderBySupplier?: Record<string, number>
     [key: string]: any
