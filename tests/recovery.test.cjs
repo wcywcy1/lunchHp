@@ -147,3 +147,43 @@ test('清空数据后刷新时间戳，其他端能感知菜单/成员/订单变
     assert.ok(group.membersTimestamp instanceof Date)
     assert.equal(group.dataTimestamp, 0)
 })
+
+test('删除组织级联清理专属数据与文件，其他组织共用的头像保留', async () => {
+    const h = harness()
+    const backupFile = 'cloud://test/lunch/backups/c/bk.json'
+    const uniqueAvatar = 'cloud://test/lunch/avatar_c1_1.jpg'
+    const sharedAvatar = 'cloud://test/lunch/avatar_shared.jpg'
+    h.files.set(backupFile, Buffer.from('{}'))
+    h.files.set(uniqueAvatar, Buffer.from('a'))
+    h.files.set(sharedAvatar, Buffer.from('a'))
+
+    h.seed('lunch_groups', [{ _id: 'c', creatorId: 'owner-c' }])
+    h.seed('lunch_members', [
+        { _id: 'c-owner', groupId: 'c', openid: 'owner-c', role: 'creator', name: 'C创建者', isVirtual: false, avatar: uniqueAvatar },
+        { _id: 'c-other', groupId: 'c', openid: '', role: 'member', name: 'C成员', isVirtual: true, avatar: sharedAvatar },
+        { _id: 'b-user', groupId: 'b', openid: 'b-user', role: 'member', name: 'B成员', isVirtual: false, avatar: sharedAvatar },
+    ])
+    h.seed('lunch_orders', [{ _id: 'c-order', groupId: 'c', memberId: 'c-other', menuId: 'c-dish', date: '2026-09-16', status: 'pending', price: 10 }])
+    h.seed('lunch_menu', [{ _id: 'c-dish', groupId: 'c', name: 'C菜', supplier: 'C店', price: 10 }])
+    h.seed('lunch_monthly_stats', [{ _id: 'c_2026_9', groupId: 'c', year: 2026, month: 9, totalAmount: 10, orderCount: 1 }])
+    h.seed('lunch_user_menu_stats', [{ _id: 'c_stats', groupId: 'c', memberId: 'c-other', menuId: 'c-dish', count: 1 }])
+    h.seed('lunch_backups', [{ _id: 'bk-c', groupId: 'c', type: 'manual', fileID: backupFile, createdAt: new Date('2026-09-16T01:00:00Z') }])
+    h.seed('lunch_order_keys', [{ _id: 'key-c', groupId: 'c', orderId: '' }])
+
+    const result = await h.invoke('lunch_menu', { action: 'deleteGroup', groupId: 'c' }, 'owner-c')
+    assert.equal(result.code, 0, result.msg)
+
+    assert.equal(h.rows('lunch_groups').some(row => row._id === 'c'), false)
+    assert.equal(h.rows('lunch_orders').filter(row => row.groupId === 'c').length, 0)
+    assert.equal(h.rows('lunch_menu').filter(row => row.groupId === 'c').length, 0)
+    assert.equal(h.rows('lunch_members').filter(row => row.groupId === 'c').length, 0)
+    assert.equal(h.rows('lunch_monthly_stats').filter(row => row.groupId === 'c').length, 0)
+    assert.equal(h.rows('lunch_user_menu_stats').filter(row => row.groupId === 'c').length, 0)
+    assert.equal(h.rows('lunch_backups').filter(row => row.groupId === 'c').length, 0)
+    assert.equal(h.rows('lunch_order_keys').filter(row => row.groupId === 'c').length, 0)
+
+    assert.equal(h.files.has(backupFile), false)
+    assert.equal(h.files.has(uniqueAvatar), false)
+    assert.ok(h.files.has(sharedAvatar))
+    assert.equal(h.rows('lunch_members').find(row => row._id === 'b-user').avatar, sharedAvatar)
+})

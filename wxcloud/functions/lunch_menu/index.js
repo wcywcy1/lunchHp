@@ -380,9 +380,20 @@ function createRequestHandlers(GROUP_ID) {
         }
     }
 
+    // 删除组织：业务数据 + 组织专属备份/下单锁，以及确认无其他组织引用的头像文件
     async function deleteGroup(event, openid) {
         const caller = await getMemberByOpenid(openid)
         if (!checkRole(caller, ROLE.CREATOR)) return { code: 403, msg: 'only creator can delete group' }
+
+        // 删除前收集组织专属文件：备份 JSON 与成员头像
+        const [backups, members] = await Promise.all([
+            fetchAll(db.collection('lunch_backups'), { groupId: GROUP_ID }),
+            fetchAll(db.collection(COL.MEMBERS), { groupId: GROUP_ID }),
+        ])
+        const backupFiles = backups.map(bk => bk.fileID).filter(Boolean)
+        const avatarFiles = [...new Set(members
+            .map(m => m.avatar)
+            .filter(file => typeof file === 'string' && file.startsWith('cloud://')))]
 
         // 彻底清除本组织全部数据
         await db.collection(COL.ORDERS).where({ groupId: GROUP_ID }).remove()
@@ -391,6 +402,27 @@ function createRequestHandlers(GROUP_ID) {
         await db.collection(COL.USER_STATS).where({ groupId: GROUP_ID }).remove()
         try { await db.collection('lunch_monthly_stats').where({ groupId: GROUP_ID }).remove() } catch (e) { console.warn('clear monthly_stats error:', e.message) }
         try { await db.collection(COL.AUDIT_LOGS).where({ groupId: GROUP_ID }).remove() } catch (e) { console.warn('clear audit_logs error:', e.message) }
+        try { await db.collection('lunch_backups').where({ groupId: GROUP_ID }).remove() } catch (e) { console.warn('clear backups error:', e.message) }
+        try { await db.collection('lunch_order_keys').where({ groupId: GROUP_ID }).remove() } catch (e) { console.warn('clear order_keys error:', e.message) }
+
+        // 头像可能仍被其他组织/用户引用（如同时属于两个组织），仅删除无引用的文件
+        let referencedAvatars = new Set()
+        if (avatarFiles.length > 0) {
+            const holders = await fetchAll(db.collection(COL.MEMBERS), { avatar: _.in(avatarFiles) })
+            referencedAvatars = new Set(holders.map(m => m.avatar))
+        }
+        const filesToDelete = [...new Set([
+            ...backupFiles,
+            ...avatarFiles.filter(file => !referencedAvatars.has(file)),
+        ])]
+        for (let i = 0; i < filesToDelete.length; i += 50) {
+            try {
+                await cloud.deleteFile({ fileList: filesToDelete.slice(i, i + 50) })
+            } catch (e) {
+                console.warn('clear group files error:', e.message)
+            }
+        }
+
         await db.collection(COL.GROUPS).doc(GROUP_ID).remove()
 
         return { code: 0 }

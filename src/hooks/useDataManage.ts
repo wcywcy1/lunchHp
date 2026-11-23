@@ -1,6 +1,6 @@
 import { ref, computed } from 'vue'
 import { onShow, onHide } from '@dcloudio/uni-app'
-import { useStore, saveSession, setCache, setRecentLoadTime, resetStore, clearAllCache, setActiveGroupId, getActiveGroupId, setStore, flushCache } from '../services/store'
+import { useStore, saveSession, setCache, setRecentLoadTime, setStatsLoadTime, resetStore, clearAllCache, setActiveGroupId, getActiveGroupId, setStore, flushCache } from '../services/store'
 import { menuAction, orderAction, backupAction } from '../services/repositories/baseRepository'
 import { resetInit, startInit, isInitRunning } from '../services/appInit'
 import { clearFreshnessCache } from '../services/freshness'
@@ -1244,6 +1244,10 @@ export function useDataManage() {
             store.recentOrders = []
             pendingOrders.value = []
             confirmedOrders.value = []
+            // 复用现有缓存机制：清掉本机统计缓存并让统计页下次按原流程重新加载
+            setStatsLoadTime(0)
+            setCache(CACHE_KEYS.MONTHLY_STATS, [], true)
+            setCache(CACHE_KEYS.MONTHLY_STATS_TIME, 0, true)
             uni.showToast({ title: '数据已清除', icon: 'success' })
         } catch (e: any) {
             uni.showToast({ title: e.message || '操作失败', icon: 'none' })
