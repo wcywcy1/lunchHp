@@ -1,7 +1,7 @@
 import { ref, computed } from 'vue'
 import { useStore, saveSession, setCache, setStatsLoadTime, resetStore, clearAllCache, getActiveGroupId, setStore, flushCache } from '../services/store'
 import { menuAction, orderAction, backupAction } from '../services/repositories/baseRepository'
-import { clearFreshnessCache } from '../services/freshness'
+import { clearFreshnessCache, toMs } from '../services/freshness'
 import { ORDER_STATUS, ROLE } from '../constants/orderStatus'
 import { CACHE_KEYS } from '../constants/cacheConfig'
 import { useRealtimeWatch } from './useRealtimeWatch'
@@ -117,6 +117,20 @@ export function useDataManage() {
             }
             if (tsRes?.result.code === 0) {
                 setStore({ groupCutoff: tsRes.result.data.orderCutoff || '10:00', cutoffDisabled: !!tsRes.result.data.cutoffDisabled })
+                const membersTimestamp = tsRes.result.data.membersTimestamp
+                if (toMs(membersTimestamp) !== toMs(store.membersTimestamp)) {
+                    try {
+                        const membersRes = await menuAction('getMembers')
+                        if (membersRes.result.code === 0) {
+                            store.members = membersRes.result.data || []
+                            setStore({ membersTimestamp })
+                            setCache(CACHE_KEYS.MEMBERS, store.members)
+                            setCache(CACHE_KEYS.MEMBERS_TIMESTAMP, membersTimestamp)
+                        }
+                    } catch (e) {
+                        console.error('loadData members error:', e)
+                    }
+                }
             }
             if (ordersError) console.error('loadData orders error:', ordersError)
             if (timestampsError) console.error('loadData timestamps error:', timestampsError)

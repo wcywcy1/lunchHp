@@ -601,6 +601,8 @@ function createRequestHandlers(GROUP_ID) {
 
             await vRef.update({ data: { ...mergeProfileFields(virtual, source, mode), mergeFromMemberId: sourceMemberId } })
             await sRef.remove()
+            // 立即通知所有客户端成员身份已变化，旧设备按 openid 解析到新 memberId
+            await tx.collection(COL.GROUPS).doc(GROUP_ID).update({ data: { membersTimestamp: db.serverDate() } })
         })
     }
 
