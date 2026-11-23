@@ -8,12 +8,6 @@ export const ACTIVE_GROUP_ID_KEY = 'lunch_active_group_id'
 
 export const CLOUD_ENV = 'cloud1-d0g9zww8h390b6f41'
 
-export const DB_PREFIX = 'lunch_'
-
-export const CLOUD_FUNC_PREFIX = 'lunch_'
-
-export const STORAGE_PREFIX = 'lunch_'
-
 export const CLOUD_STORAGE_PATH = 'lunch/'
 
 export const COLLECTIONS = {

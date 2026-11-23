@@ -211,7 +211,8 @@ export function useStats(): StatsReturn {
             if (!forceRefresh) {
                 const cachedTime = getCache(CACHE_KEYS.MONTHLY_STATS_TIME, true) || 0
                 const oneHourAgo = Date.now() - 60 * 60 * 1000
-                if (cachedTime > 0 && cachedTime > oneHourAgo) params.since = cachedTime
+                // 冷启动时内存中还没有统计数据，带 since 只会拿到空增量，必须先全量加载
+                if (monthlyStats.value.length > 0 && cachedTime > 0 && cachedTime > oneHourAgo) params.since = cachedTime
             }
 
             const res = await orderAction('getMonthlyStats', params)

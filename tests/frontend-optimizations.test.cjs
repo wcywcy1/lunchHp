@@ -92,3 +92,51 @@ test('停止接单通知只在北京时间截止后至次日零点显示', () =>
     assert.equal(getCutoffNoticeState('10:00', false, midnight).content, '')
     assert.equal(getCutoffNoticeState('10:00', true, atCutoff).content, '')
 })
+
+test('统计页冷启动不带 since，避免空增量导致页面无数据', async () => {
+    const cachedStats = [{ _id: 's1', year: 2026, month: 9, totalAmount: 10, orderCount: 1, orderByMember: {}, orderBySupplier: {} }]
+    const storage = new Map()
+    storage.set('lunch_cache_monthly_stats', JSON.stringify({ data: cachedStats, ts: Date.now() }))
+    storage.set('lunch_cache_monthly_stats_time', JSON.stringify({ data: Date.now() - 60 * 1000, ts: Date.now() }))
+
+    const previousUni = global.uni
+    const previousWx = global.wx
+    let requestSince = 'not-called'
+    global.uni = {
+        getStorageSync: key => storage.get(key) || '',
+        setStorageSync: (key, value) => storage.set(key, value),
+        removeStorageSync: key => storage.delete(key),
+        showToast: () => {},
+    }
+    global.wx = {
+        cloud: {
+            callFunction: async ({ data }) => {
+                requestSince = data.since
+                if (data.since) {
+                    return { result: { code: 0, data: [], dataTimestamp: Date.now() - 60 * 1000, incremental: true } }
+                }
+                return { result: { code: 0, data: cachedStats, dataTimestamp: Date.now(), incremental: false } }
+            },
+        },
+    }
+
+    try {
+        const { useStats } = loadTypeScriptModule('src/hooks/useStats.ts')
+        const stats = useStats()
+        await stats.loadStats()
+        assert.equal(requestSince, undefined)
+        assert.equal(stats.monthlyStats.value.length, 1)
+    } finally {
+        // 等待 setCache 的 300ms 合并写入完成，再恢复全局对象
+        await new Promise(resolve => setTimeout(resolve, 350))
+        global.uni = previousUni
+        global.wx = previousWx
+    }
+})
+
+test('CSV 导出对 emoji 使用标准 UTF-8 编码', () => {
+    const { writeCsvWithBom } = loadTypeScriptModule('src/utils/csv.ts')
+    const chunks = []
+    writeCsvWithBom({ writeFileSync: (_path, buffer) => chunks.push(new Uint8Array(buffer)) }, 'x.csv', 'A\u{1F600}中')
+    assert.deepEqual(Array.from(chunks[0]), [0xEF, 0xBB, 0xBF, 0x41, 0xF0, 0x9F, 0x98, 0x80, 0xE4, 0xB8, 0xAD])
+})

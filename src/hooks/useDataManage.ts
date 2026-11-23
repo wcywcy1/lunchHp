@@ -1,8 +1,6 @@
 import { ref, computed } from 'vue'
-import { onShow, onHide } from '@dcloudio/uni-app'
-import { useStore, saveSession, setCache, setRecentLoadTime, setStatsLoadTime, resetStore, clearAllCache, setActiveGroupId, getActiveGroupId, setStore, flushCache } from '../services/store'
+import { useStore, saveSession, setCache, setStatsLoadTime, resetStore, clearAllCache, getActiveGroupId, setStore, flushCache } from '../services/store'
 import { menuAction, orderAction, backupAction } from '../services/repositories/baseRepository'
-import { resetInit, startInit, isInitRunning } from '../services/appInit'
 import { clearFreshnessCache } from '../services/freshness'
 import { ORDER_STATUS, ROLE } from '../constants/orderStatus'
 import { CACHE_KEYS } from '../constants/cacheConfig'
@@ -568,83 +566,6 @@ export function useDataManage() {
         }
     }
 
-    function parseCsvLine(line: string): string[] {
-        const result: string[] = []
-        let current = ''
-        let inQuotes = false
-        for (let i = 0; i < line.length; i++) {
-            const ch = line[i]
-            if (inQuotes) {
-                if (ch === '"') {
-                    if (i + 1 < line.length && line[i + 1] === '"') {
-                        current += '"'
-                        i++
-                    } else {
-                        inQuotes = false
-                    }
-                } else {
-                    current += ch
-                }
-            } else {
-                if (ch === '"') {
-                    inQuotes = true
-                } else if (ch === ',') {
-                    result.push(current)
-                    current = ''
-                } else {
-                    current += ch
-                }
-            }
-        }
-        result.push(current)
-        return result
-    }
-
-    function splitCsvLines(content: string): string[] {
-        const lines: string[] = []
-        let current = ''
-        let inQuotes = false
-        for (let i = 0; i < content.length; i++) {
-            const ch = content[i]
-            if (inQuotes) {
-                current += ch
-                if (ch === '"') {
-                    if (i + 1 < content.length && content[i + 1] === '"') {
-                        i++
-                    } else {
-                        inQuotes = false
-                    }
-                }
-            } else {
-                if (ch === '"') {
-                    inQuotes = true
-                    current += ch
-                } else if (ch === '\r' || ch === '\n') {
-                    if (ch === '\r' && i + 1 < content.length && content[i + 1] === '\n') {
-                        i++
-                    }
-                    if (current.trim()) lines.push(current)
-                    current = ''
-                } else {
-                    current += ch
-                }
-            }
-        }
-        if (current.trim()) lines.push(current)
-        return lines
-    }
-
-    async function parseXlsxViaCloud(filePath: string): Promise<string[][]> {
-        const cloudPath = 'lunch/imports/' + getActiveGroupId() + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 10) + '.xlsx'
-        const uploadRes = await wx.cloud.uploadFile({ cloudPath, filePath })
-        const parseRes = await menuAction('parseXlsx', { fileID: uploadRes.fileID })
-        if (parseRes.result.code !== 0) {
-            throw new Error(parseRes.result.msg || 'xlsx解析失败')
-        }
-        try { await wx.cloud.deleteFile({ fileList: [uploadRes.fileID] }) } catch (e) { }
-        return parseRes.result.data.rows
-    }
-
     async function doImportXlsx(filePath: string, importType: 'orders' | 'menu' | 'members') {
         const mode = await new Promise<'append' | 'rewrite' | ''>(resolve => {
             const typeLabel = importType === 'orders' ? '订单' : importType === 'menu' ? '菜单' : '人员'
@@ -710,27 +631,6 @@ export function useDataManage() {
             uni.hideLoading()
             uni.showToast({ title: e.message || '导入失败', icon: 'none', duration: 3000 })
         }
-    }
-
-    function parseDate(val: string | number | undefined): string {
-        if (!val) return ''
-        if (typeof val === 'number') {
-            const epoch = new Date(Date.UTC(1899, 11, 30))
-            const d = new Date(epoch.getTime() + val * 86400000)
-            return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
-        }
-        const str = String(val).trim()
-        let m = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/)
-        if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`
-        m = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/)
-        if (m) return `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`
-        // 2-digit year: M/D/YY → assume 20XX
-        m = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2})$/)
-        if (m) {
-            const yr = Number(m[3]) + 2000
-            return `${yr}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`
-        }
-        return ''
     }
 
     const HEADER_ALIASES: Record<string, string[]> = {
@@ -1290,55 +1190,6 @@ export function useDataManage() {
         }
     }
 
-    // 组织切换相关
-    const currentGroupId = computed(() => store.groupId || getActiveGroupId())
-    const switchingGroup = ref(false)
-    const targetGroupId = ref('')
-
-    async function switchGroup() {
-        const target = targetGroupId.value.trim()
-        if (!target) {
-            uni.showToast({ title: '请输入目标组ID', icon: 'none' })
-            return
-        }
-        if (target === currentGroupId.value) {
-            uni.showToast({ title: '已是当前组', icon: 'none' })
-            return
-        }
-        const { confirm } = await uni.showModal({
-            title: '切换组织',
-            content: `将切换到组织「${target}」，本地缓存会清空并重新初始化。确定？`,
-        })
-        if (!confirm) return
-        switchingGroup.value = true
-        store.isSwitchingGroup = true
-        try {
-            realtime.closeAll()
-            clearFreshnessCache()
-            clearAllCache()
-            resetStore()
-            setActiveGroupId(target)
-            resetInit()
-            await startInit()
-            const joinRes = await menuAction('joinGroup', { nickName: '', name: '' })
-            if (joinRes.result.code === 0) {
-                const { member } = joinRes.result.data
-                setStore({ member, role: member.role, groupId: target })
-                saveSession({ groupId: target, role: member.role, member })
-            }
-            targetGroupId.value = ''
-            uni.showToast({ title: '已切换组织', icon: 'success' })
-            setTimeout(() => {
-                uni.switchTab({ url: '/pages/home/index' })
-            }, 800)
-        } catch (e: any) {
-            uni.showToast({ title: e.message || '切换失败', icon: 'none' })
-        } finally {
-            switchingGroup.value = false
-            store.isSwitchingGroup = false
-        }
-    }
-
     const showMergeDialog = ref(false)
     const mergingMember = ref<any>(null)
     const mergeTargetId = ref('')
@@ -1665,9 +1516,5 @@ export function useDataManage() {
         openCutoffDialog,
         saveCutoff,
         toggleCutoffDisabled,
-        currentGroupId,
-        targetGroupId,
-        switchingGroup,
-        switchGroup,
     }
 }

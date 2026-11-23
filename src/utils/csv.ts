@@ -28,10 +28,10 @@ export function buildCsv(lines: string[]): string {
 /** 写入带 UTF-8 BOM 的 CSV 文件（微信小程序 FS API） */
 export function writeCsvWithBom(fs: any, path: string, content: string) {
     const bytes: number[] = [0xEF, 0xBB, 0xBF]
-    for (let i = 0; i < content.length; i++) {
-        let code = content.charCodeAt(i)
+    // 按码点遍历，避免 emoji 等非 BMP 字符被拆成两个代理项写成非法 UTF-8
+    for (const ch of content) {
+        let code = ch.codePointAt(0)!
         if (code >= 0x10000) {
-            code -= 0x10000
             bytes.push(0xF0 | (code >> 18), 0x80 | ((code >> 12) & 0x3F), 0x80 | ((code >> 6) & 0x3F), 0x80 | (code & 0x3F))
         } else if (code >= 0x800) {
             bytes.push(0xE0 | (code >> 12), 0x80 | ((code >> 6) & 0x3F), 0x80 | (code & 0x3F))
