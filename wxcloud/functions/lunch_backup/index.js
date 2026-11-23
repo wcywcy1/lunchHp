@@ -315,6 +315,16 @@ async function clearAllData(event, openid) {
     try { await db.collection(COL.AUDIT_LOGS).where({ groupId: GROUP_ID }).remove() } catch (e) { console.warn('clear audit error:', e.message) }
     await db.collection('lunch_order_keys').where({ groupId: GROUP_ID }).remove()
 
+    // 数据已整体删除，必须同步时间戳，否则其他端不会重新拉取菜单/成员/订单
+    const now = db.serverDate()
+    try {
+        await db.collection(COL.GROUPS).doc(GROUP_ID).update({
+            data: { ordersTimestamp: now, menuTimestamp: now, membersTimestamp: now, dataTimestamp: 0 },
+        })
+    } catch (e) {
+        console.warn('clearAllData timestamp error:', e.message)
+    }
+
     return { code: 0 }
 }
 

@@ -124,3 +124,26 @@ test('只将明确的文档不存在视为缺失，数据库故障不能被吞�
     assert.equal(await gate.optionalDocument({ get: async () => { throw new Error('document does not exist') } }), null)
     await assert.rejects(gate.optionalDocument({ get: async () => { throw new Error('network timeout') } }), /network timeout/)
 })
+
+test('清空数据后刷新时间戳，其他端能感知菜单/成员/订单变化', async () => {
+    const h = harness()
+    h.seed('lunch_orders', [{ _id: 'o1', groupId: 'a', memberId: 'member', menuId: 'dish', date: '2026-09-16', status: 'confirmed', price: 10 }])
+    h.seed('lunch_monthly_stats', [{ _id: 'a_2026_9', groupId: 'a', year: 2026, month: 9, totalAmount: 10, orderCount: 1 }])
+    h.seed('lunch_user_menu_stats', [{ _id: 'a_member_dish', groupId: 'a', memberId: 'member', menuId: 'dish', count: 1 }])
+    h.seed('lunch_order_keys', [{ _id: 'order_x', groupId: 'a', orderId: 'o1' }])
+
+    const result = await h.invoke('lunch_backup', { action: 'clearAllData', groupId: 'a' }, 'owner-a')
+    assert.equal(result.code, 0, result.msg)
+    assert.equal(h.rows('lunch_orders').length, 0)
+    assert.equal(h.rows('lunch_menu').filter(row => row.groupId === 'a').length, 0)
+    assert.deepEqual(Array.from(h.rows('lunch_members').filter(row => row.groupId === 'a'), member => member._id), ['owner'])
+    assert.equal(h.rows('lunch_monthly_stats').length, 0)
+    assert.equal(h.rows('lunch_user_menu_stats').length, 0)
+    assert.equal(h.rows('lunch_order_keys').length, 0)
+
+    const group = h.rows('lunch_groups').find(row => row._id === 'a')
+    assert.ok(group.ordersTimestamp instanceof Date)
+    assert.ok(group.menuTimestamp instanceof Date)
+    assert.ok(group.membersTimestamp instanceof Date)
+    assert.equal(group.dataTimestamp, 0)
+})

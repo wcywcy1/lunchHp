@@ -1413,15 +1413,17 @@ function createRequestHandlers(GROUP_ID) {
         const caller = await getMemberByOpenid(openid)
         if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
 
-        const { year } = event
+        const { year, months } = event
         const where = { groupId: GROUP_ID }
         if (year) where.year = Number(year)
+        const monthList = Array.isArray(months) ? months.map(Number).filter(Number.isFinite) : []
+        if (monthList.length > 0) where.month = _.in(monthList)
 
-        const { data: stats } = await db.collection(COL.MONTHLY_STATS)
-            .where(where)
-            .orderBy('year', 'asc')
-            .orderBy('month', 'asc')
-            .get()
+        const allStats = await fetchAll(db.collection(COL.MONTHLY_STATS), where)
+        // 与页面口径一致：按筛选返回，并排除已删除月份的占位文档
+        const stats = allStats
+            .filter(s => !s.deleted)
+            .sort((a, b) => (a.year - b.year) || (a.month - b.month))
 
         if (stats.length === 0) return { code: 0, data: { fileID: null, msg: '无统计数据' } }
 
@@ -1441,7 +1443,7 @@ function createRequestHandlers(GROUP_ID) {
                 supMap[sup.supplier] = sup.amount
             }
             const supValues = suppliers.map(sup => Math.round((supMap[sup] || 0) * 100) / 100)
-            return buildCsvLine([ym, Math.round(s.totalAmount * 100) / 100, s.count, ...supValues])
+            return buildCsvLine([ym, Math.round(s.totalAmount * 100) / 100, s.orderCount || s.count || 0, ...supValues])
         })
 
         const csv = '\uFEFF' + header + '\r\n' + rows.join('\r\n')

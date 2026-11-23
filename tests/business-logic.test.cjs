@@ -114,6 +114,24 @@ test('菜单与成员超过默认查询上限时不被截断', async () => {
     assert.equal(recentMembers.data.length, 121)
 })
 
+test('月度统计导出按年份和月份筛选，并排除已删除月份', async () => {
+    const h = harness()
+    h.seed('lunch_monthly_stats', [
+        { _id: 'a_2026_1', groupId: 'a', year: 2026, month: 1, totalAmount: 100, orderCount: 2, orderBySupplier: [{ supplier: 'S1', amount: 100, count: 2 }] },
+        { _id: 'a_2026_2', groupId: 'a', year: 2026, month: 2, totalAmount: 50, orderCount: 1, orderBySupplier: [{ supplier: 'S1', amount: 50, count: 1 }] },
+        { _id: 'a_2026_3', groupId: 'a', year: 2026, month: 3, totalAmount: 0, orderCount: 0, deleted: true, orderBySupplier: [] },
+    ])
+    const result = await h.invoke('lunch_order', {
+        action: 'downloadMonthlyData', groupId: 'a', year: 2026, months: [2],
+    }, 'admin-a')
+    assert.equal(result.code, 0, result.msg)
+    assert.equal(result.data.count, 1)
+    const csv = h.files.get(result.data.fileID).toString('utf8')
+    assert.ok(csv.includes('2026-02,50,1,50'))
+    assert.ok(!csv.includes('2026-01'))
+    assert.ok(!csv.includes('2026-03'))
+})
+
 test('历史订单计数与分页只包含今天之前的订单', async () => {
     const h = harness()
     h.seed('lunch_orders', [
