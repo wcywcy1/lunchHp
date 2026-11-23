@@ -436,10 +436,8 @@ function createRequestHandlers(GROUP_ID) {
     }
 
     async function getMembers(event, openid) {
-        const { data } = await db.collection(COL.MEMBERS)
-            .where({ groupId: GROUP_ID })
-            .orderBy('joinedAt', 'asc')
-            .get()
+        const data = await fetchAll(db.collection(COL.MEMBERS), { groupId: GROUP_ID })
+        data.sort((a, b) => new Date(a.joinedAt || 0) - new Date(b.joinedAt || 0))
         return { code: 0, data }
     }
 
@@ -748,10 +746,8 @@ function createRequestHandlers(GROUP_ID) {
     }
 
     async function getMenuList(event, openid) {
-        const { data } = await db.collection(COL.MENU)
-            .where({ groupId: GROUP_ID })
-            .orderBy('sortNo', 'asc')
-            .get()
+        const data = await fetchAll(db.collection(COL.MENU), { groupId: GROUP_ID })
+        data.sort((a, b) => (a.sortNo || 0) - (b.sortNo || 0))
         // orderCount/lastOrderedAt 由 submitOrder 时 _.inc(1) 维护到 menu 文档自身，
         // 无需 aggregate 全量订单。给旧数据补默认值。
         data.forEach(item => {

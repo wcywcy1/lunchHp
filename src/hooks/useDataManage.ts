@@ -103,6 +103,8 @@ export function useDataManage() {
     async function loadData() {
         loading.value = true
         try {
+            // 历史订单计数与今日列表并行拉取，避免管理页入口缺失
+            const historyTask = loadHistoryCount()
             const { orders: res, timestamps: tsRes, ordersError, timestampsError } = await loadAdminData(
                 () => orderAction('getRecentOrders'),
                 () => menuAction('getDataTimestamps'),
@@ -119,6 +121,7 @@ export function useDataManage() {
             }
             if (ordersError) console.error('loadData orders error:', ordersError)
             if (timestampsError) console.error('loadData timestamps error:', timestampsError)
+            await historyTask
         } catch (e) {
             console.error('loadData error:', e)
         } finally {

@@ -246,16 +246,14 @@ function createRequestHandlers(GROUP_ID) {
                 })
                 .end(),
             fetchAll(db.collection(COL.ORDERS), { groupId: GROUP_ID, date: today }),
-            db.collection(COL.MENU)
-                .where({ groupId: GROUP_ID })
-                .orderBy('sortNo', 'asc')
-                .get(),
-            db.collection(COL.MEMBERS)
-                .where({ groupId: GROUP_ID })
-                .orderBy('joinedAt', 'asc')
-                .get(),
+            fetchAll(db.collection(COL.MENU), { groupId: GROUP_ID }),
+            fetchAll(db.collection(COL.MEMBERS), { groupId: GROUP_ID }),
             db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => ({ data: {} })),
         ])
+
+        // 默认查询上限会把菜单/成员截断，这里按原有排序在内存中还原顺序。
+        const menuList = menuResult.sort((a, b) => (a.sortNo || 0) - (b.sortNo || 0))
+        const membersList = membersResult.sort((a, b) => new Date(a.joinedAt || 0) - new Date(b.joinedAt || 0))
 
         // Home and management screens consume today's business orders. Querying
         // them by date prevents imported history from pushing them out of a
@@ -301,7 +299,7 @@ function createRequestHandlers(GROUP_ID) {
                     }
                     const addRes = await db.collection(COL.MEMBERS).add({ data: newMember })
                     currentMember = { ...newMember, _id: addRes._id }
-                    membersResult.data.push(currentMember)
+                    membersList.push(currentMember)
                     isNew = true
                     await _touchTimestamps({ menuTimestamp: true, membersTimestamp: true })
                 }
@@ -310,8 +308,8 @@ function createRequestHandlers(GROUP_ID) {
             console.error('joinGroup inline error:', e)
         }
 
-        await _mergePublicStats(menuResult.data)
-        const menuWithUserStats = await _mergeUserStats(menuResult.data, openid)
+        await _mergePublicStats(menuList)
+        const menuWithUserStats = await _mergeUserStats(menuList, openid)
 
         return {
             code: 0,
@@ -319,7 +317,7 @@ function createRequestHandlers(GROUP_ID) {
                 monthSummary,
                 recentOrders,
                 menu: menuWithUserStats,
-                members: membersResult.data,
+                members: membersList,
                 member: currentMember,
                 role: memberRole,
                 isNew,
@@ -374,20 +372,16 @@ function createRequestHandlers(GROUP_ID) {
     }
 
     async function getRecentMenu(event, openid) {
-        const { data } = await db.collection(COL.MENU)
-            .where({ groupId: GROUP_ID })
-            .orderBy('sortNo', 'asc')
-            .get()
+        const data = await fetchAll(db.collection(COL.MENU), { groupId: GROUP_ID })
+        data.sort((a, b) => (a.sortNo || 0) - (b.sortNo || 0))
         await _mergePublicStats(data)
         const result = await _mergeUserStats(data, openid)
         return { code: 0, data: result }
     }
 
     async function getRecentMembers(event, openid) {
-        const { data } = await db.collection(COL.MEMBERS)
-            .where({ groupId: GROUP_ID })
-            .orderBy('joinedAt', 'asc')
-            .get()
+        const data = await fetchAll(db.collection(COL.MEMBERS), { groupId: GROUP_ID })
+        data.sort((a, b) => new Date(a.joinedAt || 0) - new Date(b.joinedAt || 0))
         return { code: 0, data }
     }
 

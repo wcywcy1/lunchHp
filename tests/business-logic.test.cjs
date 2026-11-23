@@ -78,3 +78,63 @@ test('stats reads do not rebuild every historical month after a global timestamp
     assert.equal(result.data[0].totalAmount, 88)
     assert.equal(h.rows('lunch_monthly_stats')[0].sentinel, 'keep')
 })
+
+test('菜单与成员超过默认查询上限时不被截断', async () => {
+    const h = harness()
+    h.seed('lunch_groups', [{ _id: 'big', creatorId: 'owner-big' }])
+    h.seed('lunch_members', [{
+        _id: 'big-owner', groupId: 'big', openid: 'owner-big', role: 'creator', name: '创建者', isVirtual: false,
+    }])
+    h.seed('lunch_menu', Array.from({ length: 120 }, (_, i) => ({
+        _id: 'big-dish-' + i, groupId: 'big', name: '菜品' + i, supplier: '店家',
+        price: 10, visible: true, sortNo: i + 1,
+    })))
+    h.seed('lunch_members', Array.from({ length: 120 }, (_, i) => ({
+        _id: 'big-member-' + i, groupId: 'big', openid: '', name: '成员' + i, role: 'member',
+        isVirtual: true, joinedAt: new Date(Date.UTC(2026, 0, 1, 0, 0, i)),
+    })))
+
+    const menuRes = await h.invoke('lunch_menu', { action: 'getMenuList', groupId: 'big' }, 'owner-big')
+    assert.equal(menuRes.code, 0, menuRes.msg)
+    assert.equal(menuRes.data.length, 120)
+    assert.deepEqual(Array.from(menuRes.data, item => item.sortNo), Array.from({ length: 120 }, (_, i) => i + 1))
+
+    const memberRes = await h.invoke('lunch_menu', { action: 'getMembers', groupId: 'big' }, 'owner-big')
+    assert.equal(memberRes.code, 0, memberRes.msg)
+    assert.equal(memberRes.data.length, 121)
+    assert.equal(memberRes.data[0]._id, 'big-owner')
+    assert.equal(memberRes.data[memberRes.data.length - 1]._id, 'big-member-119')
+
+    const recentMenu = await h.invoke('lunch_order', { action: 'getRecentMenu', groupId: 'big' }, 'owner-big')
+    assert.equal(recentMenu.code, 0, recentMenu.msg)
+    assert.equal(recentMenu.data.length, 120)
+
+    const recentMembers = await h.invoke('lunch_order', { action: 'getRecentMembers', groupId: 'big' }, 'owner-big')
+    assert.equal(recentMembers.code, 0, recentMembers.msg)
+    assert.equal(recentMembers.data.length, 121)
+})
+
+test('历史订单计数与分页只包含今天之前的订单', async () => {
+    const h = harness()
+    h.seed('lunch_orders', [
+        { _id: 'old-pending', groupId: 'a', memberId: 'member', date: '2026-09-14', status: 'pending', price: 10, createdAt: new Date('2026-09-14T01:00:00Z') },
+        { _id: 'old-confirmed', groupId: 'a', memberId: 'member', date: '2026-09-15', status: 'confirmed', price: 12, createdAt: new Date('2026-09-15T01:00:00Z') },
+        { _id: 'today', groupId: 'a', memberId: 'member', date: '2026-09-16', status: 'confirmed', price: 8, createdAt: new Date('2026-09-16T01:00:00Z') },
+    ])
+    const count = await h.invoke('lunch_order', { action: 'getHistoryOrderCount', groupId: 'a' }, 'admin-a')
+    assert.equal(count.code, 0, count.msg)
+    assert.equal(count.data.pendingCount, 1)
+    assert.equal(count.data.confirmedCount, 1)
+
+    const confirmed = await h.invoke('lunch_order', {
+        action: 'getHistoryOrders', groupId: 'a', status: 'confirmed', page: 1, pageSize: 10,
+    }, 'admin-a')
+    assert.equal(confirmed.code, 0, confirmed.msg)
+    assert.deepEqual(Array.from(confirmed.data.list, order => order._id), ['old-confirmed'])
+
+    const pending = await h.invoke('lunch_order', {
+        action: 'getHistoryOrders', groupId: 'a', status: 'pending', page: 1, pageSize: 10,
+    }, 'admin-a')
+    assert.equal(pending.code, 0, pending.msg)
+    assert.deepEqual(Array.from(pending.data.list, order => order._id), ['old-pending'])
+})
