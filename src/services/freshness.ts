@@ -2,6 +2,7 @@ import { useStore, setStore, setCache, saveSession } from './store'
 import { menuAction } from './repositories/baseRepository'
 import { CACHE_KEYS } from '../constants/cacheConfig'
 import { GroupRequestCache } from './groupRequestCache'
+import { resolveCurrentMember } from '../utils/memberMerge'
 
 export function toMs(val: any): number | null {
     if (!val) return null
@@ -40,6 +41,7 @@ async function _doCheckFreshness(groupId: string) {
         setStore({ groupCutoff: orderCutoff || '10:00', cutoffDisabled: !!cutoffDisabled })
 
         const tasks: Promise<void>[] = []
+        let memberChanged = false
         if (toMs(menuTimestamp) !== toMs(store.menuTimestamp)) {
             tasks.push((async () => {
                 try {
@@ -65,10 +67,11 @@ async function _doCheckFreshness(groupId: string) {
                         const meId = store.member?._id
                         const myRole = store.member?.role
                         if (meId) {
-                            const me = members.find((m: any) => m._id === meId)
-                            if (me && me.role !== myRole) {
+                            const me = resolveCurrentMember(members, store.member)
+                            if (me && (me._id !== meId || me.role !== myRole)) {
                                 setStore({ member: me, role: me.role })
                                 saveSession({ groupId: me.groupId, role: me.role, member: me })
+                                memberChanged = true
                             }
                         }
                     }
@@ -76,6 +79,20 @@ async function _doCheckFreshness(groupId: string) {
             })())
         }
         await Promise.all(tasks)
+        if (memberChanged) {
+            // memberId 变化后刷新菜单，让 getMenuList 内嵌的个人点餐统计同步到新身份
+            try {
+                const menuRes = await menuAction('getMenuList', { groupId })
+                if (menuRes.result.code === 0) {
+                    const menu = menuRes.result.data
+                    setStore({ menu, menuTimestamp })
+                    setCache(CACHE_KEYS.MENU, menu)
+                    setCache(CACHE_KEYS.MENU_TIMESTAMP, menuTimestamp)
+                }
+            } catch (e) {
+                console.error('checkDataFreshness after member merge menu error:', e)
+            }
+        }
         const result = { recentTimestamp, menuTimestamp, membersTimestamp, orderCutoff, cutoffDisabled }
         return result
     } catch (e) {

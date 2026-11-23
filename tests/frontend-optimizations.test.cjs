@@ -20,6 +20,12 @@ const { GroupRequestCache } = loadTypeScriptModule('src/services/groupRequestCac
 const { loadAdminData } = loadTypeScriptModule('src/services/adminDataLoader.ts')
 const { createDebouncedTask } = loadTypeScriptModule('src/utils/debouncedTask.ts')
 const { getCutoffNoticeState } = loadTypeScriptModule('src/utils/cutoffNotice.ts')
+const {
+    resolveCurrentMember,
+    patchMembersAfterMerge,
+    filterMergeTargets,
+    getMemberMergeAction,
+} = loadTypeScriptModule('src/utils/memberMerge.ts')
 
 test('freshness 请求按组织复用并发 Promise，并分别缓存结果', async () => {
     const cache = new GroupRequestCache(5000)
@@ -139,4 +145,39 @@ test('CSV 导出对 emoji 使用标准 UTF-8 编码', () => {
     const chunks = []
     writeCsvWithBom({ writeFileSync: (_path, buffer) => chunks.push(new Uint8Array(buffer)) }, 'x.csv', 'A\u{1F600}中')
     assert.deepEqual(Array.from(chunks[0]), [0xEF, 0xBB, 0xBF, 0x41, 0xF0, 0x9F, 0x98, 0x80, 0xE4, 0xB8, 0xAD])
+})
+
+test('旧设备通过 freshness 从旧 memberId 解析到同 openid 的新 memberId', () => {
+    const members = [
+        { _id: 'A', groupId: 'a', name: '虚拟同事', role: 'member', openid: 'b', isVirtual: false },
+        { _id: 'C', groupId: 'a', name: '其他', role: 'member', openid: 'c' },
+    ]
+    const resolved = resolveCurrentMember(members, { _id: 'B', groupId: 'a', name: '同事', role: 'member', openid: 'b' })
+    assert.equal(resolved._id, 'A')
+    assert.equal(resolveCurrentMember(members, { _id: 'B', groupId: 'a', name: '同事', role: 'member', openid: 'none' }), null)
+})
+
+test('管理页合账后立即用 mergedMember 替换虚拟成员', () => {
+    const members = [
+        { _id: 'virtual', groupId: 'a', name: '虚拟同事', role: 'member', isVirtual: true },
+        { _id: 'member', groupId: 'a', name: '同事', role: 'member' },
+        { _id: 'other', groupId: 'a', name: '其他', role: 'member' },
+    ]
+    const merged = { _id: 'virtual', groupId: 'a', name: '虚拟同事', role: 'member', isVirtual: false, openid: 'b' }
+    const next = patchMembersAfterMerge(members, merged, 'member')
+    assert.deepEqual(next.map(m => m._id).sort(), ['other', 'virtual'])
+    assert.equal(next.find(m => m._id === 'virtual').isVirtual, false)
+    assert.equal(next.find(m => m._id === 'virtual').openid, 'b')
+})
+
+test('管理员合账目标排除 creator，未完成合账优先继续', () => {
+    const members = [
+        { _id: 'virtual', groupId: 'a', name: '虚拟同事', role: 'member', isVirtual: true },
+        { _id: 'creator', groupId: 'a', name: '创建者', role: 'creator' },
+        { _id: 'real', groupId: 'a', name: '同事', role: 'member' },
+    ]
+    assert.deepEqual(filterMergeTargets(members, 'virtual').map(m => m._id), ['creator', 'real'].filter(id => id !== 'creator'))
+    assert.equal(getMemberMergeAction({ _id: 'v', groupId: 'a', name: '虚拟', role: 'member', isVirtual: true, mergeFromMemberId: 'real' }), 'resume')
+    assert.equal(getMemberMergeAction({ _id: 'v', groupId: 'a', name: '虚拟', role: 'member', isVirtual: true }), 'select')
+    assert.equal(getMemberMergeAction({ _id: 'r', groupId: 'a', name: '真实', role: 'member' }), 'none')
 })

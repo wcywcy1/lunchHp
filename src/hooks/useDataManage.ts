@@ -9,6 +9,7 @@ import { buildCsvLine, writeCsvWithBom, shareOrSaveFile, isPcPlatform, chooseFil
 import { getTodayString } from '../utils/date'
 import { loadAdminData } from '../services/adminDataLoader'
 import { createDebouncedTask } from '../utils/debouncedTask'
+import { filterMergeTargets, patchMembersAfterMerge } from '../utils/memberMerge'
 
 export function useDataManage() {
     const MAX_BATCH_COUNT = 2000
@@ -1195,17 +1196,34 @@ export function useDataManage() {
     const mergeTargetId = ref('')
     const merging = ref(false)
 
-    // 可作为合帐目标的成员：已登录微信（非虚拟）且不是当前正在合并的虚拟成员
+    // 可作为合帐目标的成员：已登录微信（非虚拟）、非创建者且不是当前正在合并的虚拟成员
     const mergeTargetCandidates = computed(() =>
-        (store.members || []).filter((m: any) =>
-            !m.isVirtual && m._id !== mergingMember.value?._id
-        )
+        filterMergeTargets(store.members || [], mergingMember.value?._id)
     )
 
     function openMergeDialog(member: any) {
         mergingMember.value = member
         mergeTargetId.value = ''
         showMergeDialog.value = true
+    }
+
+    function applyMergeResult(data: any, targetMemberId: string) {
+        const mergedMember = data?.member
+        if (!mergedMember) return
+        const mergedOrders = data.mergedOrders || 0
+        store.members = patchMembersAfterMerge(store.members || [], mergedMember, targetMemberId)
+        setCache(CACHE_KEYS.MEMBERS, store.members)
+        if (store.member?._id === targetMemberId || store.member?._id === mergedMember._id) {
+            setStore({ member: mergedMember, role: mergedMember.role })
+            saveSession({ groupId: mergedMember.groupId, role: mergedMember.role, member: mergedMember })
+        }
+        // 服务端已完成统计重建；这里只负责清 UI 缓存，等待统计页重新拉取
+        setStatsLoadTime(0)
+        setCache(CACHE_KEYS.MONTHLY_STATS, [], true)
+        setCache(CACHE_KEYS.MONTHLY_STATS_TIME, 0, true)
+        showMergeDialog.value = false
+        showNameEditDialog.value = false
+        uni.showToast({ title: `关联成功（订单${mergedOrders}条）`, icon: 'success' })
     }
 
     async function mergeWithWechat() {
@@ -1230,23 +1248,36 @@ export function useDataManage() {
                 targetMemberId: mergeTargetId.value,
             })
             if (res.result.code === 0) {
-                const { member: mergedMember, mergedOrders } = res.result.data
-                // 从本地 members 列表移除目标微信成员
-                store.members = store.members.filter((m: any) => m._id !== mergeTargetId.value)
-                // 若被删的微信成员是当前登录用户，更新 store.member 为合并后的成员
-                if (store.member?._id === mergeTargetId.value) {
-                    setStore({ member: mergedMember, role: mergedMember.role })
-                    saveSession({ groupId: mergedMember.groupId, role: mergedMember.role, member: mergedMember })
-                }
-                showMergeDialog.value = false
-                showNameEditDialog.value = false
-                uni.showToast({ title: `关联成功（订单${mergedOrders}条）`, icon: 'success' })
+                applyMergeResult(res.result.data, mergeTargetId.value)
                 await loadData()
             } else {
                 throw new Error(res.result.msg || '关联失败')
             }
         } catch (e: any) {
             uni.showToast({ title: e.message || '关联失败', icon: 'none' })
+        } finally {
+            merging.value = false
+        }
+    }
+
+    // 页面刷新后继续未完成合账：target 已被认领事务删除，直接使用持久化指针
+    async function resumeMergeInProgress(member: any) {
+        if (merging.value) return
+        if (!member?.mergeFromMemberId) return
+        merging.value = true
+        try {
+            const res = await menuAction('adminLinkVirtualMember', {
+                virtualMemberId: member._id,
+                targetMemberId: member.mergeFromMemberId,
+            })
+            if (res.result.code === 0) {
+                applyMergeResult(res.result.data, member.mergeFromMemberId)
+                await loadData()
+            } else {
+                throw new Error(res.result.msg || '继续合账失败')
+            }
+        } catch (e: any) {
+            uni.showToast({ title: e.message || '继续合账失败', icon: 'none' })
         } finally {
             merging.value = false
         }
@@ -1491,6 +1522,7 @@ export function useDataManage() {
         deleteGroup,
         openMergeDialog,
         mergeWithWechat,
+        resumeMergeInProgress,
         openMenuAdd,
         openMenuEdit,
         saveMenuItem,

@@ -21,6 +21,7 @@ function createRequestHandlers(GROUP_ID) {
         AUDIT_LOGS: 'lunch_audit_logs',
     }
     const ROLE = { CREATOR: 'creator', ADMIN: 'admin', MEMBER: 'member' }
+    const monthStats = require('./monthStats').createMonthStats({ db, groupId: GROUP_ID })
 
     const AUDIT_ACTION = {
         MEMBER_NAME: 'updateMemberName',
@@ -189,7 +190,6 @@ function createRequestHandlers(GROUP_ID) {
         const targets = []
         if (['updateMemberName', 'deleteMember', 'setAdmin'].includes(action)) targets.push([COL.MEMBERS, event.memberId])
         if (['linkVirtualMember', 'adminLinkVirtualMember'].includes(action)) targets.push([COL.MEMBERS, event.virtualMemberId])
-        if (action === 'adminLinkVirtualMember') targets.push([COL.MEMBERS, event.targetMemberId])
         if (['updateMenuItem', 'deleteMenuItem', 'toggleVisible'].includes(action)) targets.push([COL.MENU, event.menuId])
         for (const [collection, id] of targets) {
             if (typeof id !== 'string' || !id.trim()) return { code: 400, msg: 'invalid document ID' }
@@ -538,6 +538,11 @@ function createRequestHandlers(GROUP_ID) {
     async function importMembers(event, openid) {
         const caller = await getMemberByOpenid(openid)
         if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
+        const pendingMerge = await db.collection(COL.MEMBERS)
+            .where({ groupId: GROUP_ID, mergeFromMemberId: _.exists(true) })
+            .limit(1)
+            .get()
+        if (pendingMerge.data.length) return { code: 409, msg: '存在未完成合账，请先完成后再导入成员' }
         const result = await require('./importMembers').importMembers(db, GROUP_ID, event.members, event.mode, event.retainedNames)
         if (result.code === 0) {
             await writeAuditLog(openid, AUDIT_ACTION.MEMBER_IMPORT, 'member', '', null, result.data, null)
@@ -553,93 +558,237 @@ function createRequestHandlers(GROUP_ID) {
         return { code: 0 }
     }
 
+    function latestTime(a, b) {
+        if (!a) return b || null
+        if (!b) return a
+        return new Date(a) > new Date(b) ? a : b
+    }
+
+    function mergeProfileFields(virtual, source, mode) {
+        const fields = {
+            openid: source.openid,
+            mergeFromMemberId: source._id,
+            role: source.role || ROLE.MEMBER,
+            privacyAgreed: source.privacyAgreed || false,
+        }
+        if (mode === 'admin') {
+            fields.nickName = source.nickName || virtual.nickName || ''
+            fields.avatar = source.avatar || virtual.avatar || ''
+        } else {
+            fields.nickName = source.nickName || ''
+            fields.avatar = virtual.avatar || source.avatar || ''
+        }
+        return fields
+    }
+
+    // 认领事务：同时更新 virtual 和删除 source，保证同一 openid 只保留一个成员。
+    async function claimVirtualMember(virtualMemberId, sourceMemberId, expectedOpenid, mode) {
+        await db.runTransaction(async tx => {
+            const vRef = tx.collection(COL.MEMBERS).doc(virtualMemberId)
+            const sRef = tx.collection(COL.MEMBERS).doc(sourceMemberId)
+            const virtual = await requestGate.optionalDocument(vRef)
+            const source = await requestGate.optionalDocument(sRef)
+
+            if (!virtual || virtual.groupId !== GROUP_ID || virtual.isVirtual !== true || virtual.openid || virtual.mergeFromMemberId) {
+                throw requestGate.error(409, '该记录已被认领或合账状态已变化，请刷新后重试')
+            }
+            if (!source || source.groupId !== GROUP_ID || source.isVirtual || source.openid !== expectedOpenid || sourceMemberId === virtualMemberId) {
+                throw requestGate.error(409, '目标微信成员状态已变化，请刷新后重试')
+            }
+            if (mode === 'admin' && source.role === ROLE.CREATOR) {
+                throw requestGate.error(403, '创建者不能作为合账目标')
+            }
+
+            await vRef.update({ data: { ...mergeProfileFields(virtual, source, mode), mergeFromMemberId: sourceMemberId } })
+            await sRef.remove()
+        })
+    }
+
+    async function completeMemberMerge({ virtualMemberId, virtual, sourceId, mode, actorOpenid, sourceSnapshot, entryDataTimestamp }) {
+        const virtualName = virtual.name || virtual.nickName || ''
+        const affectedMonths = new Set()
+        let migratedOrders = 0
+
+        async function moveSourceOrders() {
+            const orders = await fetchAll(db.collection(COL.ORDERS), { groupId: GROUP_ID, memberId: sourceId })
+            if (orders.length === 0) return
+            const BATCH = 100
+            for (let i = 0; i < orders.length; i += BATCH) {
+                const chunk = orders.slice(i, i + BATCH)
+                await db.collection(COL.ORDERS)
+                    .where({ _id: _.in(chunk.map(o => o._id)), groupId: GROUP_ID })
+                    .update({ data: { memberId: virtualMemberId, memberName: virtualName } })
+            }
+            for (const order of orders) {
+                migratedOrders++
+                if (order.status === 'confirmed' && order.date) affectedMonths.add(order.date.substring(0, 7))
+            }
+        }
+
+        // 1. 迁移 source 订单；2. 归一 virtual 历史订单姓名；3. 再次扫描 source 残留
+        await moveSourceOrders()
+
+        const virtualOrders = await fetchAll(db.collection(COL.ORDERS), { groupId: GROUP_ID, memberId: virtualMemberId })
+        const renameOrders = virtualOrders.filter(o => (o.memberName || '') !== virtualName)
+        if (renameOrders.length > 0) {
+            const BATCH = 100
+            for (let i = 0; i < renameOrders.length; i += BATCH) {
+                const chunk = renameOrders.slice(i, i + BATCH)
+                await db.collection(COL.ORDERS)
+                    .where({ _id: _.in(chunk.map(o => o._id)), groupId: GROUP_ID })
+                    .update({ data: { memberName: virtualName } })
+            }
+            for (const order of renameOrders) {
+                if (order.status === 'confirmed' && order.date) affectedMonths.add(order.date.substring(0, 7))
+            }
+        }
+
+        await moveSourceOrders()
+
+        // 4. 个人统计：逐菜单两文档事务，保证重试不重复累计
+        const sourceStats = await fetchAll(db.collection(COL.USER_STATS), { groupId: GROUP_ID, memberId: sourceId })
+        for (const stat of sourceStats) {
+            if (!stat.menuId) continue
+            const newId = `${GROUP_ID}_${virtualMemberId}_${stat.menuId}`
+            await db.runTransaction(async tx => {
+                const oldRef = tx.collection(COL.USER_STATS).doc(stat._id)
+                const newRef = tx.collection(COL.USER_STATS).doc(newId)
+                const oldStat = await requestGate.optionalDocument(oldRef)
+                if (!oldStat) return
+                const existing = await requestGate.optionalDocument(newRef)
+                if (existing) {
+                    await newRef.update({
+                        data: {
+                            count: (existing.count || 0) + (oldStat.count || 0),
+                            lastAt: latestTime(existing.lastAt, oldStat.lastAt),
+                        },
+                    })
+                } else {
+                    await newRef.set({
+                        data: {
+                            groupId: GROUP_ID,
+                            memberId: virtualMemberId,
+                            menuId: stat.menuId,
+                            count: oldStat.count || 0,
+                            lastAt: oldStat.lastAt || null,
+                        },
+                    })
+                }
+                await oldRef.remove()
+            })
+        }
+
+        // 5. 服务端重建受影响月份（或全量），复用 monthStats 模块
+        const needsFullRebuild = !entryDataTimestamp || entryDataTimestamp === 0
+        const isRetry = !!virtual.mergeFromMemberId
+        let months = [...affectedMonths]
+        if (!needsFullRebuild && isRetry) {
+            const confirmed = await fetchAll(db.collection(COL.ORDERS), {
+                groupId: GROUP_ID,
+                memberId: virtualMemberId,
+                status: 'confirmed',
+            })
+            months = [...new Set(confirmed.map(o => o.date && o.date.substring(0, 7)).filter(Boolean))]
+        }
+
+        const didRebuild = needsFullRebuild || months.length > 0
+        if (needsFullRebuild) {
+            await monthStats.rebuildMonth(null)
+        } else if (months.length > 0) {
+            await monthStats.rebuildMonths(months)
+        }
+
+        // 6. 时间戳
+        const now = db.serverDate()
+        const groupUpdate = { membersTimestamp: now, ordersTimestamp: now }
+        if (didRebuild) groupUpdate.dataTimestamp = now
+        await db.collection(COL.GROUPS).doc(GROUP_ID).update({ data: groupUpdate })
+
+        // 7. finalize：所有迁移和统计重建成功后才清除指针
+        await db.collection(COL.MEMBERS).doc(virtualMemberId).update({
+            data: { isVirtual: false, mergeFromMemberId: _.remove() },
+        })
+
+        const updated = (await db.collection(COL.MEMBERS).doc(virtualMemberId).get()).data
+
+        // 8. 审计日志为附属记录，失败不影响合账成功
+        try {
+            if (mode === 'admin') {
+                await writeAuditLog(actorOpenid, AUDIT_ACTION.MEMBER_LINK_ADMIN, 'member', virtualMemberId,
+                    { targetSnapshot: sourceSnapshot || { _id: sourceId }, virtualSnapshot: virtual },
+                    { memberId: virtualMemberId },
+                    { ordersMoved: migratedOrders, statsMoved: sourceStats.length, rebuiltMonths: didRebuild ? months : [] })
+            } else {
+                await writeAuditLog(actorOpenid, AUDIT_ACTION.MEMBER_LINK, 'member', virtualMemberId,
+                    {
+                        callerId: sourceId,
+                        callerName: sourceSnapshot ? sourceSnapshot.name : '',
+                        callerAvatar: sourceSnapshot ? sourceSnapshot.avatar : '',
+                        virtualSnapshot: virtual,
+                    },
+                    { memberId: virtualMemberId },
+                    { ordersMoved: migratedOrders, statsMoved: sourceStats.length, rebuiltMonths: didRebuild ? months : [] })
+            }
+        } catch (e) {
+            console.error('merge audit log error:', e)
+        }
+
+        return { member: updated, mergedOrders: migratedOrders, mergedStats: sourceStats.length, rebuiltMonths: didRebuild ? months : [] }
+    }
+
     async function linkVirtualMember(event, openid) {
         const { virtualMemberId } = event
         if (!virtualMemberId) return { code: 400, msg: 'missing virtualMemberId' }
 
-        const caller = await getMemberByOpenid(openid)
-        if (!caller) return { code: 403, msg: 'not a member' }
-
         const virtual = (await db.collection(COL.MEMBERS).doc(virtualMemberId).get()).data
-        if (!virtual || !virtual.isVirtual) return { code: 404, msg: 'virtual member not found' }
+        if (!virtual || virtual.groupId !== GROUP_ID) return { code: 404, msg: 'virtual member not found' }
+
+        const entryGroup = (await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => ({ data: {} }))).data || {}
+        const entryDataTimestamp = entryGroup.dataTimestamp
+
+        // 进行中：按指针继续完成，不再要求 source 成员存在
+        if (virtual.mergeFromMemberId) {
+            if (virtual.openid !== openid) return { code: 409, msg: '该记录已被其他微信账号认领' }
+            return {
+                code: 0,
+                data: await completeMemberMerge({
+                    virtualMemberId,
+                    virtual,
+                    sourceId: virtual.mergeFromMemberId,
+                    mode: 'self',
+                    actorOpenid: openid,
+                    sourceSnapshot: null,
+                    entryDataTimestamp,
+                }),
+            }
+        }
+
+        if (!virtual.isVirtual) {
+            if (virtual.openid === openid) {
+                return { code: 0, data: { member: virtual, mergedOrders: 0, mergedStats: 0, rebuiltMonths: [] } }
+            }
+            return { code: 404, msg: 'virtual member not found' }
+        }
         if (virtual.openid) return { code: 409, msg: '该成员已关联微信账号' }
 
-        const virtualName = virtual.name || virtual.nickName || ''
+        const caller = await getMemberByOpenid(openid)
+        if (!caller) return { code: 403, msg: 'not a member' }
+        if (caller._id === virtualMemberId) return { code: 409, msg: '合账状态异常，请刷新后重试' }
+        if (caller.mergeFromMemberId) return { code: 409, msg: '当前成员有未完成合账，请先完成后再关联' }
 
-        // 1. 转移订单：把当前微信成员的订单 memberId/memberName 改到虚拟成员（保留张三的历史）
-        let callerOrderCount = 0
-        if (caller._id) {
-            const callerOrders = await fetchAll(db.collection(COL.ORDERS), { groupId: GROUP_ID, memberId: caller._id })
-            callerOrderCount = callerOrders.length
-            if (callerOrders.length > 0) {
-                const BATCH = 100
-                for (let i = 0; i < callerOrders.length; i += BATCH) {
-                    const chunkIds = callerOrders.slice(i, i + BATCH).map(o => o._id)
-                    await db.collection(COL.ORDERS)
-                        .where({ _id: _.in(chunkIds) })
-                        .update({ data: { memberId: virtualMemberId, memberName: virtualName } })
-                }
-            }
-
-            // 2. 合并个人点餐统计：把当前微信成员的统计转移到虚拟成员
-            const callerStats = await fetchAll(db.collection(COL.USER_STATS), { groupId: GROUP_ID, memberId: caller._id })
-            for (const cs of callerStats) {
-                const newId = `${GROUP_ID}_${virtualMemberId}_${cs.menuId}`
-                const existing = await db.collection(COL.USER_STATS).doc(newId).get().catch(() => ({ data: null }))
-                if (existing.data) {
-                    const mergedCount = (existing.data.count || 0) + (cs.count || 0)
-                    const mergedLastAt = (cs.lastAt && existing.data.lastAt)
-                        ? (new Date(cs.lastAt) > new Date(existing.data.lastAt) ? cs.lastAt : existing.data.lastAt)
-                        : (cs.lastAt || existing.data.lastAt)
-                    await db.collection(COL.USER_STATS).doc(newId).update({
-                        data: { count: mergedCount, lastAt: mergedLastAt }
-                    })
-                    await db.collection(COL.USER_STATS).doc(cs._id).remove()
-                } else {
-                    await db.collection(COL.USER_STATS).doc(newId).set({
-                        data: {
-                            groupId: GROUP_ID,
-                            memberId: virtualMemberId,
-                            menuId: cs.menuId,
-                            count: cs.count || 0,
-                            lastAt: cs.lastAt || null,
-                        }
-                    })
-                    await db.collection(COL.USER_STATS).doc(cs._id).remove()
-                }
-            }
+        await claimVirtualMember(virtualMemberId, caller._id, caller.openid || openid, 'self')
+        return {
+            code: 0,
+            data: await completeMemberMerge({
+                virtualMemberId,
+                virtual,
+                sourceId: caller._id,
+                mode: 'self',
+                actorOpenid: openid,
+                sourceSnapshot: caller,
+                entryDataTimestamp,
+            }),
         }
-
-        // 3. 更新虚拟成员：挂 openid，isVirtual=false，保留 caller role，avatar 取舍
-        const update = {
-            openid,
-            role: caller.role || ROLE.MEMBER,
-            isVirtual: false,
-            nickName: caller.nickName || '',
-            privacyAgreed: caller.privacyAgreed || false,
-        }
-        if (caller.role !== ROLE.MEMBER) {
-            update.role = caller.role
-        }
-        if (caller.avatar && !virtual.avatar) {
-            update.avatar = caller.avatar
-        }
-        await db.collection(COL.MEMBERS).doc(virtualMemberId).update({ data: update })
-
-        // 4. 删除当前微信成员记录
-        if (caller._id) {
-            await db.collection(COL.MEMBERS).doc(caller._id).remove()
-        }
-
-        await writeAuditLog(openid, AUDIT_ACTION.MEMBER_LINK, 'member', virtualMemberId,
-            { callerId: caller._id || null, callerName: caller.name, callerAvatar: caller.avatar, virtualSnapshot: virtual },
-            { memberId: virtualMemberId }, { ordersMoved: callerOrderCount })
-        await updateGroupTimestamp('membersTimestamp')
-        try {
-            await db.collection(COL.GROUPS).doc(GROUP_ID).update({ data: { ordersTimestamp: db.serverDate() } })
-        } catch (e) { console.error('touch ordersTimestamp error:', e) }
-        const updated = (await db.collection(COL.MEMBERS).doc(virtualMemberId).get()).data
-        return { code: 0, data: { member: updated } }
     }
 
     // 管理员代关联：把已登录微信成员的数据转移到指定的虚拟成员，保留虚拟成员（带着历史订单），
@@ -654,83 +803,57 @@ function createRequestHandlers(GROUP_ID) {
         if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
 
         const virtual = (await db.collection(COL.MEMBERS).doc(virtualMemberId).get()).data
-        if (!virtual || !virtual.isVirtual) return { code: 404, msg: '虚拟成员不存在' }
+        if (!virtual || virtual.groupId !== GROUP_ID) return { code: 404, msg: '虚拟成员不存在' }
 
-        const target = (await db.collection(COL.MEMBERS).doc(targetMemberId).get()).data
+        const entryGroup = (await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => ({ data: {} }))).data || {}
+        const entryDataTimestamp = entryGroup.dataTimestamp
+
+        // 进行中：按指针继续完成；target 已被认领事务删除，不再要求 target 存在
+        if (virtual.mergeFromMemberId) {
+            if (virtual.mergeFromMemberId !== targetMemberId) {
+                return { code: 409, msg: '该记录存在另一笔未完成合账，请刷新后重试' }
+            }
+            return {
+                code: 0,
+                data: await completeMemberMerge({
+                    virtualMemberId,
+                    virtual,
+                    sourceId: virtual.mergeFromMemberId,
+                    mode: 'admin',
+                    actorOpenid: openid,
+                    sourceSnapshot: null,
+                    entryDataTimestamp,
+                }),
+            }
+        }
+
+        if (!virtual.isVirtual) return { code: 409, msg: '目标虚拟成员已被关联或已完成合账' }
+        if (virtual.openid) return { code: 409, msg: '该成员已被其他微信账号认领' }
+
+        const targetRes = await db.collection(COL.MEMBERS)
+            .where({ _id: targetMemberId, groupId: GROUP_ID })
+            .limit(1)
+            .get()
+        const target = targetRes.data[0]
         if (!target) return { code: 404, msg: '目标成员不存在' }
         if (target.isVirtual) return { code: 400, msg: '目标成员必须为已登录微信成员' }
         if (!target.openid) return { code: 400, msg: '目标成员未绑定微信' }
+        if (target.role === ROLE.CREATOR) return { code: 403, msg: '创建者不能作为合账目标' }
+        if (target.mergeFromMemberId) return { code: 409, msg: '目标成员存在未完成合账' }
 
-        const virtualName = virtual.name || virtual.nickName || ''
-
-        // 1. 转移订单：把目标微信成员的订单 memberId/memberName 改到虚拟成员（保留张三的历史）
-        const targetOrders = await fetchAll(db.collection(COL.ORDERS), { groupId: GROUP_ID, memberId: targetMemberId })
-        if (targetOrders.length > 0) {
-            const BATCH = 100
-            for (let i = 0; i < targetOrders.length; i += BATCH) {
-                const chunkIds = targetOrders.slice(i, i + BATCH).map(o => o._id)
-                await db.collection(COL.ORDERS)
-                    .where({ _id: _.in(chunkIds) })
-                    .update({ data: { memberId: virtualMemberId, memberName: virtualName } })
-            }
+        await claimVirtualMember(virtualMemberId, targetMemberId, target.openid, 'admin')
+        return {
+            code: 0,
+            data: await completeMemberMerge({
+                virtualMemberId,
+                virtual,
+                sourceId: targetMemberId,
+                mode: 'admin',
+                actorOpenid: openid,
+                sourceSnapshot: target,
+                entryDataTimestamp,
+            }),
         }
-
-        // 2. 合并个人点餐统计：把目标微信成员的统计转移到虚拟成员
-        const targetStats = await fetchAll(db.collection(COL.USER_STATS), { groupId: GROUP_ID, memberId: targetMemberId })
-        for (const ts of targetStats) {
-            const newId = `${GROUP_ID}_${virtualMemberId}_${ts.menuId}`
-            const existing = await db.collection(COL.USER_STATS).doc(newId).get().catch(() => ({ data: null }))
-            if (existing.data) {
-                const mergedCount = (existing.data.count || 0) + (ts.count || 0)
-                const mergedLastAt = (ts.lastAt && existing.data.lastAt)
-                    ? (new Date(ts.lastAt) > new Date(existing.data.lastAt) ? ts.lastAt : existing.data.lastAt)
-                    : (ts.lastAt || existing.data.lastAt)
-                await db.collection(COL.USER_STATS).doc(newId).update({
-                    data: { count: mergedCount, lastAt: mergedLastAt }
-                })
-                await db.collection(COL.USER_STATS).doc(ts._id).remove()
-            } else {
-                await db.collection(COL.USER_STATS).doc(newId).set({
-                    data: {
-                        groupId: GROUP_ID,
-                        memberId: virtualMemberId,
-                        menuId: ts.menuId,
-                        count: ts.count || 0,
-                        lastAt: ts.lastAt || null,
-                    }
-                })
-                await db.collection(COL.USER_STATS).doc(ts._id).remove()
-            }
-        }
-
-        // 3. 更新虚拟成员：挂目标 openid，isVirtual=false，保留目标 role，avatar 取舍
-        const update = {
-            openid: target.openid,
-            isVirtual: false,
-            role: target.role || ROLE.MEMBER,
-            nickName: target.nickName || virtual.nickName || '',
-            privacyAgreed: target.privacyAgreed || false,
-        }
-        if (target.avatar) {
-            update.avatar = target.avatar
-        }
-        await db.collection(COL.MEMBERS).doc(virtualMemberId).update({ data: update })
-
-        // 4. 删除目标微信成员记录
-        await db.collection(COL.MEMBERS).doc(targetMemberId).remove()
-
-        await writeAuditLog(openid, AUDIT_ACTION.MEMBER_LINK_ADMIN, 'member', virtualMemberId,
-            { targetSnapshot: target, virtualSnapshot: virtual },
-            { memberId: virtualMemberId }, { ordersMoved: targetOrders.length, statsMoved: targetStats.length })
-
-        // 5. 触发成员时间戳 + 订单时间戳（订单 memberId 变了）
-        await updateGroupTimestamp('membersTimestamp')
-        try {
-            await db.collection(COL.GROUPS).doc(GROUP_ID).update({ data: { ordersTimestamp: db.serverDate() } })
-        } catch (e) { console.error('touch ordersTimestamp error:', e) }
-
-        const updated = (await db.collection(COL.MEMBERS).doc(virtualMemberId).get()).data
-        return { code: 0, data: { member: updated, mergedOrders: targetOrders.length, mergedStats: targetStats.length } }
     }
 
     // 用户更新自己的头像和昵称（微信平台限制：必须用户主动设置）
@@ -766,6 +889,7 @@ function createRequestHandlers(GROUP_ID) {
         const target = (await db.collection(COL.MEMBERS).doc(memberId).get()).data
         if (!target) return { code: 404, msg: 'member not found' }
         if (target.role === ROLE.CREATOR) return { code: 400, msg: 'cannot delete creator' }
+        if (target.mergeFromMemberId) return { code: 409, msg: '合账未完成，请先继续完成后再删除' }
 
         await writeAuditLog(openid, AUDIT_ACTION.MEMBER_DELETE, 'member', memberId, target, null, null)
         await db.collection(COL.MEMBERS).doc(memberId).remove()

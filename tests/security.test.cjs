@@ -12,6 +12,8 @@ test('独立部署的公共安全模块保持一致', () => {
     assert.equal(source('lunch_order'), source('lunch_backup'))
     assert.equal(fs.readFileSync(path.join(__dirname, '../wxcloud/functions/lunch_order/importMembers.js'), 'utf8'),
         fs.readFileSync(path.join(__dirname, '../wxcloud/functions/lunch_menu/importMembers.js'), 'utf8'))
+    assert.equal(fs.readFileSync(path.join(__dirname, '../wxcloud/functions/lunch_order/monthStats.js'), 'utf8'),
+        fs.readFileSync(path.join(__dirname, '../wxcloud/functions/lunch_menu/monthStats.js'), 'utf8'))
 })
 
 test('其他组织的订单、菜品、成员不可修改或授权', async () => {

@@ -25,6 +25,7 @@ function createRequestHandlers(GROUP_ID) {
     }
     const ROLE = { CREATOR: 'creator', ADMIN: 'admin', MEMBER: 'member' }
     const STATUS = { PENDING: 'pending', CONFIRMED: 'confirmed', CANCELLED: 'cancelled' }
+    const monthStats = require('./monthStats').createMonthStats({ db, groupId: GROUP_ID })
 
     const AUDIT_ACTION = {
         ORDERS_IMPORT: 'importOrders',
@@ -973,102 +974,7 @@ function createRequestHandlers(GROUP_ID) {
     }
 
     async function doRebuildMonthStats(targetYearMonth) {
-        const where = { groupId: GROUP_ID, status: STATUS.CONFIRMED }
-        const statsWhere = { groupId: GROUP_ID }
-        if (targetYearMonth) {
-            where.date = db.RegExp({ regexp: `^${targetYearMonth}` })
-            statsWhere.year = Number(targetYearMonth.split('-')[0])
-            statsWhere.month = Number(targetYearMonth.split('-')[1])
-        }
-
-        // 清除旧记录（包括自动生成_id的旧格式）
-        await db.collection(COL.MONTHLY_STATS).where(statsWhere).remove()
-
-        const allOrders = await fetchAll(db.collection(COL.ORDERS), where)
-
-        const monthMap = {}
-        for (const order of allOrders) {
-            const ym = order.date.substring(0, 7)
-            const [year, month] = ym.split('-').map(Number)
-            if (!monthMap[ym]) {
-                monthMap[ym] = { year, month, totalAmount: 0, count: 0, byMember: {}, bySupplier: {} }
-            }
-            const m = monthMap[ym]
-            m.totalAmount += order.price
-            m.count += 1
-
-            if (!m.byMember[order.memberId]) {
-                m.byMember[order.memberId] = { memberId: order.memberId, memberName: order.memberName, amount: 0, count: 0 }
-            }
-            m.byMember[order.memberId].amount += order.price
-            m.byMember[order.memberId].count += 1
-
-            if (!m.bySupplier[order.supplier]) {
-                m.bySupplier[order.supplier] = { supplier: order.supplier, amount: 0, count: 0 }
-            }
-            m.bySupplier[order.supplier].amount += order.price
-            m.bySupplier[order.supplier].count += 1
-        }
-
-        const now = db.serverDate()
-        for (const [ym, m] of Object.entries(monthMap)) {
-            const orderByMember = Object.values(m.byMember)
-            const orderBySupplier = Object.values(m.bySupplier)
-
-            const orderByMemberMap = {}
-            for (const item of orderByMember) {
-                const key = item.memberName || '未定义'
-                orderByMemberMap[key] = Math.round(((orderByMemberMap[key] || 0) + item.amount) * 100) / 100
-            }
-            const orderBySupplierMap = {}
-            for (const item of orderBySupplier) {
-                orderBySupplierMap[item.supplier || '未定义'] = Math.round(item.amount * 100) / 100
-            }
-
-            // 用确定性 _id 写入，并发 rebuild 写同一个 _id 不会产生重复
-            const docId = `${GROUP_ID}_${m.year}_${m.month}`
-            await db.collection(COL.MONTHLY_STATS).doc(docId).set({
-                data: {
-                    groupId: GROUP_ID,
-                    year: m.year,
-                    month: m.month,
-                    totalAmount: Math.round(m.totalAmount * 100) / 100,
-                    orderCount: m.count,
-                    orderByMember,
-                    orderBySupplier,
-                    orderByMemberMap,
-                    orderBySupplierMap,
-                    deleted: false,
-                    createdAt: now,
-                    updatedAt: now,
-                },
-            })
-        }
-
-        // Targeted rebuilds retain a deletion marker so incremental clients can
-        // remove a cached month after its last confirmed order disappears.
-        if (targetYearMonth && Object.keys(monthMap).length === 0) {
-            const [year, month] = targetYearMonth.split('-').map(Number)
-            const docId = `${GROUP_ID}_${year}_${month}`
-            await db.collection(COL.MONTHLY_STATS).doc(docId).set({
-                data: {
-                    groupId: GROUP_ID,
-                    year,
-                    month,
-                    totalAmount: 0,
-                    orderCount: 0,
-                    orderByMember: [],
-                    orderBySupplier: [],
-                    orderByMemberMap: {},
-                    orderBySupplierMap: {},
-                    deleted: true,
-                    createdAt: now,
-                    updatedAt: now,
-                },
-            })
-        }
-
-        return { rebuiltMonths: Object.keys(monthMap) }
+        return monthStats.rebuildMonth(targetYearMonth)
     }
 
     async function searchOrders(event, openid) {
@@ -1278,6 +1184,12 @@ function createRequestHandlers(GROUP_ID) {
     async function rebuildOrderRelations(event, openid) {
         const caller = await getMemberByOpenid(openid)
         if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
+
+        const pendingMerge = await db.collection(COL.MEMBERS)
+            .where({ groupId: GROUP_ID, mergeFromMemberId: _.exists(true) })
+            .limit(1)
+            .get()
+        if (pendingMerge.data.length) return { code: 409, msg: '存在未完成合账，请先完成后再重置订单关联' }
 
         const allMembers = await fetchAll(db.collection(COL.MEMBERS), { groupId: GROUP_ID })
         const memberByName = {}

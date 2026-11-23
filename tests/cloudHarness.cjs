@@ -68,11 +68,13 @@ function harness() {
             },
             async count() { return { total: [...table().values()].filter(row => matches(row, where)).length } },
             async update({ data }) {
+                if (db.failOp && db.failOp(name, 'update', null, data)) throw new Error('injected write failure')
                 let count = 0
                 for (const [key, row] of table()) if (matches(row, where)) { table().set(key, updated(row, data)); count++ }
                 return { stats: { updated: count } }
             },
             async remove() {
+                if (db.failOp && db.failOp(name, 'remove', null, null)) throw new Error('injected write failure')
                 let count = 0
                 for (const [key, row] of table()) if (matches(row, where)) { table().delete(key); count++ }
                 return { stats: { removed: count } }
@@ -82,16 +84,22 @@ function harness() {
                     async get() { return { data: clone(table().get(key)) } },
                     async set({ data }) {
                         if (db.failWrite && db.failWrite(name, key, data)) throw new Error('injected write failure')
+                        if (db.failOp && db.failOp(name, 'set', key, data)) throw new Error('injected write failure')
                         table().set(key, { ...clone(data), _id: key })
                         return { stats: { updated: 1 } }
                     },
                     async update({ data }) {
+                        if (db.failOp && db.failOp(name, 'doc.update', key, data)) throw new Error('injected write failure')
                         const old = table().get(key)
                         if (!old) throw new Error('document does not exist')
                         table().set(key, updated(old, data))
                         return { stats: { updated: 1 } }
                     },
-                    async remove() { table().delete(key); return { stats: { removed: 1 } } },
+                    async remove() {
+                        if (db.failOp && db.failOp(name, 'doc.remove', key, null)) throw new Error('injected write failure')
+                        table().delete(key)
+                        return { stats: { removed: 1 } }
+                    },
                 }
             },
             async add({ data }) {
@@ -99,6 +107,7 @@ function harness() {
                 const ids = []
                 for (const row of rows) {
                     const key = row._id || 'generated_' + (++id)
+                    if (db.failOp && db.failOp(name, 'add', key, row)) throw new Error('injected write failure')
                     if (table().has(key)) throw new Error('duplicate id')
                     table().set(key, { ...clone(row), _id: key })
                     ids.push(key)
@@ -109,7 +118,7 @@ function harness() {
         return query()
     }
     const db = {
-        command, failWrite: null, collection: name => collection(name),
+        command, failWrite: null, failOp: null, collection: name => collection(name),
         RegExp: ({ regexp }) => ({ __regex: regexp }),
         serverDate: () => new Date('2026-09-16T01:00:00Z'),
         createCollection: async name => { getTable(name) },

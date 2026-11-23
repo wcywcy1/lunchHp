@@ -1,6 +1,6 @@
 import { ref, computed, watch } from 'vue'
 import { onShow, onHide } from '@dcloudio/uni-app'
-import { useStore, setStore, getCache, setCache, saveSession, getRecentLoadTime, setRecentLoadTime, flushCache } from '../services/store'
+import { useStore, setStore, getCache, setCache, saveSession, getRecentLoadTime, setRecentLoadTime, setStatsLoadTime, flushCache } from '../services/store'
 import { menuAction, orderAction } from '../services/repositories/baseRepository'
 import { waitForInit } from '../services/appInit'
 import { CACHE_KEYS, CACHE_TTL } from '../constants/cacheConfig'
@@ -9,6 +9,7 @@ import { CLOUD_STORAGE_PATH } from '../constants/appConfig'
 import { checkDataFreshness, toMs } from '../services/freshness'
 import { getTodayString } from '../utils/date'
 import { getCutoffNoticeState } from '../utils/cutoffNotice'
+import { patchMembersAfterMerge } from '../utils/memberMerge'
 
 export function useHome() {
     const store = useStore()
@@ -405,6 +406,11 @@ export function useHome() {
                 const { member } = res.result.data
                 setStore({ member, role: member.role })
                 saveSession({ groupId: member.groupId, role: member.role, member })
+                store.members = patchMembersAfterMerge(store.members || [], member, '')
+                setCache(CACHE_KEYS.MEMBERS, store.members)
+                setStatsLoadTime(0)
+                setCache(CACHE_KEYS.MONTHLY_STATS, [], true)
+                setCache(CACHE_KEYS.MONTHLY_STATS_TIME, 0, true)
                 showLinkDialog.value = false
                 showNameDialog.value = false
                 uni.showToast({ title: '关联成功', icon: 'success' })

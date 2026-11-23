@@ -121,7 +121,10 @@
           <text class="form-label">新姓名</text>
           <input class="form-input" v-model="editingName" placeholder="输入姓名" @keyboardheightchange="onNameEditKeyboard" />
         </view>
-        <view v-if="editingMember?.isVirtual" class="merge-section" @tap="openMergeDialog(editingMember)">
+        <view v-if="getMemberMergeAction(editingMember) === 'resume'" class="merge-section" @tap="resumeMergeInProgress(editingMember)">
+          <text class="merge-btn">⏳ 合账未完成，点此继续完成</text>
+        </view>
+        <view v-else-if="getMemberMergeAction(editingMember) === 'select'" class="merge-section" @tap="openMergeDialog(editingMember)">
           <text class="merge-btn">🔗 关联微信账号</text>
         </view>
         <view class="modal-actions">
@@ -321,6 +324,7 @@ import DataBackup from '../../components/data/DataBackup.vue'
 import DangerZone from '../../components/data/DangerZone.vue'
 import DownloadDialog from '../../components/data/DownloadDialog.vue'
 import CustomTabBar from '../../components/CustomTabBar/CustomTabBar.vue'
+import { getMemberMergeAction } from '../../utils/memberMerge'
 
 const store = useStore()
 const { isAdmin, isCreator } = useAuth()
@@ -399,6 +403,7 @@ const {
   deleteGroup,
   openMergeDialog,
   mergeWithWechat,
+  resumeMergeInProgress,
   openMenuAdd,
   openMenuEdit,
   saveMenuItem,
