@@ -224,7 +224,7 @@ lunchHp (我要干饭)
 | `MONTH_SUMMARY` | 5 min | ✅（跟随订单时间戳刷新） | Watch 变化和订单时间戳变化都会调用 `refreshMonthSummary` |
 | `MENU` | 30 min | ✅ | — |
 | `MEMBERS` | 30 min | ✅ | — |
-| `MONTHLY_STATS` | 30 min | ✅（增量合并） | 已支持空月份删除标记；仍应保留跨月回归测试 |
+| `MONTHLY_STATS` | 30 min | ✅（增量合并） | 已支持空月份删除标记；冷启动内存无数据时首次全量加载；仍应保留跨月回归测试 |
 
 **建议**：维持当前策略。补充跨月和切组回归测试即可，不增加新的缓存版本机制。
 
@@ -253,6 +253,7 @@ lunchHp (我要干饭)
 | `writeAuditLog` | `lunch_menu`, `lunch_order` | ~20 | ✅ 相同（常量不同） |
 | `requestGate.js` | 三个云函数 | ~62 | ✅ 相同 |
 | `importMembers.js` | `lunch_menu`, `lunch_order` | ~80 | ✅ 相同 |
+| `monthStats.js` | `lunch_menu`, `lunch_order` | ~110 | ✅ 相同（安全测试校验） |
 | `ensureCollection` 模式 | 三个云函数 | ~10-15 | 类似、非完全相同 |
 | `rateLimit` | `lunch_order`, `lunch_menu` | ~12 | ✅ 相同 |
 | `_rateMap` | `lunch_order`, `lunch_menu`, `lunch_voice` | ~3 | ✅ 都是实例级 Map |
