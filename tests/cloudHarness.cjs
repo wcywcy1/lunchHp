@@ -9,6 +9,7 @@ function harness() {
     let transactionQueue = Promise.resolve()
     const identity = new AsyncLocalStorage()
     const files = new Map()
+    const logs = []
     const clone = value => value === undefined ? undefined : structuredClone(value)
     const op = (type, value) => ({ __op: type, value })
     const command = Object.fromEntries(['eq', 'neq', 'lt', 'gt', 'in', 'nin', 'exists', 'inc', 'remove', 'set'].map(type => [type, value => op(type, value)]))
@@ -147,7 +148,8 @@ function harness() {
         if (functions.has(name)) return functions.get(name)
         const filename = path.resolve(__dirname, '../wxcloud/functions', name, 'index.js')
         const sandbox = {
-            exports: {}, Buffer, Date: TestDate, TextDecoder, console: { log() {}, warn() {}, error() {} },
+            exports: {}, Buffer, Date: TestDate, TextDecoder,
+            console: { log: (...args) => logs.push({ level: 'log', args }), warn: (...args) => logs.push({ level: 'warn', args }), error: (...args) => logs.push({ level: 'error', args }) },
             setTimeout, clearTimeout,
             require(module) {
                 if (module === 'wx-server-sdk') return cloud
@@ -176,7 +178,7 @@ function harness() {
         { _id: 'other-dish', groupId: 'b', name: '其他午餐', price: 20, visible: true, sortNo: 1 },
     ])
     return {
-        db, cloud, files, seed,
+        db, cloud, files, seed, logs,
         rows: name => clone([...getTable(name).values()]),
         setNow: date => { now = new Date(date).getTime() },
         invoke: (name, event, openid = 'admin-a', source = 'wx_client') => identity.run({ OPENID: openid, SOURCE: source }, () => load(name)(event, {})),

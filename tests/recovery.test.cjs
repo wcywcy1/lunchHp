@@ -187,3 +187,90 @@ test('删除组织级联清理专属数据与文件，其他组织共用的头�
     assert.ok(h.files.has(sharedAvatar))
     assert.equal(h.rows('lunch_members').find(row => row._id === 'b-user').avatar, sharedAvatar)
 })
+
+test('头像引用查询失败时终止删除，不改变任何组织数据', async () => {
+    const h = harness()
+    h.seed('lunch_groups', [{ _id: 'c', creatorId: 'owner-c' }])
+    h.seed('lunch_members', [{
+        _id: 'c-owner', groupId: 'c', openid: 'owner-c', role: 'creator', name: 'C创建者',
+        isVirtual: false, avatar: 'cloud://test/lunch/avatar_c.jpg',
+    }])
+    h.seed('lunch_orders', [{ _id: 'c-order', groupId: 'c', memberId: 'c-owner', menuId: 'c-dish', date: '2026-09-16', status: 'pending', price: 10 }])
+    h.seed('lunch_menu', [{ _id: 'c-dish', groupId: 'c', name: 'C菜', supplier: 'C店', price: 10 }])
+    h.seed('lunch_backups', [{ _id: 'bk-c', groupId: 'c', type: 'manual', fileID: 'cloud://test/lunch/backups/c/bk.json' }])
+
+    const originalCollection = h.db.collection
+    h.db.collection = name => {
+        const real = originalCollection(name)
+        if (name !== 'lunch_members') return real
+        return {
+            where(condition) {
+                if (condition && condition.avatar) throw new Error('avatar query failed')
+                return real.where(condition)
+            },
+        }
+    }
+    try {
+        const result = await h.invoke('lunch_menu', { action: 'deleteGroup', groupId: 'c' }, 'owner-c')
+        assert.equal(result.code, 500)
+        assert.ok(h.rows('lunch_groups').some(row => row._id === 'c'))
+        assert.equal(h.rows('lunch_orders').filter(row => row.groupId === 'c').length, 1)
+        assert.equal(h.rows('lunch_menu').filter(row => row.groupId === 'c').length, 1)
+        assert.equal(h.rows('lunch_members').filter(row => row.groupId === 'c').length, 1)
+        assert.equal(h.rows('lunch_backups').filter(row => row.groupId === 'c').length, 1)
+    } finally {
+        h.db.collection = originalCollection
+    }
+})
+
+test('deleteFile 逐项失败时记录残留 fileID 与错误信息', async () => {
+    const h = harness()
+    const okFile = 'cloud://test/lunch/backups/c/ok.json'
+    const failFile = 'cloud://test/lunch/avatar_c.jpg'
+    h.files.set(okFile, Buffer.from('{}'))
+    h.files.set(failFile, Buffer.from('a'))
+    h.seed('lunch_groups', [{ _id: 'c', creatorId: 'owner-c' }])
+    h.seed('lunch_members', [{
+        _id: 'c-owner', groupId: 'c', openid: 'owner-c', role: 'creator', name: 'C创建者',
+        isVirtual: false, avatar: failFile,
+    }])
+    h.seed('lunch_backups', [{ _id: 'bk-c', groupId: 'c', type: 'manual', fileID: okFile }])
+
+    h.cloud.deleteFile = async ({ fileList }) => ({
+        fileList: fileList.map(fileID => {
+            if (fileID === failFile) return { fileID, status: -1, errMsg: 'permission denied' }
+            h.files.delete(fileID)
+            return { fileID, status: 0, errMsg: 'ok' }
+        }),
+    })
+
+    const result = await h.invoke('lunch_menu', { action: 'deleteGroup', groupId: 'c' }, 'owner-c')
+    assert.equal(result.code, 0, result.msg)
+    assert.equal(h.rows('lunch_groups').some(row => row._id === 'c'), false)
+    assert.equal(h.files.has(okFile), false)
+    assert.ok(h.files.has(failFile))
+    const warned = h.logs.filter(entry => entry.level === 'warn').map(entry => entry.args.join(' ')).join('\n')
+    assert.ok(warned.includes(failFile))
+    assert.ok(warned.includes('permission denied'))
+})
+
+test('deleteFile 抛异常时记录该批全部 fileID 且不阻断组织删除', async () => {
+    const h = harness()
+    const backupFile = 'cloud://test/lunch/backups/c/a.json'
+    const avatarFile = 'cloud://test/lunch/avatar_c.jpg'
+    h.seed('lunch_groups', [{ _id: 'c', creatorId: 'owner-c' }])
+    h.seed('lunch_members', [{
+        _id: 'c-owner', groupId: 'c', openid: 'owner-c', role: 'creator', name: 'C创建者',
+        isVirtual: false, avatar: avatarFile,
+    }])
+    h.seed('lunch_backups', [{ _id: 'bk-c', groupId: 'c', type: 'manual', fileID: backupFile }])
+    h.cloud.deleteFile = async () => { throw new Error('storage unavailable') }
+
+    const result = await h.invoke('lunch_menu', { action: 'deleteGroup', groupId: 'c' }, 'owner-c')
+    assert.equal(result.code, 0, result.msg)
+    assert.equal(h.rows('lunch_groups').some(row => row._id === 'c'), false)
+    const warned = h.logs.filter(entry => entry.level === 'warn').map(entry => entry.args.join(' ')).join('\n')
+    assert.ok(warned.includes(backupFile))
+    assert.ok(warned.includes(avatarFile))
+    assert.ok(warned.includes('storage unavailable'))
+})

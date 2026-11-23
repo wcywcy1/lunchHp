@@ -395,6 +395,17 @@ function createRequestHandlers(GROUP_ID) {
             .map(m => m.avatar)
             .filter(file => typeof file === 'string' && file.startsWith('cloud://')))]
 
+        // 头像可能仍被其他组织/用户引用（如同时属于两个组织），只删除无引用的文件。
+        // 该查询在任何删除动作之前执行，失败则终止，不改变任何数据。
+        let referencedAvatars = new Set()
+        if (avatarFiles.length > 0) {
+            const holders = await fetchAll(db.collection(COL.MEMBERS), {
+                groupId: _.neq(GROUP_ID),
+                avatar: _.in(avatarFiles),
+            })
+            referencedAvatars = new Set(holders.map(m => m.avatar))
+        }
+
         // 彻底清除本组织全部数据
         await db.collection(COL.ORDERS).where({ groupId: GROUP_ID }).remove()
         await db.collection(COL.MENU).where({ groupId: GROUP_ID }).remove()
@@ -405,21 +416,23 @@ function createRequestHandlers(GROUP_ID) {
         try { await db.collection('lunch_backups').where({ groupId: GROUP_ID }).remove() } catch (e) { console.warn('clear backups error:', e.message) }
         try { await db.collection('lunch_order_keys').where({ groupId: GROUP_ID }).remove() } catch (e) { console.warn('clear order_keys error:', e.message) }
 
-        // 头像可能仍被其他组织/用户引用（如同时属于两个组织），仅删除无引用的文件
-        let referencedAvatars = new Set()
-        if (avatarFiles.length > 0) {
-            const holders = await fetchAll(db.collection(COL.MEMBERS), { avatar: _.in(avatarFiles) })
-            referencedAvatars = new Set(holders.map(m => m.avatar))
-        }
         const filesToDelete = [...new Set([
             ...backupFiles,
             ...avatarFiles.filter(file => !referencedAvatars.has(file)),
         ])]
         for (let i = 0; i < filesToDelete.length; i += 50) {
+            const batch = filesToDelete.slice(i, i + 50)
             try {
-                await cloud.deleteFile({ fileList: filesToDelete.slice(i, i + 50) })
+                const res = await cloud.deleteFile({ fileList: batch })
+                const failed = (res && Array.isArray(res.fileList) ? res.fileList : [])
+                    .filter(item => item && item.status !== 0)
+                if (failed.length > 0) {
+                    console.warn('clear group files failed:',
+                        failed.map(item => `${item.fileID}:${item.errMsg || item.status}`).join(', '))
+                }
             } catch (e) {
-                console.warn('clear group files error:', e.message)
+                // 文件删除失败不阻断组织删除，但需记录完整批次用于事后清理
+                console.warn('clear group files error:', e.message, batch.join(','))
             }
         }
 
