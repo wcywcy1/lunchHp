@@ -1,5 +1,6 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
 const path = require('node:path')
 const esbuild = require('esbuild')
 
@@ -18,7 +19,6 @@ function loadTypeScriptModule(relativePath) {
 
 const { GroupRequestCache } = loadTypeScriptModule('src/services/groupRequestCache.ts')
 const { loadAdminData } = loadTypeScriptModule('src/services/adminDataLoader.ts')
-const { createDebouncedTask } = loadTypeScriptModule('src/utils/debouncedTask.ts')
 const { getCutoffNoticeState } = loadTypeScriptModule('src/utils/cutoffNotice.ts')
 const {
     resolveCurrentMember,
@@ -67,21 +67,6 @@ test('管理页并行请求允许订单或时间戳单独失败', async () => {
     assert.match(result.ordersError.message, /orders failed/)
     assert.deepEqual(result.timestamps, { orderCutoff: '10:00' })
     assert.equal(result.timestampsError, null)
-})
-
-test('Watch 防抖只执行最后一次任务，取消后不再执行', async () => {
-    let calls = 0
-    const debounced = createDebouncedTask(() => { calls += 1 }, 15)
-    debounced.schedule()
-    debounced.schedule()
-    debounced.schedule()
-    await new Promise(resolve => setTimeout(resolve, 30))
-    assert.equal(calls, 1)
-
-    debounced.schedule()
-    debounced.cancel()
-    await new Promise(resolve => setTimeout(resolve, 30))
-    assert.equal(calls, 1)
 })
 
 test('停止接单通知只在北京时间截止后至次日零点显示', () => {
@@ -180,4 +165,29 @@ test('管理员合账目标排除 creator，未完成合账优先继续', () => 
     assert.equal(getMemberMergeAction({ _id: 'v', groupId: 'a', name: '虚拟', role: 'member', isVirtual: true, mergeFromMemberId: 'real' }), 'resume')
     assert.equal(getMemberMergeAction({ _id: 'v', groupId: 'a', name: '虚拟', role: 'member', isVirtual: true }), 'select')
     assert.equal(getMemberMergeAction({ _id: 'r', groupId: 'a', name: '真实', role: 'member' }), 'none')
+})
+
+function walkSourceFiles(dir) {
+    const files = []
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name)
+        if (entry.isDirectory()) files.push(...walkSourceFiles(full))
+        else files.push(full)
+    }
+    return files
+}
+
+test('客户端不再直接访问云数据库，也不再使用 Collection.watch', () => {
+    const root = path.resolve(__dirname, '../src')
+    const offenders = []
+    for (const file of walkSourceFiles(root)) {
+        if (!/\.(ts|js|vue)$/.test(file) || file.endsWith('.d.ts')) continue
+        const text = fs.readFileSync(file, 'utf8')
+        if (/wx\.cloud\.database/.test(text) || /\.watch\s*\(/.test(text) ||
+            /watchTodayOrders|useRealtimeWatch/.test(text)) {
+            offenders.push(path.relative(root, file))
+        }
+    }
+    assert.deepEqual(offenders, [])
+    assert.equal(fs.existsSync(path.resolve(root, 'hooks/useRealtimeWatch.ts')), false)
 })

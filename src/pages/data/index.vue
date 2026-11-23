@@ -309,7 +309,7 @@
 
 <script setup lang="ts">
 import { computed, watch } from 'vue'
-import { onShow, onHide } from '@dcloudio/uni-app'
+import { onShow } from '@dcloudio/uni-app'
 import { useStore } from '../../services/store'
 import { useAuth } from '../../hooks/useAuth'
 import { useDataManage } from '../../hooks/useDataManage'
@@ -424,8 +424,6 @@ const {
   toggleHistoryConfirmed,
   loadMoreHistoryPending,
   loadMoreHistoryConfirmed,
-  startRealtimeWatch,
-  stopRealtimeWatch,
   openCutoffDialog,
   saveCutoff,
   toggleCutoffDisabled,
@@ -462,8 +460,6 @@ onShow(() => {
     uni.switchTab({ url: '/pages/home/index' })
     return
   }
-  // realtime watcher 始终开启，保证管理员实时看到新订单
-  startRealtimeWatch()
   // 节流：30 秒内不重复全量加载
   const now = Date.now()
   if (now - lastDataLoadTime < DATA_THROTTLE_MS) return
@@ -471,10 +467,6 @@ onShow(() => {
   loadData()
   loadPendingCancelRequests()
   loadMenuList()
-})
-
-onHide(() => {
-  stopRealtimeWatch()
 })
 </script>
 

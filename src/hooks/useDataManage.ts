@@ -4,11 +4,9 @@ import { menuAction, orderAction, backupAction } from '../services/repositories/
 import { clearFreshnessCache, toMs } from '../services/freshness'
 import { ORDER_STATUS, ROLE } from '../constants/orderStatus'
 import { CACHE_KEYS } from '../constants/cacheConfig'
-import { useRealtimeWatch } from './useRealtimeWatch'
 import { buildCsvLine, writeCsvWithBom, shareOrSaveFile, isPcPlatform, chooseFile } from '../utils/csv'
 import { getTodayString } from '../utils/date'
 import { loadAdminData } from '../services/adminDataLoader'
-import { createDebouncedTask } from '../utils/debouncedTask'
 import { filterMergeTargets, patchMembersAfterMerge } from '../utils/memberMerge'
 
 export function useDataManage() {
@@ -57,7 +55,6 @@ export function useDataManage() {
     const backingUp = ref(false)
     const rebuilding = ref(false)
     const saving = ref(false)
-    const realtime = useRealtimeWatch()
 
     // 停止接单时间相关
     const showCutoffDialog = ref(false)
@@ -139,21 +136,6 @@ export function useDataManage() {
             console.error('loadData error:', e)
         } finally {
             loading.value = false
-        }
-    }
-
-    async function loadOrdersOnly() {
-        try {
-            const res = await orderAction('getRecentOrders')
-            if (res.result.code === 0) {
-                const orders = res.result.data || []
-                const today = getTodayString()
-                const todayOrders = orders.filter((o: any) => o.date === today)
-                pendingOrders.value = todayOrders.filter((o: any) => o.status === ORDER_STATUS.PENDING)
-                confirmedOrders.value = todayOrders.filter((o: any) => o.status === ORDER_STATUS.CONFIRMED)
-            }
-        } catch (e) {
-            console.error('loadOrdersOnly error:', e)
         }
     }
 
@@ -1403,20 +1385,6 @@ export function useDataManage() {
         }
     }
 
-    const watchRefresh = createDebouncedTask(() => { void loadOrdersOnly() }, 400)
-
-    function startRealtimeWatch() {
-        realtime.watchTodayOrders((snapshot: any) => {
-            if (snapshot.type === 'init') return
-            watchRefresh.schedule()
-        })
-    }
-
-    function stopRealtimeWatch() {
-        watchRefresh.cancel()
-        realtime.closeAll()
-    }
-
     function openCutoffDialog() {
         cutoffInput.value = groupCutoff.value
         showCutoffDialog.value = true
@@ -1557,8 +1525,6 @@ export function useDataManage() {
         toggleHistoryConfirmed,
         loadMoreHistoryPending,
         loadMoreHistoryConfirmed,
-        startRealtimeWatch,
-        stopRealtimeWatch,
         openCutoffDialog,
         saveCutoff,
         toggleCutoffDisabled,

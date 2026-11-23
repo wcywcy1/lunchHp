@@ -4,7 +4,6 @@ import { useStore, setStore, getCache, setCache, saveSession, getRecentLoadTime,
 import { menuAction, orderAction } from '../services/repositories/baseRepository'
 import { waitForInit } from '../services/appInit'
 import { CACHE_KEYS, CACHE_TTL } from '../constants/cacheConfig'
-import { useRealtimeWatch } from './useRealtimeWatch'
 import { CLOUD_STORAGE_PATH } from '../constants/appConfig'
 import { checkDataFreshness, toMs } from '../services/freshness'
 import { getTodayString } from '../utils/date'
@@ -26,7 +25,6 @@ export function useHome() {
     const cutoffNoticeContent = ref('')
     const operationalNotice = ref('')
     const noticeContent = computed(() => operationalNotice.value || cutoffNoticeContent.value)
-    const realtime = useRealtimeWatch()
     let cutoffNoticeTimer: ReturnType<typeof setTimeout> | null = null
 
     const currentAvatar = computed(() => store.member?.avatar || '')
@@ -167,35 +165,10 @@ export function useHome() {
             showPrivacyDialog.value = true
             return
         }
-        startRealtimeWatch()
         const now = Date.now()
         if (now - lastFreshnessCheck < FRESHNESS_THROTTLE_MS) return
         lastFreshnessCheck = now
         await checkFreshness()
-    }
-
-    function startRealtimeWatch() {
-        realtime.watchTodayOrders({
-            onInit: () => {},
-            onPatch: (changes: any[]) => {
-                if (!changes || changes.length === 0) return
-                const orders = [...(store.recentOrders || [])]
-                for (const c of changes) {
-                    const idx = orders.findIndex((o: any) => o._id === c.doc._id)
-                    if (c.queueType === 'add' || c.queueType === 'init') {
-                        if (idx < 0) orders.unshift(c.doc)
-                    } else if (c.queueType === 'update' || c.queueType === 'replace') {
-                        if (idx >= 0) orders[idx] = c.doc
-                    } else if (c.queueType === 'remove') {
-                        if (idx >= 0) orders.splice(idx, 1)
-                    }
-                }
-                setStore({ recentOrders: orders })
-                setCache(CACHE_KEYS.RECENT_ORDERS, orders)
-                refreshMonthSummary()
-            },
-            onError: () => { fetchRecentOrders() }
-        })
     }
 
     const showNoticeBanner = computed(() => noticeContent.value.length > 0)
@@ -451,7 +424,6 @@ export function useHome() {
         initApp,
         onShow,
         onHide: () => {
-            realtime.closeAll()
             if (cutoffNoticeTimer) clearTimeout(cutoffNoticeTimer)
             cutoffNoticeTimer = null
         },

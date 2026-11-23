@@ -373,6 +373,7 @@ function createRequestHandlers(GROUP_ID) {
             }
             const { _id } = await db.collection(COL.MEMBERS).add({ data: member })
             member._id = _id
+            await updateGroupTimestamp('membersTimestamp')
 
             return { code: 0, data: { member, groupId: targetGroupId, groupName: name, alreadyJoined: false } }
         } finally {

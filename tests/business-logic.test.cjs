@@ -156,3 +156,46 @@ test('历史订单计数与分页只包含今天之前的订单', async () => {
     assert.equal(pending.code, 0, pending.msg)
     assert.deepEqual(Array.from(pending.data.list, order => order._id), ['old-pending'])
 })
+
+test('joinGroupByName 新增成员后更新 membersTimestamp', async () => {
+    const h = harness()
+    h.seed('lunch_groups', [{ _id: 'named', name: '测试组织', creatorId: 'owner-named' }])
+    assert.equal(h.rows('lunch_groups').find(g => g._id === 'named').membersTimestamp, undefined)
+
+    const created = await h.invoke('lunch_menu', {
+        action: 'joinGroupByName', groupId: 'named', groupName: '测试组织',
+    }, 'new-member')
+    assert.equal(created.code, 0, created.msg)
+    assert.equal(created.data.alreadyJoined, false)
+    assert.equal(created.data.member.groupId, 'named')
+    assert.equal(created.data.member.role, 'member')
+    assert.ok(h.rows('lunch_groups').find(g => g._id === 'named').membersTimestamp instanceof Date)
+    assert.equal(h.rows('lunch_members').filter(m => m.groupId === 'named' && m.openid === 'new-member').length, 1)
+
+    const again = await h.invoke('lunch_menu', {
+        action: 'joinGroupByName', groupId: 'named', groupName: '测试组织',
+    }, 'new-member')
+    assert.equal(again.code, 0, again.msg)
+    assert.equal(again.data.alreadyJoined, true)
+    assert.equal(h.rows('lunch_members').filter(m => m.groupId === 'named' && m.openid === 'new-member').length, 1)
+})
+
+test('切组后按 groupId 顺序读取订单不会串组', async () => {
+    const h = harness()
+    h.setNow('2026-09-16T01:00:00Z')
+    h.seed('lunch_orders', [
+        { _id: 'a-order', groupId: 'a', memberId: 'member', menuId: 'dish', memberName: 'A组', status: 'pending', date: '2026-09-16', createdAt: new Date('2026-09-16T01:00:00Z') },
+        { _id: 'b-order', groupId: 'b', memberId: 'other', menuId: 'other-dish', memberName: 'B组', status: 'pending', date: '2026-09-16', createdAt: new Date('2026-09-16T01:00:00Z') },
+    ])
+
+    const a1 = await h.invoke('lunch_order', { action: 'getRecentOrders', groupId: 'a' }, 'member-a')
+    const b1 = await h.invoke('lunch_order', { action: 'getRecentOrders', groupId: 'b' }, 'owner-b')
+    const a2 = await h.invoke('lunch_order', { action: 'getRecentOrders', groupId: 'a' }, 'member-a')
+
+    assert.equal(a1.code, 0, a1.msg)
+    assert.equal(b1.code, 0, b1.msg)
+    assert.equal(a2.code, 0, a2.msg)
+    assert.deepEqual(Array.from(a1.data, order => order._id), ['a-order'])
+    assert.deepEqual(Array.from(b1.data, order => order._id), ['b-order'])
+    assert.deepEqual(Array.from(a2.data, order => order._id), ['a-order'])
+})

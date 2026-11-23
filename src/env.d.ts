@@ -11,7 +11,6 @@ declare const wx: {
   cloud: {
     init(options: { env: string; traceUser?: boolean }): void
     callFunction(options: { name: string; data?: Record<string, any> }): Promise<any>
-    database(): any
     downloadFile(options: { fileID: string; success?: (res: any) => void; fail?: (err: any) => void }): void
     deleteFile(options: { fileList: string[] }): Promise<any>
     uploadFile(options: { cloudPath: string; filePath: string }): Promise<{ fileID: string }>
