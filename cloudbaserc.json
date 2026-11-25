@@ -1,0 +1,38 @@
+{
+  "$schema": "https://static.cloudbase.net/cli/cloudbaserc.schema.json",
+  "envId": "cloud1-d0g9zww8h390b6f41",
+  "functionRoot": "wxcloud/functions",
+  "functions": [
+    {
+      "name": "lunch_menu",
+      "handler": "index.main",
+      "timeout": 20,
+      "installDependency": true
+    },
+    {
+      "name": "lunch_order",
+      "handler": "index.main",
+      "timeout": 20,
+      "installDependency": true
+    },
+    {
+      "name": "lunch_backup",
+      "handler": "index.main",
+      "timeout": 20,
+      "installDependency": true,
+      "triggers": [
+        {
+          "name": "weeklyBackup",
+          "type": "timer",
+          "config": "0 0 2 * * SUN *"
+        }
+      ]
+    },
+    {
+      "name": "lunch_voice",
+      "handler": "index.main",
+      "timeout": 20,
+      "installDependency": true
+    }
+  ]
+}

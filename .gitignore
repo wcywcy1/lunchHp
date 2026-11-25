@@ -16,6 +16,10 @@ dist
 *.key
 private.wx*.key
 
+# CloudBase CLI 本地环境变量
+.env
+.env.*.local
+
 # Editor directories and files
 .idea
 *.suo

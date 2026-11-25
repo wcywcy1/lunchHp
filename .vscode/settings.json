@@ -1,0 +1,8 @@
+{
+  "json.schemas": [
+    {
+      "fileMatch": ["cloudbaserc.json"],
+      "url": "https://static.cloudbase.net/cli/cloudbaserc.schema.json"
+    }
+  ]
+}
