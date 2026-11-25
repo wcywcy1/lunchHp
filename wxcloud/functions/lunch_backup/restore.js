@@ -160,6 +160,11 @@ async function restore({ db, cloud, groupId, openid, event, loadBackup, doBackup
         }
         return { done: end === plan.length, jobId: job.id, processed: end, total: plan.length }
     })
+    // 恢复计划文件只用于本次任务，完成后删除，避免云存储长期累积。
+    if (result.done && job.planFileID) {
+        try { await cloud.deleteFile({ fileList: [job.planFileID] }) }
+        catch (e) { console.warn('cleanup restore plan file failed:', e && e.message) }
+    }
     return { code: 0, data: result }
 }
 module.exports = { restore, validateSnapshot, buildPlan, reviveDates }

@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue'
-import { useStore, saveSession, setCache, setStatsLoadTime, resetStore, clearAllCache, getActiveGroupId, setStore, flushCache } from '../services/store'
+import { useStore, saveSession, setCache, setStatsLoadTime, setRecentLoadTime, resetStore, clearAllCache, getActiveGroupId, setStore, flushCache } from '../services/store'
 import { menuAction, orderAction, backupAction } from '../services/repositories/baseRepository'
 import { clearFreshnessCache, toMs } from '../services/freshness'
 import { ORDER_STATUS, ROLE } from '../constants/orderStatus'
@@ -514,11 +514,20 @@ export function useDataManage() {
         if (saving.value) return
         if (!editingMember.value) return
         const name = editingName.value.trim()
+        if (!name) {
+            uni.showToast({ title: '姓名不能为空', icon: 'none' })
+            return
+        }
+        if (name.length > 20) {
+            uni.showToast({ title: '姓名不能超过20个字符', icon: 'none' })
+            return
+        }
         saving.value = true
         try {
             await menuAction('updateMemberName', { memberId: editingMember.value._id, name })
             const member = store.members.find((m: any) => m._id === editingMember.value._id)
             if (member) member.name = name
+            setCache(CACHE_KEYS.MEMBERS, store.members)
             if (store.member && store.member._id === editingMember.value._id) {
                 store.member.name = name
                 saveSession({ groupId: store.member.groupId, role: store.member.role, member: store.member })
@@ -537,6 +546,7 @@ export function useDataManage() {
             await menuAction('setAdmin', { memberId, isAdmin: true })
             const member = store.members.find((m: any) => m._id === memberId)
             if (member) member.role = ROLE.ADMIN
+            setCache(CACHE_KEYS.MEMBERS, store.members)
             if (store.member?._id === memberId) {
                 store.member.role = ROLE.ADMIN
                 store.role = ROLE.ADMIN
@@ -552,6 +562,7 @@ export function useDataManage() {
             await menuAction('setAdmin', { memberId, isAdmin: false })
             const member = store.members.find((m: any) => m._id === memberId)
             if (member) member.role = ROLE.MEMBER
+            setCache(CACHE_KEYS.MEMBERS, store.members)
             if (store.member?._id === memberId) {
                 store.member.role = ROLE.MEMBER
                 store.role = ROLE.MEMBER
@@ -560,6 +571,22 @@ export function useDataManage() {
             uni.showToast({ title: '已撤除管理员', icon: 'success' })
         } catch (e: any) {
             uni.showToast({ title: e.message || '操作失败', icon: 'none' })
+        }
+    }
+
+    // 覆盖导入前先做一次全量备份；备份失败则取消，避免“先删后写”中途失败丢数据
+    async function ensureBackupBeforeRewrite(mode: 'append' | 'rewrite' | ''): Promise<boolean> {
+        if (mode !== 'rewrite') return true
+        uni.showLoading({ title: '覆盖前自动备份...', mask: true })
+        try {
+            const res = await backupAction('backupManual', { remark: '覆盖导入前自动备份' })
+            if (res.result.code !== 0) throw new Error(res.result.msg || '自动备份失败')
+            return true
+        } catch (e: any) {
+            uni.showToast({ title: (e.message || '自动备份失败') + '，已取消覆盖导入', icon: 'none', duration: 3000 })
+            return false
+        } finally {
+            uni.hideLoading()
         }
     }
 
@@ -577,6 +604,7 @@ export function useDataManage() {
             })
         })
         if (!mode) return
+        if (!await ensureBackupBeforeRewrite(mode)) return
 
         uni.showLoading({ title: '上传文件...' })
         try {
@@ -825,6 +853,7 @@ export function useDataManage() {
             })
         })
         if (!mode) return
+        if (!await ensureBackupBeforeRewrite(mode)) return
 
         uni.showLoading({ title: '上传文件...' })
         try {
@@ -903,7 +932,8 @@ export function useDataManage() {
                     success: res => resolve(res.confirm ? 'append' : 'rewrite'),
                 })
             })
-            if (!mode) return
+            if (!mode) { uni.hideLoading(); return }
+            if (!await ensureBackupBeforeRewrite(mode)) return
             const batches = splitBatches(items)
             uni.showLoading({ title: '导入中...' })
             let totalInserted = 0
@@ -970,7 +1000,8 @@ export function useDataManage() {
                 success: res => resolve(res.confirm ? 'append' : 'rewrite'),
             })
         })
-        if (!mode) return
+        if (!mode) { uni.hideLoading(); return }
+        if (!await ensureBackupBeforeRewrite(mode)) return
         const batches = splitBatches(members)
         let totalInserted = 0
         const skippedMembers: any[] = []
@@ -1051,13 +1082,26 @@ export function useDataManage() {
             const capabilities = await backupAction('getBackupCapabilities', { groupId })
             if (capabilities.result.data?.restoreProtocol !== 2) throw new Error('请先更新备份云函数')
             let jobId = ''
+            let rounds = 0
+            let lastProcessed = -1
+            let stalled = 0
+            const MAX_RESTORE_ROUNDS = 2000
             while (true) {
+                if (++rounds > MAX_RESTORE_ROUNDS) throw new Error('恢复轮次过多，请稍后重试继续')
                 if (store.groupId !== groupId) throw new Error('组织已切换，请返回原组织继续恢复')
                 const res = await backupAction('restoreBackup', { backupId, jobId: jobId || undefined, groupId, restoreProtocol: 2 })
                 const progress = res.result.data
                 if (typeof progress?.done !== 'boolean') throw new Error('恢复协议不匹配，请更新云函数')
                 jobId = progress.jobId
                 if (progress.done) break
+                const processed = Number(progress.processed) || 0
+                if (processed === lastProcessed) {
+                    stalled++
+                    if (stalled >= 3) throw new Error('恢复长时间无进展，请稍后重试继续')
+                } else {
+                    lastProcessed = processed
+                    stalled = 0
+                }
                 uni.showLoading({ title: '恢复 ' + (progress.processed || 0) + '/' + progress.total, mask: true })
             }
             showBackupDialog.value = false
@@ -1117,6 +1161,7 @@ export function useDataManage() {
         try {
             await menuAction('deleteMember', { memberId: member._id })
             store.members = store.members.filter((m: any) => m._id !== member._id)
+            setCache(CACHE_KEYS.MEMBERS, store.members)
             uni.showToast({ title: '已删除', icon: 'success' })
         } catch (e: any) {
             uni.showToast({ title: e.message || '删除失败', icon: 'none' })
@@ -1141,6 +1186,15 @@ export function useDataManage() {
             store.recentOrders = []
             pendingOrders.value = []
             confirmedOrders.value = []
+            // 服务端已清空业务数据，本机缓存必须同步清掉，避免重启后旧数据回填
+            setCache(CACHE_KEYS.RECENT_ORDERS, [])
+            setCache(CACHE_KEYS.MENU, [])
+            setCache(CACHE_KEYS.MEMBERS, [])
+            setCache(CACHE_KEYS.MONTH_SUMMARY, null)
+            setCache(CACHE_KEYS.RECENT_TIMESTAMP, null)
+            setCache(CACHE_KEYS.MENU_TIMESTAMP, null)
+            setCache(CACHE_KEYS.MEMBERS_TIMESTAMP, null)
+            setRecentLoadTime(0)
             // 复用现有缓存机制：清掉本机统计缓存并让统计页下次按原流程重新加载
             setStatsLoadTime(0)
             setCache(CACHE_KEYS.MONTHLY_STATS, [], true)

@@ -148,6 +148,74 @@ test('清空数据后刷新时间戳，其他端能感知菜单/成员/订单变
     assert.equal(group.dataTimestamp, 0)
 })
 
+test('定时备份按最久未尝试的组轮转，并跳过已处理组', async () => {
+    const h = harness()
+    await h.db.collection('lunch_groups').where({}).remove()
+    h.seed('lunch_groups', [
+        { _id: 'g1', creatorId: 'o1', lastAutoBackupAttemptAt: new Date('2026-09-01T00:00:00Z') },
+        { _id: 'g2', creatorId: 'o2', lastAutoBackupAttemptAt: new Date('2026-09-10T00:00:00Z') },
+        { _id: 'g3', creatorId: 'o3', lastAutoBackupAttemptAt: new Date('2026-09-05T00:00:00Z') },
+    ])
+    const paths = []
+    const originalUpload = h.cloud.uploadFile
+    h.cloud.uploadFile = async payload => {
+        paths.push(payload.cloudPath)
+        return originalUpload(payload)
+    }
+
+    const result = await h.invoke('lunch_backup', { Type: 'Timer', TriggerName: 'autoBackup' }, '', 'wx_trigger')
+    assert.equal(result.code, 0, JSON.stringify(result))
+    assert.equal(result.data.length, 3)
+    assert.ok(paths[0].includes('/g1/'))
+    for (const id of ['g1', 'g2', 'g3']) {
+        assert.ok(h.rows('lunch_groups').find(row => row._id === id).lastAutoBackupAttemptAt instanceof Date)
+    }
+    assert.equal(h.rows('lunch_backups').filter(row => row.type === 'auto').length, 3)
+
+    await h.db.collection('lunch_groups').doc('g2').update({
+        data: { lastAutoBackupAttemptAt: new Date('2026-08-01T00:00:00Z') },
+    })
+    paths.length = 0
+    const second = await h.invoke('lunch_backup', { Type: 'Timer', TriggerName: 'autoBackup' }, '', 'wx_trigger')
+    assert.equal(second.code, 0)
+    assert.ok(paths[0].includes('/g2/'))
+})
+
+test('恢复完成后删除恢复计划文件，安全快照保留', async () => {
+    const h = harness()
+    const backup = await h.invoke('lunch_backup', { action: 'backupManual', groupId: 'a' })
+    const request = { action: 'restoreBackup', restoreProtocol: 2, groupId: 'a', backupId: backup.data._id }
+    const start = await h.invoke('lunch_backup', request)
+    assert.equal(start.code, 0, start.msg)
+    const job = h.rows('lunch_groups').find(row => row._id === 'a').restoreJob
+    assert.ok(job.planFileID)
+    assert.ok(h.files.has(job.planFileID))
+
+    let result = start
+    for (let i = 0; i < 20 && !result.data.done; i++) {
+        result = await h.invoke('lunch_backup', { ...request, jobId: start.data.jobId })
+        assert.equal(result.code, 0, result.msg)
+    }
+    assert.equal(result.data.done, true)
+    assert.equal(h.files.has(job.planFileID), false)
+    const group = h.rows('lunch_groups').find(row => row._id === 'a')
+    assert.ok(group.lastRestore.safetyBackupId)
+    assert.ok(h.rows('lunch_backups').find(row => row._id === group.lastRestore.safetyBackupId))
+})
+
+test('恢复期间删除备份被维护锁拦截', async () => {
+    const h = harness()
+    const backup = await h.invoke('lunch_backup', { action: 'backupManual', groupId: 'a' })
+    const start = await h.invoke('lunch_backup', {
+        action: 'restoreBackup', restoreProtocol: 2, groupId: 'a', backupId: backup.data._id,
+    })
+    assert.equal(start.code, 0, start.msg)
+    // deleteBackup 不在免租约白名单里，restoreJob 存在时由 requestGate 统一返回 423
+    const removed = await h.invoke('lunch_backup', { action: 'deleteBackup', groupId: 'a', backupId: backup.data._id })
+    assert.equal(removed.code, 423)
+    assert.ok(h.rows('lunch_backups').find(row => row._id === backup.data._id))
+})
+
 test('删除组织级联清理专属数据与文件，其他组织共用的头像保留', async () => {
     const h = harness()
     const backupFile = 'cloud://test/lunch/backups/c/bk.json'

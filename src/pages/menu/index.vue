@@ -109,19 +109,22 @@ const {
 } = useOrder()
 
 // 帮他人点餐时拉取被帮人的点餐统计，self 模式清空回退到当前用户统计
+let userStatsRequestSeq = 0
 watch([orderFor, orderForMemberId], async () => {
+  const seq = ++userStatsRequestSeq
   if (orderFor.value === 'help' && orderForMemberId.value) {
     try {
       const res = await orderAction('getUserMenuStats', { memberId: orderForMemberId.value })
+      if (seq !== userStatsRequestSeq) return
       if (res.result.code === 0) {
         statsOverride.value = res.result.data.stats || {}
         return
       }
     } catch (e) {
-      console.error('getUserMenuStats error:', e)
+      if (seq === userStatsRequestSeq) console.error('getUserMenuStats error:', e)
     }
   }
-  statsOverride.value = {}
+  if (seq === userStatsRequestSeq) statsOverride.value = {}
 }, { immediate: true })
 
 const { state: voiceState, volume: voiceVolume, toggle: onVoiceToggle } = useVoiceSearch({

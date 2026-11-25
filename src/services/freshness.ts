@@ -40,47 +40,30 @@ async function _doCheckFreshness(groupId: string) {
         const { recentTimestamp, menuTimestamp, membersTimestamp, orderCutoff, cutoffDisabled } = res.result.data
         setStore({ groupCutoff: orderCutoff || '10:00', cutoffDisabled: !!cutoffDisabled })
 
-        const tasks: Promise<void>[] = []
-        let memberChanged = false
-        if (toMs(menuTimestamp) !== toMs(store.menuTimestamp)) {
-            tasks.push((async () => {
-                try {
-                    const menuRes = await menuAction('getMenuList', { groupId })
-                    if (menuRes.result.code === 0) {
-                        const menu = menuRes.result.data
-                        setStore({ menu, menuTimestamp })
-                        setCache(CACHE_KEYS.MENU, menu)
-                        setCache(CACHE_KEYS.MENU_TIMESTAMP, menuTimestamp)
-                    }
-                } catch (e) { console.error('checkDataFreshness menu error:', e) }
-            })())
-        }
+        // 先刷新成员，再按新的 memberId 拉菜单，避免同一动作内调用两次 getMenuList
         if (toMs(membersTimestamp) !== toMs(store.membersTimestamp)) {
-            tasks.push((async () => {
-                try {
-                    const membersRes = await menuAction('getMembers', { groupId })
-                    if (membersRes.result.code === 0) {
-                        const members = membersRes.result.data
-                        setStore({ members, membersTimestamp })
-                        setCache(CACHE_KEYS.MEMBERS, members)
-                        setCache(CACHE_KEYS.MEMBERS_TIMESTAMP, membersTimestamp)
-                        const meId = store.member?._id
-                        const myRole = store.member?.role
-                        if (meId) {
-                            const me = resolveCurrentMember(members, store.member)
-                            if (me && (me._id !== meId || me.role !== myRole)) {
-                                setStore({ member: me, role: me.role })
-                                saveSession({ groupId: me.groupId, role: me.role, member: me })
-                                memberChanged = true
-                            }
+            try {
+                const membersRes = await menuAction('getMembers', { groupId })
+                if (membersRes.result.code === 0) {
+                    const members = membersRes.result.data
+                    setStore({ members, membersTimestamp })
+                    setCache(CACHE_KEYS.MEMBERS, members)
+                    setCache(CACHE_KEYS.MEMBERS_TIMESTAMP, membersTimestamp)
+                    const meId = store.member?._id
+                    const myRole = store.member?.role
+                    if (meId) {
+                        const me = resolveCurrentMember(members, store.member)
+                        if (me && (me._id !== meId || me.role !== myRole)) {
+                            setStore({ member: me, role: me.role })
+                            saveSession({ groupId: me.groupId, role: me.role, member: me })
                         }
                     }
-                } catch (e) { console.error('checkDataFreshness members error:', e) }
-            })())
+                }
+            } catch (e) {
+                console.error('checkDataFreshness members error:', e)
+            }
         }
-        await Promise.all(tasks)
-        if (memberChanged) {
-            // memberId 变化后刷新菜单，让 getMenuList 内嵌的个人点餐统计同步到新身份
+        if (toMs(menuTimestamp) !== toMs(store.menuTimestamp)) {
             try {
                 const menuRes = await menuAction('getMenuList', { groupId })
                 if (menuRes.result.code === 0) {
@@ -90,7 +73,7 @@ async function _doCheckFreshness(groupId: string) {
                     setCache(CACHE_KEYS.MENU_TIMESTAMP, menuTimestamp)
                 }
             } catch (e) {
-                console.error('checkDataFreshness after member merge menu error:', e)
+                console.error('checkDataFreshness menu error:', e)
             }
         }
         const result = { recentTimestamp, menuTimestamp, membersTimestamp, orderCutoff, cutoffDisabled }

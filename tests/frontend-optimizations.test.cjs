@@ -167,6 +167,30 @@ test('管理员合账目标排除 creator，未完成合账优先继续', () => 
     assert.equal(getMemberMergeAction({ _id: 'r', groupId: 'a', name: '真实', role: 'member' }), 'none')
 })
 
+test('业务日期统一按北京时间跨日', () => {
+    const { getTodayString, getTodayDisplayString, getBeijingHHMM } = loadTypeScriptModule('src/utils/date.ts')
+    assert.equal(getTodayString(new Date('2026-09-16T15:59:59.000Z')), '2026-09-16')
+    assert.equal(getTodayString(new Date('2026-09-16T16:00:00.000Z')), '2026-09-17')
+    assert.equal(getTodayDisplayString(new Date('2026-09-16T16:00:00.000Z')), '2026年09月17日')
+    assert.equal(getBeijingHHMM(Date.parse('2026-09-16T02:00:00.000Z')), '10:00')
+})
+
+test('截止状态按北京时间计算，下一次变化落在截止时刻或次日零点', () => {
+    const { getBeijingCutoffState } = loadTypeScriptModule('src/utils/date.ts')
+    const before = getBeijingCutoffState('10:00', Date.parse('2026-09-16T01:59:59.000Z'))
+    assert.equal(before.allowed, true)
+    assert.ok(before.nextChangeMs > 0 && before.nextChangeMs <= 3000)
+
+    const atCutoff = getBeijingCutoffState('10:00', Date.parse('2026-09-16T02:00:00.000Z'))
+    assert.equal(atCutoff.allowed, false)
+    assert.ok(atCutoff.nextChangeMs > 0)
+
+    const midnight = getBeijingCutoffState('10:00', Date.parse('2026-09-16T16:00:00.000Z'))
+    assert.equal(midnight.allowed, true)
+
+    assert.equal(getBeijingCutoffState('bad-value', Date.parse('2026-09-16T01:00:00.000Z')).allowed, true)
+})
+
 function walkSourceFiles(dir) {
     const files = []
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {

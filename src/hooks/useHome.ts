@@ -6,7 +6,7 @@ import { waitForInit } from '../services/appInit'
 import { CACHE_KEYS, CACHE_TTL } from '../constants/cacheConfig'
 import { CLOUD_STORAGE_PATH } from '../constants/appConfig'
 import { checkDataFreshness, toMs } from '../services/freshness'
-import { getTodayString } from '../utils/date'
+import { getTodayString, getTodayDisplayString } from '../utils/date'
 import { getCutoffNoticeState } from '../utils/cutoffNotice'
 import { patchMembersAfterMerge } from '../utils/memberMerge'
 
@@ -58,10 +58,7 @@ export function useHome() {
 
     const currentMemberId = computed(() => store.member?._id || '')
 
-    const todayDate = computed(() => {
-        const d = new Date()
-        return `${d.getFullYear()}年${String(d.getMonth() + 1).padStart(2, '0')}月${String(d.getDate()).padStart(2, '0')}日`
-    })
+    const todayDate = computed(() => getTodayDisplayString())
 
     const todayOrders = computed(() => {
         const today = getTodayString()
@@ -288,21 +285,21 @@ export function useHome() {
         }
         if (!store.member) return
         saving.value = true
-        const oldName = store.member.name
         try {
-            store.member.name = name
-            await menuAction('updateMemberName', { memberId: store.member._id, name })
+            // 先上传头像并写入服务端，再改名；避免头像失败时服务端姓名已改、本地却回滚的分叉
+            let newAvatar = ''
             if (avatarChanged.value && editingAvatar.value) {
                 const cloudPath = `${CLOUD_STORAGE_PATH}avatar_${store.member._id}_${Date.now()}.jpg`
                 const uploadRes = await wx.cloud.uploadFile({
                     cloudPath,
                     filePath: editingAvatar.value,
                 })
-                const profileRes = await menuAction('updateMemberProfile', { avatar: uploadRes.fileID })
-                if (profileRes.result.code === 0) {
-                    store.member.avatar = uploadRes.fileID
-                }
+                await menuAction('updateMemberProfile', { avatar: uploadRes.fileID })
+                newAvatar = uploadRes.fileID
             }
+            await menuAction('updateMemberName', { memberId: store.member._id, name })
+            store.member.name = name
+            if (newAvatar) store.member.avatar = newAvatar
             saveSession({ groupId: store.member.groupId, role: store.member.role, member: store.member })
             editingName.value = ''
             editingAvatar.value = ''
@@ -311,9 +308,6 @@ export function useHome() {
             showWelcomeDialog.value = false
             uni.showToast({ title: '已保存', icon: 'success' })
         } catch (e: any) {
-            if (store.member) {
-                store.member.name = oldName
-            }
             uni.showToast({ title: e.message || '保存失败', icon: 'none' })
         } finally {
             saving.value = false

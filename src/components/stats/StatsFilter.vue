@@ -118,6 +118,11 @@ watch(() => props.filter, (val) => {
   innerFilter.value = { ...val }
 }, { deep: true })
 
+// 每次打开都从已生效的筛选条件重建，取消时未确认的改动不会残留到下次
+watch(() => props.show, (visible) => {
+  if (visible) innerFilter.value = { ...props.filter }
+})
+
 const yearDisplayOptions = computed(() => ['全部', ...props.yearOptions.map(String)])
 const yearIndex = computed(() => {
   if (innerFilter.value.year === null) return 0

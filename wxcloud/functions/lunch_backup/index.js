@@ -5,7 +5,20 @@ const _ = db.command
 
 const requestGate = require('./requestGate')
 const _rateMap = new Map()
+const crypto = require('crypto')
 let backupCollectionsEnsured = false
+
+// 对外只暴露可预期的 4xx 文案；5xx 统一脱敏并带 requestId，细节进日志
+function errorResponse(e, tag) {
+    const code = typeof e.code === 'number' ? e.code : 500
+    if (code < 500 && e.message) return { code, msg: e.message }
+    const requestId = crypto.randomBytes(6).toString('hex')
+    console.error(`[${tag}] request ${requestId}:`, e)
+    return { code: 500, msg: `服务暂时不可用，请稍后重试（${requestId}）` }
+}
+// 定时备份：单次调用最多处理 20 个组、45 秒；未处理的组在下次定时触发时继续。
+const AUTO_BACKUP_MAX_GROUPS = 20
+const AUTO_BACKUP_TIME_BUDGET_MS = 45000
 
 async function ensureBackupCollections() {
     if (backupCollectionsEnsured) return
@@ -32,6 +45,7 @@ const ROLE = { CREATOR: 'creator', ADMIN: 'admin' }
 
 const AUTO_MAX = 8
 const MANUAL_MAX = 10
+const SAFETY_MAX = 3
 const BATCH_SIZE = 100
 
 async function getMemberByOpenid(openid) {
@@ -66,7 +80,7 @@ function checkRole(member, ...allowed) {
 
 async function fetchAll(collection, where) {
     const all = []
-    const limit = 100
+    const limit = 1000
     let skip = 0
     while (true) {
         const { data } = await collection.where(where).orderBy('_id', 'asc').skip(skip).limit(limit).get()
@@ -78,13 +92,14 @@ async function fetchAll(collection, where) {
 }
 
 function formatTimestamp(d) {
-    const dt = new Date(d)
-    const y = dt.getFullYear()
-    const m = String(dt.getMonth() + 1).padStart(2, '0')
-    const day = String(dt.getDate()).padStart(2, '0')
-    const h = String(dt.getHours()).padStart(2, '0')
-    const min = String(dt.getMinutes()).padStart(2, '0')
-    const sec = String(dt.getSeconds()).padStart(2, '0')
+    // 云函数运行时为 UTC，文件名统一按北京时间生成
+    const dt = new Date(new Date(d).getTime() + 8 * 60 * 60 * 1000)
+    const y = dt.getUTCFullYear()
+    const m = String(dt.getUTCMonth() + 1).padStart(2, '0')
+    const day = String(dt.getUTCDate()).padStart(2, '0')
+    const h = String(dt.getUTCHours()).padStart(2, '0')
+    const min = String(dt.getUTCMinutes()).padStart(2, '0')
+    const sec = String(dt.getUTCSeconds()).padStart(2, '0')
     return `${y}${m}${day}_${h}${min}${sec}`
 }
 
@@ -125,11 +140,10 @@ async function doBackup(type, remark) {
         sha256: crypto.createHash('sha256').update(content).digest('hex'),
     }
     const { _id } = await db.collection(COL.BACKUPS).add({ data: backup })
-    // 恢复前安全快照独立保留，不受普通备份轮换影响。
-    if (type === 'auto' || type === 'manual') {
-        try { await cleanupOldBackups(type, type === 'auto' ? AUTO_MAX : MANUAL_MAX) }
-        catch (e) { console.error('cleanup backups:', e.message) }
-    }
+    // 安全快照同样纳入轮换，避免每次恢复都永久保留一份全量数据。
+    const maxKeep = type === 'safety' ? SAFETY_MAX : type === 'auto' ? AUTO_MAX : MANUAL_MAX
+    try { await cleanupOldBackups(type, maxKeep) }
+    catch (e) { console.error('cleanup backups:', e.message) }
     return { _id, ...backup }
 }
 
@@ -212,8 +226,7 @@ async function dispatch(event, context, trustedTimer = false) {
         if (trustedTimer && action === 'backupAuto') return { code: 0, data: await doBackup('auto', '') }
         return await fn(event, OPENID)
     } catch (e) {
-        console.error(`[lunch_backup] ${action} error:`, e)
-        return { code: typeof e.code === 'number' ? e.code : 500, msg: e.message || 'internal error' }
+        return errorResponse(e, 'lunch_backup')
     }
 }
 
@@ -340,26 +353,61 @@ async function runForGroup(event, context, trustedTimer = false) {
         if (!['restoreBackup', 'getBackupList', 'getBackupCapabilities'].includes(event.action)) release = await requestGate.enter(db, groupId)
         return await createRequestHandlers(groupId)(event, context, trustedTimer)
     } catch (e) {
-        return { code: typeof e.code === 'number' ? e.code : 500, msg: e.message }
+        return errorResponse(e, 'lunch_backup.runForGroup')
     } finally {
         if (release) await release()
     }
 }
 
+function toTime(value) {
+    if (!value) return 0
+    if (value instanceof Date) return value.getTime()
+    const time = new Date(value).getTime()
+    return Number.isFinite(time) ? time : 0
+}
+
+async function fetchAllGroups() {
+    const all = []
+    let skip = 0
+    const limit = 1000
+    while (true) {
+        const { data } = await db.collection('lunch_groups').skip(skip).limit(limit).get()
+        all.push(...data)
+        if (data.length < limit) break
+        skip += limit
+    }
+    return all
+}
+
 exports.main = async (event = {}, context) => {
     // 定时触发不携带微信身份；客户端伪造 Timer 字段不能绕过身份检查。
-    if (cloud.getWXContext().SOURCE === 'wx_trigger' && event.Type === 'Timer' && event.TriggerName === 'weeklyBackup') {
+    if (cloud.getWXContext().SOURCE === 'wx_trigger' && event.Type === 'Timer' &&
+        (event.TriggerName === 'autoBackup' || event.TriggerName === 'weeklyBackup')) {
+        const startedAt = Date.now()
+        const groups = await fetchAllGroups()
+        // 最久未尝试的组优先；单次调用有数量与时间预算，剩余组由下次触发继续。
+        groups.sort((a, b) => toTime(a.lastAutoBackupAttemptAt) - toTime(b.lastAutoBackupAttemptAt))
         const results = []
-        let skip = 0
-        while (true) {
-            const { data } = await db.collection('lunch_groups').skip(skip).limit(100).get()
-            for (const group of data) {
-                results.push({ groupId: group._id, result: await runForGroup({ action: 'backupAuto', groupId: group._id }, context, true) })
+        let processed = 0
+        for (const group of groups) {
+            if (processed >= AUTO_BACKUP_MAX_GROUPS) break
+            if (Date.now() - startedAt >= AUTO_BACKUP_TIME_BUDGET_MS) break
+            processed++
+            // 先记录尝试时间：即使本组备份超时/失败，下次也会排到其他组之后，避免饿死后续组织。
+            try {
+                await db.collection('lunch_groups').doc(group._id).update({
+                    data: { lastAutoBackupAttemptAt: db.serverDate() },
+                })
+            } catch (e) {
+                console.warn('mark backup attempt:', group._id, e && e.message)
             }
-            if (data.length < 100) break
-            skip += 100
+            results.push({ groupId: group._id, result: await runForGroup({ action: 'backupAuto', groupId: group._id }, context, true) })
         }
-        return { code: results.some(item => item.result.code !== 0) ? 500 : 0, data: results }
+        return {
+            code: results.some(item => item.result.code !== 0) ? 500 : 0,
+            data: results,
+            remaining: Math.max(groups.length - processed, 0),
+        }
     }
     return runForGroup(event, context)
 }

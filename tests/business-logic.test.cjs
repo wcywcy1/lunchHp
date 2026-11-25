@@ -199,3 +199,154 @@ test('切组后按 groupId 顺序读取订单不会串组', async () => {
     assert.deepEqual(Array.from(b1.data, order => order._id), ['b-order'])
     assert.deepEqual(Array.from(a2.data, order => order._id), ['a-order'])
 })
+
+test('确认单与个人点餐统计超过默认查询上限时不被截断', async () => {
+    const h = harness()
+    h.seed('lunch_orders', Array.from({ length: 150 }, (_, i) => ({
+        _id: 'confirmed-' + i, groupId: 'a', date: '2026-09-16', status: 'confirmed',
+        memberId: 'member', memberName: '成员' + String(i).padStart(3, '0'),
+        menuId: 'dish', menuName: '午餐', supplier: i % 2 === 0 ? 'A店' : 'B店', price: 10, note: '',
+    })))
+    h.seed('lunch_user_menu_stats', Array.from({ length: 120 }, (_, i) => ({
+        _id: 'stat-' + i, groupId: 'a', memberId: 'member', menuId: 'dish-' + i, count: i + 1,
+    })))
+
+    const bySupplier = await h.invoke('lunch_order', { action: 'getConfirmedBySupplier', groupId: 'a', date: '2026-09-16' })
+    assert.equal(bySupplier.code, 0, bySupplier.msg)
+    const total = Object.values(bySupplier.data).reduce((sum, list) => sum + list.length, 0)
+    assert.equal(total, 150)
+
+    const download = await h.invoke('lunch_order', { action: 'downloadConfirmed', groupId: 'a', date: '2026-09-16' })
+    assert.equal(download.code, 0, download.msg)
+    const csv = h.files.get(download.data.fileID).toString('utf8')
+    assert.ok(csv.includes('成员000'))
+    assert.ok(csv.includes('成员149'))
+
+    const stats = await h.invoke('lunch_order', { action: 'getUserMenuStats', groupId: 'a', memberId: 'member' }, 'member-a')
+    assert.equal(stats.code, 0, stats.msg)
+    assert.equal(Object.keys(stats.data.stats).length, 120)
+})
+
+test('批量确认超过 100 条时全部生效', async () => {
+    const h = harness()
+    const ids = Array.from({ length: 150 }, (_, i) => 'pending-' + i)
+    h.seed('lunch_orders', ids.map(id => ({
+        _id: id, groupId: 'a', date: '2026-09-16', status: 'pending',
+        memberId: 'member', menuId: 'dish', price: 10, supplier: 'S',
+    })))
+
+    const result = await h.invoke('lunch_order', { action: 'batchConfirm', groupId: 'a', orderIds: ids })
+    assert.equal(result.code, 0, result.msg)
+    assert.equal(result.data.filter(item => item.success).length, 150)
+    assert.equal(h.rows('lunch_orders').filter(row => row.status === 'confirmed').length, 150)
+})
+
+test('菜单价格拒绝负数、NaN、Infinity，导入也整体拒绝', async () => {
+    const h = harness()
+    for (const price of [-1, NaN, Infinity, null]) {
+        assert.equal((await h.invoke('lunch_menu', { action: 'addMenuItem', groupId: 'a', supplier: 'S', name: 'X', price })).code, 400, String(price))
+    }
+    assert.equal((await h.invoke('lunch_menu', { action: 'updateMenuItem', groupId: 'a', menuId: 'dish', price: -5 })).code, 400)
+    assert.equal((await h.invoke('lunch_menu', {
+        action: 'importMenuItems', groupId: 'a', mode: 'append', items: [{ supplier: 'S', name: 'X', price: -1 }],
+    })).code, 400)
+    h.seed('lunch_orders', [{ _id: 'order-price', groupId: 'a', date: '2026-09-16', status: 'pending', memberId: 'member', menuId: 'dish', price: 10 }])
+    assert.equal((await h.invoke('lunch_order', {
+        action: 'updateOrder', groupId: 'a', orderId: 'order-price', price: -5,
+    })).code, 400)
+    assert.equal(h.rows('lunch_menu').find(row => row._id === 'dish').price, 18.5)
+})
+
+test('语音识别：空身份拒绝、配额原子递增、异常 fail-closed', async () => {
+    const h = harness()
+    assert.equal((await h.invoke('lunch_voice', { action: 'speechRecognize', audioBase64: 'YQ==' }, '')).code, 401)
+
+    h.seed('lunch_voice_usage', [{ _id: 'member-a_2026-09-16', count: 29, date: '2026-09-16' }])
+    const nearLimit = await h.invoke('lunch_voice', { action: 'speechRecognize', audioBase64: 'YQ==' }, 'member-a')
+    assert.equal(nearLimit.success, false)
+    assert.equal(h.rows('lunch_voice_usage').find(row => row._id === 'member-a_2026-09-16').count, 30)
+
+    const exhausted = await h.invoke('lunch_voice', { action: 'speechRecognize', audioBase64: 'YQ==' }, 'member-a')
+    assert.match(exhausted.message, /次数已用完/)
+
+    const first = await h.invoke('lunch_voice', { action: 'speechRecognize', audioBase64: 'YQ==' }, 'new-user')
+    assert.equal(first.success, false)
+    assert.equal(h.rows('lunch_voice_usage').find(row => row._id === 'new-user_2026-09-16').count, 1)
+
+    h.db.failOp = (name, op) => name === 'lunch_voice_usage' && op === 'update'
+    const failed = await h.invoke('lunch_voice', { action: 'speechRecognize', audioBase64: 'YQ==' }, 'member-a')
+    h.db.failOp = null
+    assert.match(failed.message, /次数已用完/)
+    assert.equal(h.rows('lunch_voice_usage').find(row => row._id === 'member-a_2026-09-16').count, 30)
+})
+
+test('FlashRecognition 超时后不再调用 SentenceRecognition', async () => {
+    const h = harness()
+    let sentenceCalls = 0
+    h.setEnv({ TENCENT_SECRET_ID: 'id', TENCENT_SECRET_KEY: 'key' })
+    h.setTencentCloud({
+        asr: {
+            v20190614: {
+                Client: class {
+                    FlashRecognition() { return new Promise(() => {}) }
+                    SentenceRecognition() { sentenceCalls += 1; return Promise.resolve({ Result: 'fallback' }) }
+                },
+            },
+        },
+    })
+    const result = await h.invoke('lunch_voice', { action: 'speechRecognize', audioBase64: 'YQ==' }, 'member-a')
+    assert.equal(result.success, false)
+    assert.match(result.message, /超时/)
+    assert.equal(sentenceCalls, 0)
+})
+
+test('并发创建同名组织只成功一个，删除后名称可复用', async () => {
+    const h = harness()
+    const [first, second] = await Promise.all([
+        h.invoke('lunch_menu', { action: 'createGroup', groupName: '并发组' }, 'user-1'),
+        h.invoke('lunch_menu', { action: 'createGroup', groupName: '并发组' }, 'user-2'),
+    ])
+    const codes = [first.code, second.code].sort((a, b) => a - b)
+    assert.deepEqual(codes, [0, 409])
+    const created = first.code === 0 ? first : second
+    const creator = first.code === 0 ? 'user-1' : 'user-2'
+    assert.equal(h.rows('lunch_groups').filter(row => row.name === '并发组').length, 1)
+    assert.equal(h.rows('lunch_group_names').filter(row => row.groupId === created.data.groupId).length, 1)
+
+    const removed = await h.invoke('lunch_menu', { action: 'deleteGroup', groupId: created.data.groupId }, creator)
+    assert.equal(removed.code, 0, removed.msg)
+    assert.equal(h.rows('lunch_group_names').filter(row => row.groupId === created.data.groupId).length, 0)
+
+    const again = await h.invoke('lunch_menu', { action: 'createGroup', groupName: '并发组' }, 'user-3')
+    assert.equal(again.code, 0, again.msg)
+})
+
+test('并发统计重建只保留一份结果并释放重建锁', async () => {
+    const h = harness()
+    h.seed('lunch_orders', [
+        { _id: 'stat-aug', groupId: 'a', date: '2026-08-01', status: 'confirmed', memberId: 'member', memberName: '同事', menuId: 'dish', supplier: '店家', price: 10 },
+        { _id: 'stat-sep', groupId: 'a', date: '2026-09-01', status: 'confirmed', memberId: 'member', memberName: '同事', menuId: 'dish', supplier: '店家', price: 12 },
+    ])
+    const [first, second] = await Promise.all([
+        h.invoke('lunch_order', { action: 'getMonthlyStats', groupId: 'a' }, 'member-a'),
+        h.invoke('lunch_order', { action: 'getMonthlyStats', groupId: 'a' }, 'member-a'),
+    ])
+    assert.equal(first.code, 0, first.msg)
+    assert.equal(second.code, 0, second.msg)
+    assert.equal(h.rows('lunch_monthly_stats').length, 2)
+    assert.equal(h.rows('lunch_order_keys').filter(row => String(row._id).startsWith('stats_')).length, 0)
+})
+
+test('未预期异常对外脱敏并返回 requestId', async () => {
+    const h = harness()
+    h.seed('lunch_orders', [{ _id: 'order-error', groupId: 'a', date: '2026-09-16', status: 'pending', memberId: 'member', price: 10 }])
+    h.db.failOp = (name, op) => name === 'lunch_orders' && op === 'doc.update'
+    const result = await h.invoke('lunch_order', {
+        action: 'updateOrder', groupId: 'a', orderId: 'order-error', note: 'x',
+    })
+    h.db.failOp = null
+    assert.equal(result.code, 500)
+    assert.ok(!result.msg.includes('injected write failure'))
+    assert.match(result.msg, /服务暂时不可用/)
+    assert.match(result.msg, /（[0-9a-f]{12}）/)
+})

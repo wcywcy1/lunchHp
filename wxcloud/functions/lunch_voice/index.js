@@ -10,17 +10,25 @@ try { tencentcloud = require('tencentcloud-sdk-nodejs') } catch (e) {}
 
 // 每日配额：同一 openid 每天最多 30 次 ASR 调用（控制按次计费成本）
 var VOICE_DAILY_QUOTA = 30
+// 客户端已限制 base64 ≤900KB，服务端再兜底一次，避免直接调用云函数传入超大 payload
+var MAX_AUDIO_BASE64 = 900 * 1024
+var FLASH_TIMEOUT_MS = 1000
 
 // 简单速率限制：同一 openid 10 秒内最多 5 次（实例级内存）
 var _rateMap = new Map()
 function rateLimit(openid) {
-  if (!openid) return true
+  if (!openid) return false
   var now = Date.now()
   var windowMs = 10000
   var arr = (_rateMap.get(openid) || []).filter(function (t) { return now - t < windowMs })
   if (arr.length >= 5) return false
   arr.push(now)
   _rateMap.set(openid, arr)
+  if (_rateMap.size > 10000) {
+    for (var entry of _rateMap) {
+      if (entry[1].every(function (t) { return now - t >= windowMs })) _rateMap.delete(entry[0])
+    }
+  }
   return true
 }
 
@@ -31,32 +39,44 @@ async function ensureUsageCollection() {
   _usageEnsured = true
 }
 
-// 每日配额检查并计数（北京时间日切）；配额表异常时放行，不阻断功能
+// 每日配额原子递增（北京时间日切）；任何异常一律 fail-closed，避免按次计费失控
 async function checkDailyQuota(openid) {
-  if (!openid) return true
+  if (!openid) return false
   await ensureUsageCollection()
   var bj = new Date(Date.now() + 8 * 3600 * 1000)
   var today = bj.getUTCFullYear() + '-' + String(bj.getUTCMonth() + 1).padStart(2, '0') + '-' + String(bj.getUTCDate()).padStart(2, '0')
   var docId = openid + '_' + today
   var col = db.collection('lunch_voice_usage')
+  try {
+    var updated = await col.where({ _id: docId, count: _.lt(VOICE_DAILY_QUOTA) })
+      .update({ data: { count: _.inc(1) } })
+    if (updated && updated.stats && updated.stats.updated === 1) return true
+  } catch (e) {
+    console.warn('updateVoiceQuota error:', e && e.message)
+    return false
+  }
+  // 更新命中 0：文档不存在或配额已满。先确认是否已有记录。
   var existing = null
   try {
-    var res = await col.doc(docId).get()
-    existing = res.data
+    existing = (await col.doc(docId).get()).data
   } catch (e) {
     existing = null // 首次调用，文档不存在
   }
-  if (existing && existing.count >= VOICE_DAILY_QUOTA) return false
+  if (existing) return false
+  // 首次建文档：用固定 _id add，并发首建只有一个成功，另一个走条件更新
   try {
-    if (existing) {
-      await col.doc(docId).update({ data: { count: _.inc(1) } })
-    } else {
-      await col.doc(docId).set({ data: { count: 1, date: today } })
-    }
+    await col.add({ data: { _id: docId, count: 1, date: today } })
+    return true
   } catch (e) {
-    console.warn('updateVoiceQuota error:', e && e.message)
+    try {
+      var retry = await col.where({ _id: docId, count: _.lt(VOICE_DAILY_QUOTA) })
+        .update({ data: { count: _.inc(1) } })
+      return !!(retry && retry.stats && retry.stats.updated === 1)
+    } catch (retryErr) {
+      console.warn('updateVoiceQuota error:', retryErr && retryErr.message)
+      return false
+    }
   }
-  return true
 }
 
 /**
@@ -74,6 +94,9 @@ async function speechRecognize(data) {
   }
   if (!data.audioBase64) {
     return { success: false, message: '缺少音频数据' }
+  }
+  if (typeof data.audioBase64 !== 'string' || data.audioBase64.length > MAX_AUDIO_BASE64) {
+    return { success: false, message: '录音过长，请缩短后重试' }
   }
 
   try {
@@ -96,6 +119,7 @@ async function speechRecognize(data) {
     var format = data.voiceFormat || 'mp3'
 
     // ------ 主识别：FlashRecognition（极速一句话识别，1s 超时，失败/超时走 Sentence 兜底） ------
+    var flashTimedOut = false
     try {
       var flashPromise = client.FlashRecognition({
         EngSerViceType: '16k_zh',
@@ -104,10 +128,19 @@ async function speechRecognize(data) {
         Data: data.audioBase64,
         ...(hotwordId ? { HotwordId: hotwordId } : {})
       })
+      var timer = null
       var timeoutP = new Promise(function (_, reject) {
-        setTimeout(function () { reject(new Error('FlashRecognition timeout')) }, 1000)
+        timer = setTimeout(function () {
+          flashTimedOut = true
+          reject(new Error('FlashRecognition timeout'))
+        }, FLASH_TIMEOUT_MS)
       })
-      var flashRes = await Promise.race([flashPromise, timeoutP])
+      var flashRes
+      try {
+        flashRes = await Promise.race([flashPromise, timeoutP])
+      } finally {
+        if (timer) clearTimeout(timer)
+      }
       if (flashRes && flashRes.Result) {
         return {
           success: true,
@@ -119,8 +152,12 @@ async function speechRecognize(data) {
       // Flash 返回但 Result 为空，走兜底
       console.warn('FlashRecognition 返回空文本，降级 SentenceRecognition')
     } catch (flashErr) {
-      // Flash 调用失败或超时，打印日志但不向上抛，走 Sentence 兜底
-      console.warn('FlashRecognition 失败/超时，降级 SentenceRecognition：',
+      // 超时后不再发 Sentence，避免同一段音频产生两次 ASR 计费
+      if (flashTimedOut) {
+        return { success: false, message: '识别超时，请重试' }
+      }
+      // Flash 调用失败，打印日志但不向上抛，走 Sentence 兜底
+      console.warn('FlashRecognition 失败，降级 SentenceRecognition：',
         flashErr.code || '', flashErr.message || '')
     }
 
@@ -149,8 +186,15 @@ exports.main = async function (event, context) {
   var { OPENID } = cloud.getWXContext()
   var action = event.action
   if (action === 'speechRecognize') {
+    if (!OPENID) return { success: false, code: 401, message: '请先登录' }
     if (!rateLimit(OPENID)) {
       return { success: false, message: '操作太频繁，请稍后再试' }
+    }
+    if (event.audioBase64 !== undefined && typeof event.audioBase64 !== 'string') {
+      return { success: false, message: '音频格式无效' }
+    }
+    if (event.audioBase64 && event.audioBase64.length > MAX_AUDIO_BASE64) {
+      return { success: false, message: '录音过长，请缩短后重试' }
     }
     if (event.audioBase64) {
       var allowed = await checkDailyQuota(OPENID)

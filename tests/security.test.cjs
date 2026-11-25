@@ -140,6 +140,7 @@ test('恢复保留ID和关联、不提权，失败回滚当前批次并可继续
     assert.equal(started.code, 0, started.msg)
     assert.equal(started.data.done, false)
     assert.equal((await h.invoke('lunch_order', order, 'member-a')).code, 423)
+    assert.equal((await h.invoke('lunch_order', { action: 'getRecentOrders', groupId: 'a' }, 'member-a')).code, 423)
     assert.equal((await h.invoke('lunch_menu', { action: 'updateMenuItem', groupId: 'a', menuId: 'dish', price: 1 })).code, 423)
     assert.equal((await h.invoke('lunch_menu', { action: 'getMenuList', groupId: 'b' }, 'owner-b')).code, 0)
     h.db.failWrite = (name, id) => name === 'lunch_members' && id === 'member'

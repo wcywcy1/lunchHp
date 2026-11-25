@@ -149,6 +149,8 @@ function harness() {
     }
     const functions = new Map()
     let now = new Date('2026-09-16T01:00:00Z').getTime()
+    let tencentCloud = null
+    const env = {}
     class TestDate extends Date {
         constructor(...args) { super(...(args.length ? args : [now])) }
         static now() { return now }
@@ -157,12 +159,16 @@ function harness() {
         if (functions.has(name)) return functions.get(name)
         const filename = path.resolve(__dirname, '../wxcloud/functions', name, 'index.js')
         const sandbox = {
-            exports: {}, Buffer, Date: TestDate, TextDecoder,
+            exports: {}, Buffer, Date: TestDate, TextDecoder, process: { env },
             console: { log: (...args) => logs.push({ level: 'log', args }), warn: (...args) => logs.push({ level: 'warn', args }), error: (...args) => logs.push({ level: 'error', args }) },
             setTimeout, clearTimeout,
             require(module) {
                 if (module === 'wx-server-sdk') return cloud
                 if (module === 'xlsx') throw new Error('not installed in test')
+                if (module === 'tencentcloud-sdk-nodejs') {
+                    if (tencentCloud) return tencentCloud
+                    throw new Error('not installed in test')
+                }
                 return require(module.startsWith('.') ? path.resolve(path.dirname(filename), module) : module)
             },
         }
@@ -190,6 +196,11 @@ function harness() {
         db, cloud, files, seed, logs,
         rows: name => clone([...getTable(name).values()]),
         setNow: date => { now = new Date(date).getTime() },
+        setTencentCloud: value => { tencentCloud = value },
+        setEnv: value => {
+            for (const key of Object.keys(env)) delete env[key]
+            Object.assign(env, value)
+        },
         invoke: (name, event, openid = 'admin-a', source = 'wx_client') => identity.run({ OPENID: openid, SOURCE: source }, () => load(name)(event, {})),
     }
 }

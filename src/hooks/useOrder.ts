@@ -1,9 +1,10 @@
-import { ref, computed, onUnmounted, ComputedRef, Ref } from 'vue'
+import { ref, computed, watch, onUnmounted, ComputedRef, Ref } from 'vue'
 import { onShow, onHide } from '@dcloudio/uni-app'
 import { useStore, setCache, flushCache, orderJustSucceeded } from '../services/store'
 import { menuAction, orderAction } from '../services/repositories/baseRepository'
 import { CACHE_KEYS } from '../constants/cacheConfig'
 import { useAuth } from './useAuth'
+import { getTodayString, getBeijingCutoffState } from '../utils/date'
 
 interface MenuItem {
     _id: string
@@ -51,17 +52,25 @@ export function useOrder(): OrderReturn {
     const submitting = ref(false)
     const showMemberPicker = ref(false)
     const showAddMember = ref(false)
-    const clockNow = ref(Date.now())
-    let clockTimer: ReturnType<typeof setInterval> | null = null
+    const cutoffAllowed = ref(true)
+    let cutoffTimer: ReturnType<typeof setTimeout> | null = null
     function stopClock() {
-        if (clockTimer) clearInterval(clockTimer)
-        clockTimer = null
+        if (cutoffTimer) clearTimeout(cutoffTimer)
+        cutoffTimer = null
     }
-    onShow(() => {
+    function scheduleCutoff() {
         stopClock()
-        clockNow.value = Date.now()
-        clockTimer = setInterval(() => { clockNow.value = Date.now() }, 1000)
-    })
+        if (isAdmin.value || store.cutoffDisabled) {
+            cutoffAllowed.value = true
+            return
+        }
+        const state = getBeijingCutoffState((store.groupCutoff as string) || '10:00')
+        cutoffAllowed.value = state.allowed
+        cutoffTimer = setTimeout(scheduleCutoff, Math.max(state.nextChangeMs, 1000))
+    }
+    watch([() => store.groupCutoff, () => store.cutoffDisabled, isAdmin], scheduleCutoff)
+    scheduleCutoff()
+    onShow(scheduleCutoff)
     onHide(stopClock)
     onUnmounted(stopClock)
 
@@ -94,9 +103,7 @@ export function useOrder(): OrderReturn {
 
     const isOrderAllowed = computed(() => {
         if (isAdmin.value || store.cutoffDisabled) return true
-        const cutoff = (store.groupCutoff as string) || '10:00'
-        const hhmm = new Date(clockNow.value + 8 * 3600000).toISOString().slice(11, 16)
-        return hhmm < cutoff
+        return cutoffAllowed.value
     })
 
     function selectMenuItem(menuId: string) {
@@ -146,7 +153,7 @@ export function useOrder(): OrderReturn {
 
     async function submitOrder() {
         if (submitting.value) return
-        clockNow.value = Date.now()
+        scheduleCutoff()
         if (!isOrderAllowed.value) {
             uni.showToast({ title: '今日点餐已截止，如需点餐请联系管理员', icon: 'none', duration: 2500 })
             return
@@ -176,7 +183,7 @@ export function useOrder(): OrderReturn {
             : orderForMemberId.value
         const memberName = orderForName.value
 
-        const date = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10)
+        const date = getTodayString()
 
         submitting.value = true
         const submitted = { done: false }

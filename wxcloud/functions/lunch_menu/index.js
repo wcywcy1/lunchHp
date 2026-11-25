@@ -3,12 +3,22 @@ cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 const _ = db.command
 const $ = db.command.aggregate
+const crypto = require('crypto')
 let XLSX = null
 try { XLSX = require('xlsx') } catch (e) { }
 
 const requestGate = require('./requestGate')
 const _rateMap = new Map()
 let _collectionsEnsured = false
+
+// 对外只暴露可预期的 4xx 文案；5xx 统一脱敏并带 requestId，细节进日志
+function errorResponse(e, tag) {
+    const code = typeof e.code === 'number' ? e.code : 500
+    if (code < 500 && e.message) return { code, msg: e.message }
+    const requestId = crypto.randomBytes(6).toString('hex')
+    console.error(`[${tag}] request ${requestId}:`, e)
+    return { code: 500, msg: `服务暂时不可用，请稍后重试（${requestId}）` }
+}
 
 // 每次调用创建独立组织上下文，避免复用实例并发请求时串组。
 function createRequestHandlers(GROUP_ID) {
@@ -104,6 +114,14 @@ function createRequestHandlers(GROUP_ID) {
         return all
     }
 
+    function normalizePrice(value) {
+        if (value === '' || value === undefined) return 0
+        if (value === null) return null
+        const price = Number(value)
+        if (!Number.isFinite(price) || price < 0 || price > 100000) return null
+        return Math.round(price * 100) / 100
+    }
+
     // 简单速率限制：同一 openid 10 秒窗口内最多 30 次调用（实例级内存，防异常刷量）
     // 速率记录保留在模块级，组织上下文仅属于本次请求。
     function rateLimit(openid, limit = 30, windowMs = 10000) {
@@ -181,8 +199,7 @@ function createRequestHandlers(GROUP_ID) {
             }
             return await fn(event, OPENID)
         } catch (e) {
-            console.error(`[lunch_menu] ${action} error:`, e)
-            return { code: typeof e.code === 'number' ? e.code : 500, msg: e.message || 'internal error' }
+            return errorResponse(e, 'lunch_menu')
         }
     }
 
@@ -236,7 +253,7 @@ function createRequestHandlers(GROUP_ID) {
     // 集合初始化状态在模块级缓存。
     async function ensureCollections() {
         if (_collectionsEnsured) return
-        const required = ['lunch_groups', 'lunch_members', 'lunch_menu', 'lunch_orders', 'lunch_monthly_stats', 'lunch_backups', 'lunch_user_menu_stats']
+        const required = ['lunch_groups', 'lunch_members', 'lunch_menu', 'lunch_orders', 'lunch_monthly_stats', 'lunch_backups', 'lunch_user_menu_stats', 'lunch_group_names']
         for (const name of required) {
             try {
                 await db.createCollection(name)
@@ -289,31 +306,47 @@ function createRequestHandlers(GROUP_ID) {
             qrcode: '',
             createdAt: now,
         }
-        await db.collection(COL.GROUPS).add({ data: group })
-
-        // 创建者自动成为该组成员（creator 角色）
-        const member = {
-            groupId: newGroupId,
-            name: '',
-            nickName: '',
-            avatar: '',
-            openid,
-            role: ROLE.CREATOR,
-            isVirtual: false,
-            privacyAgreed: false,
-            joinedAt: now,
+        // 组名锁：固定 _id 的 add 是原子的，并发同名建组只有一个能成功
+        const lockId = crypto.createHash('sha256').update(name).digest('hex')
+        const lockRef = db.collection('lunch_group_names')
+        try {
+            await lockRef.add({ data: { _id: lockId, name, groupId: newGroupId, createdAt: now } })
+        } catch (e) {
+            return { code: 409, msg: `组名「${name}」已存在，请换一个` }
         }
-        const { _id } = await db.collection(COL.MEMBERS).add({ data: member })
-        member._id = _id
+        let groupAdded = false
+        try {
+            await db.collection(COL.GROUPS).add({ data: group })
+            groupAdded = true
 
-        return { code: 0, data: { groupId: newGroupId, groupName: name, member } }
+            // 创建者自动成为该组成员（creator 角色）
+            const member = {
+                groupId: newGroupId,
+                name: '',
+                nickName: '',
+                avatar: '',
+                openid,
+                role: ROLE.CREATOR,
+                isVirtual: false,
+                privacyAgreed: false,
+                joinedAt: now,
+            }
+            const { _id } = await db.collection(COL.MEMBERS).add({ data: member })
+            member._id = _id
+
+            return { code: 0, data: { groupId: newGroupId, groupName: name, member } }
+        } catch (e) {
+            if (groupAdded) {
+                try { await db.collection(COL.GROUPS).doc(newGroupId).remove() } catch (cleanupErr) { }
+            }
+            try { await lockRef.doc(lockId).remove() } catch (cleanupErr) { }
+            throw e
+        }
     }
 
     // 通用模式：列出当前用户已加入的所有组
     async function listJoinedGroups(event, openid) {
-        const { data } = await db.collection(COL.MEMBERS)
-            .where({ openid })
-            .get()
+        const data = await fetchAll(db.collection(COL.MEMBERS), { openid })
         if (!data || data.length === 0) {
             return { code: 0, data: [] }
         }
@@ -438,6 +471,8 @@ function createRequestHandlers(GROUP_ID) {
         }
 
         await db.collection(COL.GROUPS).doc(GROUP_ID).remove()
+        // 组织真正删除后再释放组名，避免删除中途失败时名称被提前占用
+        try { await db.collection('lunch_group_names').where({ groupId: GROUP_ID }).remove() } catch (e) { console.warn('clear group names error:', e.message) }
 
         return { code: 0 }
     }
@@ -929,9 +964,7 @@ function createRequestHandlers(GROUP_ID) {
         // 合并当前用户的个人点餐统计，用于"最近点过"个人化排序
         const caller = await getMemberByOpenid(openid).catch(() => null)
         if (caller && caller._id) {
-            const { data: stats } = await db.collection(COL.USER_STATS)
-                .where({ groupId: GROUP_ID, memberId: caller._id })
-                .get()
+            const stats = await fetchAll(db.collection(COL.USER_STATS), { groupId: GROUP_ID, memberId: caller._id })
             const statMap = {}
             stats.forEach(s => { statMap[s.menuId] = s })
             data.forEach(item => {
@@ -948,6 +981,8 @@ function createRequestHandlers(GROUP_ID) {
     async function addMenuItem(event, openid) {
         const { supplier, name, price, photo, visible } = event
         if (!supplier || !name || price === undefined) return { code: 400, msg: 'missing required fields' }
+        const normalizedPrice = normalizePrice(price)
+        if (normalizedPrice === null) return { code: 400, msg: '价格无效' }
 
         const caller = await getMemberByOpenid(openid)
         if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
@@ -965,7 +1000,7 @@ function createRequestHandlers(GROUP_ID) {
             sortNo: maxSortNo + 10,
             supplier,
             name,
-            price: Number(price),
+            price: normalizedPrice,
             photo: photo || '',
             visible: visible !== false,
             createdAt: now,
@@ -984,6 +1019,12 @@ function createRequestHandlers(GROUP_ID) {
         const { items, mode } = event
         if (!Array.isArray(items) || items.length === 0) return { code: 400, msg: 'missing items' }
 
+        // 先校验再执行 rewrite 删除，避免参数无效时把现有菜单清空
+        const rowsWithFields = items.filter(it => it.supplier && it.name)
+        const invalidPrice = rowsWithFields.filter(it => it.price === undefined || normalizePrice(it.price) === null).length
+        if (invalidPrice) return { code: 400, msg: `有 ${invalidPrice} 项价格缺失或无效` }
+        if (rowsWithFields.length === 0) return { code: 400, msg: 'no valid items' }
+
         if (mode === 'rewrite') {
             await db.collection(COL.MENU).where({ groupId: GROUP_ID }).remove()
         }
@@ -996,12 +1037,12 @@ function createRequestHandlers(GROUP_ID) {
         let sortNo = existing.length > 0 ? existing[0].sortNo : 0
 
         const now = db.serverDate()
-        const batch = items.filter(it => it.supplier && it.name && it.price !== undefined).map(it => ({
+        const batch = rowsWithFields.map(it => ({
             groupId: GROUP_ID,
             sortNo: sortNo += 10,
             supplier: it.supplier,
             name: it.name,
-            price: Number(it.price) || 0,
+            price: normalizePrice(it.price),
             photo: it.photo || '',
             visible: it.visible !== false,
             createdAt: now,
@@ -1032,7 +1073,11 @@ function createRequestHandlers(GROUP_ID) {
         const update = {}
         if (supplier !== undefined) update.supplier = supplier
         if (name !== undefined) update.name = name
-        if (price !== undefined) update.price = Number(price)
+        if (price !== undefined) {
+            const normalizedPrice = normalizePrice(price)
+            if (normalizedPrice === null) return { code: 400, msg: '价格无效' }
+            update.price = normalizedPrice
+        }
         if (photo !== undefined) update.photo = photo
         if (Object.keys(update).length === 0) return { code: 400, msg: 'nothing to update' }
 
@@ -1104,9 +1149,7 @@ function createRequestHandlers(GROUP_ID) {
 
         const newVisible = !!visible
 
-        const { data: items } = await db.collection(COL.MENU)
-            .where({ groupId: GROUP_ID, supplier })
-            .get()
+        const items = await fetchAll(db.collection(COL.MENU), { groupId: GROUP_ID, supplier })
 
         if (items.length === 0) return { code: 404, msg: 'no items found for supplier' }
 
@@ -1293,7 +1336,7 @@ exports.main = async (event = {}, context) => {
         }
         return await createRequestHandlers(groupId)(event, context)
     } catch (e) {
-        return { code: typeof e.code === 'number' ? e.code : 500, msg: e.message }
+        return errorResponse(e, 'lunch_menu.main')
     } finally {
         if (release) await release()
     }

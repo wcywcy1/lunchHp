@@ -69,6 +69,8 @@ export function useStats(): StatsReturn {
     const detailPage = ref(0)
     const detailTotal = ref(0)
     const pageSize = 50
+    // 筛选/明细/汇总共用请求序号：筛选切换后，旧请求返回直接丢弃
+    let requestSeq = 0
     // 有筛选时由后端实时聚合填充，无筛选时为 null（走月度统计快路径）
     const summaryAggregate = ref<SummaryAggregate | null>(null)
 
@@ -267,23 +269,26 @@ export function useStats(): StatsReturn {
     }
 
     async function applyFilter(f: FilterState) {
+        const seq = ++requestSeq
         filter.value = { ...f }
+        summaryAggregate.value = null
         showFilter.value = false
-        await Promise.all([searchDetail(), fetchSummaryAggregate()])
+        await Promise.all([searchDetail(seq), fetchSummaryAggregate(seq)])
     }
 
     async function resetFilter() {
+        const seq = ++requestSeq
         filter.value = { year: null, months: [], members: [], suppliers: [] }
         showFilter.value = false
         summaryAggregate.value = null
-        await searchDetail()
+        await searchDetail(seq)
     }
 
     function openFilter() { showFilter.value = true }
     function closeFilter() { showFilter.value = false }
 
     /** 拉取筛选后的实时聚合（与清单同一查询条件，保证汇总和清单口径一致） */
-    async function fetchSummaryAggregate() {
+    async function fetchSummaryAggregate(seq: number = requestSeq) {
         const f = filter.value
         if (f.year === null && f.months.length === 0 && f.members.length === 0 && f.suppliers.length === 0) {
             summaryAggregate.value = null
@@ -297,6 +302,7 @@ export function useStats(): StatsReturn {
             if (f.suppliers.length > 0) params.suppliers = f.suppliers
 
             const res = await orderAction('searchOrders', params)
+            if (seq !== requestSeq) return
             if (res.result.code === 0 && res.result.data.totals) {
                 summaryAggregate.value = {
                     totals: res.result.data.totals,
@@ -310,23 +316,24 @@ export function useStats(): StatsReturn {
             }
             // code !== 0 的错误已由 cloudAction 统一抛出，走下方 catch
         } catch (e: any) {
+            if (seq !== requestSeq) return
             console.error('fetchSummaryAggregate error:', e)
             uni.showToast({ title: e.message || '汇总查询失败', icon: 'none' })
         }
     }
 
-    async function searchDetail() {
+    async function searchDetail(seq: number = ++requestSeq) {
         detailPage.value = 0
         detailOrders.value = []
-        await fetchDetailPage()
+        await fetchDetailPage(seq)
     }
 
     async function loadMoreDetail() {
         if (detailLoading.value || !hasMoreDetail.value) return
-        await fetchDetailPage()
+        await fetchDetailPage(requestSeq)
     }
 
-    async function fetchDetailPage() {
+    async function fetchDetailPage(seq: number = requestSeq) {
         detailLoading.value = true
         try {
             const f = filter.value
@@ -337,6 +344,7 @@ export function useStats(): StatsReturn {
             if (f.suppliers.length > 0) params.suppliers = f.suppliers
 
             const res = await orderAction('searchOrders', params)
+            if (seq !== requestSeq) return
             if (res.result.code === 0) {
                 const { list, total } = res.result.data
                 detailOrders.value = [...detailOrders.value, ...list]
@@ -344,9 +352,9 @@ export function useStats(): StatsReturn {
                 detailPage.value++
             }
         } catch (e) {
-            console.error('searchDetail error:', e)
+            if (seq === requestSeq) console.error('searchDetail error:', e)
         } finally {
-            detailLoading.value = false
+            if (seq === requestSeq) detailLoading.value = false
         }
     }
 

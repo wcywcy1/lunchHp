@@ -3,6 +3,7 @@ cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 const db = cloud.database()
 const _ = db.command
 const $ = db.command.aggregate
+const crypto = require('crypto')
 let XLSX = null
 try { XLSX = require('xlsx') } catch (e) { }
 
@@ -10,6 +11,15 @@ const requestGate = require('./requestGate')
 const _rateMap = new Map()
 const autoCancelByGroup = new Map()
 let _collectionsEnsured = false
+
+// 对外只暴露可预期的 4xx 文案；5xx 统一脱敏并带 requestId，细节进日志
+function errorResponse(e, tag) {
+    const code = typeof e.code === 'number' ? e.code : 500
+    if (code < 500 && e.message) return { code, msg: e.message }
+    const requestId = crypto.randomBytes(6).toString('hex')
+    console.error(`[${tag}] request ${requestId}:`, e)
+    return { code: 500, msg: `服务暂时不可用，请稍后重试（${requestId}）` }
+}
 
 // 每次调用创建独立组织上下文，避免复用实例并发请求时串组。
 function createRequestHandlers(GROUP_ID) {
@@ -100,6 +110,17 @@ function createRequestHandlers(GROUP_ID) {
             skip += limit
         }
         return all
+    }
+
+    function compareText(a, b) {
+        const left = String(a || '')
+        const right = String(b || '')
+        return left < right ? -1 : left > right ? 1 : 0
+    }
+
+    async function fetchMonthlyStats(where) {
+        const rows = await fetchAll(db.collection(COL.MONTHLY_STATS), where)
+        return rows.sort((a, b) => (a.year - b.year) || (a.month - b.month))
     }
 
     // CSV 字段转义（RFC 4180）：含逗号/引号/换行时用双引号包裹
@@ -202,8 +223,7 @@ function createRequestHandlers(GROUP_ID) {
             }
             return await fn(event, OPENID)
         } catch (e) {
-            console.error(`[lunch_order] ${action} error:`, e)
-            return { code: typeof e.code === 'number' ? e.code : 500, msg: e.message || 'internal error' }
+            return errorResponse(e, 'lunch_order')
         }
     }
 
@@ -218,10 +238,26 @@ function createRequestHandlers(GROUP_ID) {
             if (!Array.isArray(event.orderIds) || !event.orderIds.length) return { code: 400, msg: 'missing orderIds' }
             for (const id of new Set(event.orderIds)) targets.push([COL.ORDERS, id])
         }
+        const byCollection = new Map()
         for (const [collection, id] of targets) {
             if (typeof id !== 'string' || !id.trim()) return { code: 400, msg: 'invalid document ID' }
-            const { data } = await db.collection(collection).where({ _id: id, groupId: GROUP_ID }).limit(1).get()
-            if (!data.length) return { code: 404, msg: '目标数据不存在或不属于当前组织' }
+            if (!byCollection.has(collection)) byCollection.set(collection, new Set())
+            byCollection.get(collection).add(id)
+        }
+        // 批量目标一次查一组，避免逐条查询把批量操作放大成 N 次数据库调用。
+        for (const [collection, ids] of byCollection) {
+            const list = [...ids]
+            let found = 0
+            const CHUNK = 100
+            for (let i = 0; i < list.length; i += CHUNK) {
+                const chunk = list.slice(i, i + CHUNK)
+                const { data } = await db.collection(collection)
+                    .where({ _id: _.in(chunk), groupId: GROUP_ID })
+                    .limit(chunk.length)
+                    .get()
+                found += data.length
+            }
+            if (found !== list.length) return { code: 404, msg: '目标数据不存在或不属于当前组织' }
         }
         return null
     }
@@ -429,6 +465,40 @@ function createRequestHandlers(GROUP_ID) {
 
 
 
+    // 统计重建锁：复用 order_keys 集合，30 秒自动过期，避免并发全量重建
+    function statsRebuildLockId() {
+        return 'stats_' + GROUP_ID
+    }
+
+    async function claimStatsRebuild() {
+        const lockId = statsRebuildLockId()
+        const col = db.collection(COL.ORDER_KEYS)
+        const now = Date.now()
+        try {
+            await col.add({ data: { _id: lockId, groupId: GROUP_ID, expiresAt: new Date(now + 30000) } })
+            return true
+        } catch (e) {
+            const res = await col.where({ _id: lockId, expiresAt: _.lt(new Date(now)) })
+                .update({ data: { expiresAt: new Date(now + 30000) } })
+            return !!(res && res.stats && res.stats.updated === 1)
+        }
+    }
+
+    async function releaseStatsRebuild() {
+        try { await db.collection(COL.ORDER_KEYS).doc(statsRebuildLockId()).remove() } catch (e) { }
+    }
+
+    async function rebuildStatsWithLock() {
+        if (!await claimStatsRebuild()) return false
+        try {
+            await doRebuildMonthStats(null)
+            await _touchTimestamps({ dataTimestamp: true })
+        } finally {
+            await releaseStatsRebuild()
+        }
+        return true
+    }
+
     // 合并大众点餐统计（orderCount/lastOrderedAt）到 menu
     // orderCount/lastOrderedAt 由 submitOrder 时 _.inc(1) 维护到 menu 文档自身，无需 aggregate 全量订单
     async function _mergePublicStats(menu) {
@@ -442,9 +512,7 @@ function createRequestHandlers(GROUP_ID) {
     async function _mergeUserStats(menu, openid) {
         const caller = await getMemberByOpenid(openid).catch(() => null)
         if (!caller || !caller._id) return menu
-        const { data: stats } = await db.collection(COL.USER_STATS)
-            .where({ groupId: GROUP_ID, memberId: caller._id })
-            .get()
+        const stats = await fetchAll(db.collection(COL.USER_STATS), { groupId: GROUP_ID, memberId: caller._id })
         const statMap = {}
         stats.forEach(s => { statMap[s.menuId] = s })
         menu.forEach(item => {
@@ -457,18 +525,17 @@ function createRequestHandlers(GROUP_ID) {
         return menu
     }
 
-    // upsert 当前用户对某道菜的个人点餐统计（确定性 _id 避免重复）
+    // upsert 当前用户对某道菜的个人点餐统计（确定性 _id；add 失败说明已存在，再原子 inc）
     async function _upsertUserStat(memberId, menuId, now) {
         if (!memberId) return
         const statId = `${GROUP_ID}_${memberId}_${menuId}`
-        const existing = await db.collection(COL.USER_STATS).doc(statId).get().catch(() => ({ data: null }))
-        if (existing.data) {
+        try {
+            await db.collection(COL.USER_STATS).add({
+                data: { _id: statId, groupId: GROUP_ID, memberId, menuId, count: 1, lastAt: now }
+            })
+        } catch (e) {
             await db.collection(COL.USER_STATS).doc(statId).update({
                 data: { count: _.inc(1), lastAt: now }
-            })
-        } else {
-            await db.collection(COL.USER_STATS).doc(statId).set({
-                data: { groupId: GROUP_ID, memberId, menuId, count: 1, lastAt: now }
             })
         }
     }
@@ -620,9 +687,9 @@ function createRequestHandlers(GROUP_ID) {
         const caller = await getMemberByOpenid(openid)
         if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
 
-        const { data: pendingOrders } = await db.collection(COL.ORDERS)
-            .where({ _id: _.in(orderIds), groupId: GROUP_ID, status: STATUS.PENDING })
-            .get()
+        const pendingOrders = await fetchAll(db.collection(COL.ORDERS), {
+            _id: _.in(orderIds), groupId: GROUP_ID, status: STATUS.PENDING,
+        })
         const pendingIds = new Set(pendingOrders.map(order => order._id))
         const now = db.serverDate()
         // 批量更新：用 where + _.in 一次更新，避免循环单条 update
@@ -676,9 +743,9 @@ function createRequestHandlers(GROUP_ID) {
         if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
 
         // 1. 一次性查出订单（拿 date 用于按月 rebuild）
-        const { data: orders } = await db.collection(COL.ORDERS)
-            .where({ _id: _.in(orderIds), groupId: GROUP_ID, status: _.neq(STATUS.CANCELLED) })
-            .get()
+        const orders = await fetchAll(db.collection(COL.ORDERS), {
+            _id: _.in(orderIds), groupId: GROUP_ID, status: _.neq(STATUS.CANCELLED),
+        })
 
         // 2. 批量更新状态
         const now = db.serverDate()
@@ -757,10 +824,10 @@ function createRequestHandlers(GROUP_ID) {
         const caller = await getMemberByOpenid(openid)
         if (!checkRole(caller, ROLE.ADMIN, ROLE.CREATOR)) return { code: 403, msg: 'admin/creator only' }
 
-        const { data } = await db.collection(COL.ORDERS)
-            .where({ groupId: GROUP_ID, status: STATUS.CONFIRMED, cancelRequested: true })
-            .orderBy('updatedAt', 'asc')
-            .get()
+        const data = await fetchAll(db.collection(COL.ORDERS), {
+            groupId: GROUP_ID, status: STATUS.CONFIRMED, cancelRequested: true,
+        })
+        data.sort((a, b) => new Date(a.updatedAt || 0) - new Date(b.updatedAt || 0))
         return { code: 0, data }
     }
 
@@ -801,7 +868,11 @@ function createRequestHandlers(GROUP_ID) {
         if (menuId !== undefined) update.menuId = menuId
         if (menuName !== undefined) update.menuName = menuName
         if (supplier !== undefined) update.supplier = supplier
-        if (price !== undefined) update.price = Number(price)
+        if (price !== undefined) {
+            const normalizedPrice = normalizePrice(price)
+            if (normalizedPrice === null) return { code: 400, msg: '价格无效' }
+            update.price = normalizedPrice
+        }
         if (note !== undefined) update.note = note
 
         await db.collection(COL.ORDERS).doc(orderId).update({ data: update })
@@ -821,11 +892,10 @@ function createRequestHandlers(GROUP_ID) {
         const { date } = event
         if (!date) return { code: 400, msg: 'missing date' }
 
-        const { data: orders } = await db.collection(COL.ORDERS)
-            .where({ groupId: GROUP_ID, date, status: STATUS.CONFIRMED })
-            .orderBy('supplier', 'asc')
-            .orderBy('memberName', 'asc')
-            .get()
+        const orders = await fetchAll(db.collection(COL.ORDERS), {
+            groupId: GROUP_ID, date, status: STATUS.CONFIRMED,
+        })
+        orders.sort((a, b) => compareText(a.supplier, b.supplier) || compareText(a.memberName, b.memberName))
 
         const bySupplier = {}
         for (const o of orders) {
@@ -837,6 +907,7 @@ function createRequestHandlers(GROUP_ID) {
     }
 
     async function getMonthlyStats(event, openid) {
+        await ensureCollections()
         const { year, since } = event
         const where = { groupId: GROUP_ID }
         if (year) where.year = Number(year)
@@ -847,19 +918,13 @@ function createRequestHandlers(GROUP_ID) {
             : 0
 
         if (serverTs === 0) {
-            // 立即占位，防止并发请求也触发 rebuild
-            await _touchTimestamps({ dataTimestamp: true })
-            try {
-                await doRebuildMonthStats(null)
-            } catch (e) {
-                await _touchTimestamps({ dataTimestamp: 0 })
-                throw e
+            if (!await rebuildStatsWithLock()) {
+                // 另一个实例正在重建：有数据就返回全量，没有则标记为增量空，避免客户端清空已有缓存
+                const existing = await fetchMonthlyStats(where)
+                const result = existing.map(doc => _formatStatDoc(doc)).filter(stat => !stat.deleted)
+                return { code: 0, data: result, dataTimestamp: serverTs, incremental: result.length === 0 }
             }
-            const { data } = await db.collection(COL.MONTHLY_STATS)
-                .where(where)
-                .orderBy('year', 'asc')
-                .orderBy('month', 'asc')
-                .get()
+            const data = await fetchMonthlyStats(where)
             const result = data.map(doc => _formatStatDoc(doc)).filter(stat => !stat.deleted)
             const newGroupRes = await db.collection(COL.GROUPS).doc(GROUP_ID).get().catch(() => ({ data: {} }))
             const newTs = newGroupRes.data && newGroupRes.data.dataTimestamp
@@ -871,47 +936,34 @@ function createRequestHandlers(GROUP_ID) {
         if (since) {
             const changedWhere = { groupId: GROUP_ID, updatedAt: _.gt(new Date(since)) }
             if (year) changedWhere.year = Number(year)
-            let { data: changedStats } = await db.collection(COL.MONTHLY_STATS)
-                .where(changedWhere)
-                .orderBy('year', 'asc')
-                .orderBy('month', 'asc')
-                .get()
+            let changedStats = await fetchMonthlyStats(changedWhere)
 
             if (changedStats.length === 0) {
                 const { total } = await db.collection(COL.MONTHLY_STATS)
                     .where(where)
                     .count()
                 if (total === 0) {
-                    await doRebuildMonthStats(null)
-                    const { data: rebuilt } = await db.collection(COL.MONTHLY_STATS)
-                        .where(where)
-                        .orderBy('year', 'asc')
-                        .orderBy('month', 'asc')
-                        .get()
+                    if (!await rebuildStatsWithLock()) {
+                        const existing = await fetchMonthlyStats(where)
+                        const result = existing.map(doc => _formatStatDoc(doc)).filter(stat => !stat.deleted)
+                        return { code: 0, data: result, dataTimestamp: serverTs, incremental: result.length === 0 }
+                    }
+                    const rebuilt = await fetchMonthlyStats(where)
                     const result = rebuilt.map(doc => _formatStatDoc(doc)).filter(stat => !stat.deleted)
                     return { code: 0, data: result, dataTimestamp: serverTs, incremental: false }
                 }
                 return { code: 0, data: [], dataTimestamp: serverTs, incremental: true }
             }
 
-            const result = changedStats.map(doc => _formatStatDoc(doc))
+            const result = changedStats.map(doc => _formatStatDoc(doc)).filter(stat => !stat.deleted)
             return { code: 0, data: result, dataTimestamp: serverTs, incremental: true }
         }
 
-        let { data } = await db.collection(COL.MONTHLY_STATS)
-            .where(where)
-            .orderBy('year', 'asc')
-            .orderBy('month', 'asc')
-            .get()
+        let data = await fetchMonthlyStats(where)
 
         if (data.length === 0) {
             await doRebuildMonthStats(null)
-            const result = await db.collection(COL.MONTHLY_STATS)
-                .where(where)
-                .orderBy('year', 'asc')
-                .orderBy('month', 'asc')
-                .get()
-            data = result.data
+            data = await fetchMonthlyStats(where)
         }
 
         const result = data.map(doc => _formatStatDoc(doc)).filter(stat => !stat.deleted)
@@ -1107,7 +1159,7 @@ function createRequestHandlers(GROUP_ID) {
             fileContent: Buffer.from(csv, 'utf-8'),
         })
 
-        return { code: 0, data: { fileID: uploadResult.fileID, count: allOrders.length, fileName: `清单_${new Date().toISOString().slice(0, 10)}.csv` } }
+        return { code: 0, data: { fileID: uploadResult.fileID, count: allOrders.length, fileName: `清单_${getToday()}.csv` } }
     }
 
     async function importFromCsv(event, openid) {
@@ -1270,11 +1322,8 @@ function createRequestHandlers(GROUP_ID) {
         const where = { groupId: GROUP_ID, date, status: STATUS.CONFIRMED }
         if (supplier) where.supplier = supplier
 
-        const { data: orders } = await db.collection(COL.ORDERS)
-            .where(where)
-            .orderBy('supplier', 'asc')
-            .orderBy('memberName', 'asc')
-            .get()
+        const orders = await fetchAll(db.collection(COL.ORDERS), where)
+        orders.sort((a, b) => compareText(a.supplier, b.supplier) || compareText(a.memberName, b.memberName))
 
         if (orders.length === 0) return { code: 0, data: { fileID: null, msg: '无已确认订单' } }
 
@@ -1438,16 +1487,29 @@ function createRequestHandlers(GROUP_ID) {
             })
         )
 
-        try { await cloud.deleteFile({ fileList: [fileID] }) } catch (e) { }
-
+        let result
         if (importType === 'orders') {
-            return await _importOrdersFromRows(rows, mode, openid)
+            result = await _importOrdersFromRows(rows, mode, openid)
         } else if (importType === 'menu') {
-            return await _importMenuFromRows(rows, mode)
+            result = await _importMenuFromRows(rows, mode)
         } else if (importType === 'members') {
-            return await _importMembersFromRows(rows, mode)
+            result = await _importMembersFromRows(rows, mode)
+        } else {
+            return { code: 400, msg: `unknown importType: ${importType}` }
         }
-        return { code: 400, msg: `unknown importType: ${importType}` }
+        // 落库成功后才删除源文件；失败时保留文件，便于重试
+        if (result.code === 0) {
+            try { await cloud.deleteFile({ fileList: [fileID] }) } catch (e) { }
+        }
+        return result
+    }
+
+    function normalizePrice(value) {
+        if (value === '' || value === undefined) return 0
+        if (value === null) return null
+        const price = Number(value)
+        if (!Number.isFinite(price) || price < 0 || price > 100000) return null
+        return Math.round(price * 100) / 100
     }
 
     function _parseDate(val) {
@@ -1701,11 +1763,13 @@ function createRequestHandlers(GROUP_ID) {
             .map(cols => ({
                 supplier: cols[idx.supplier_menu] || '',
                 name: cols[idx.menuName_menu] || '',
-                price: idx.price_menu !== undefined ? (Number(cols[idx.price_menu]) || 0) : 0,
+                price: idx.price_menu !== undefined ? normalizePrice(cols[idx.price_menu]) : 0,
                 visible: idx.visible !== undefined ? cols[idx.visible] !== '否' : true,
             }))
 
         if (items.length === 0) return { code: 400, msg: '无有效数据' }
+        const invalidPrice = items.filter(it => it.price === null).length
+        if (invalidPrice) return { code: 400, msg: `有 ${invalidPrice} 行价格无效` }
 
         if (mode === 'rewrite') {
             await db.collection(COL.MENU).where({ groupId: GROUP_ID }).remove()
@@ -1724,7 +1788,7 @@ function createRequestHandlers(GROUP_ID) {
             sortNo: sortNo += 10,
             supplier: it.supplier,
             name: it.name,
-            price: Number(it.price) || 0,
+            price: it.price,
             photo: '',
             visible: it.visible !== false,
             createdAt: now,
@@ -1761,9 +1825,7 @@ function createRequestHandlers(GROUP_ID) {
         const caller = await getMemberByOpenid(openid).catch(() => null)
         if (!caller) return { code: 403, msg: 'member only' }
 
-        const { data: stats } = await db.collection(COL.USER_STATS)
-            .where({ groupId: GROUP_ID, memberId })
-            .get()
+        const stats = await fetchAll(db.collection(COL.USER_STATS), { groupId: GROUP_ID, memberId })
         const map = {}
         stats.forEach(s => {
             map[s.menuId] = { count: s.count || 0, lastAt: s.lastAt || null }
@@ -1775,10 +1837,11 @@ function createRequestHandlers(GROUP_ID) {
 }
 
 // 只读操作无需获取租约，避免并发事务冲突；getInitData 已单独处理维护模式。
+// getRecentOrders / getMonthlyStats 可能写库（自动取消、统计重建），必须持租约。
 const READ_ACTIONS = new Set([
-    'getRecentOrders', 'getRecentTimestamp', 'getAllTimestamps',
+    'getRecentTimestamp', 'getAllTimestamps',
     'getRecentMenu', 'getRecentMembers', 'getMonthSummary', 'getPendingCancelRequests',
-    'getConfirmedBySupplier', 'getMonthlyStats',
+    'getConfirmedBySupplier',
     'searchOrders', 'exportOrders', 'downloadConfirmed', 'downloadMonthlyData',
     'getHistoryOrderCount', 'getHistoryOrders', 'getUserMenuStats',
 ])
@@ -1806,7 +1869,7 @@ exports.main = async (event = {}, context) => {
         }
         return await createRequestHandlers(groupId)(event, context)
     } catch (e) {
-        return { code: typeof e.code === 'number' ? e.code : 500, msg: e.message }
+        return errorResponse(e, 'lunch_order.main')
     } finally {
         if (release) await release()
     }
